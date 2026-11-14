@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"slices"
 	"sync"
@@ -17,71 +18,87 @@ import (
 //
 //   - the connector's Run, which owns the network connection;
 //   - drain, the only reader of conn.Updates(); it writes pushes to the store
-//     and never calls a connector request method, so the connector is never
-//     held up waiting for it;
+//     and runs on the embedded ledger, which has no connector, so it cannot
+//     make a connector request and hold the connector up waiting for it;
 //   - supervise, which owns the catch-up after each connect and the people
 //     refresh;
 //   - backfill, which fetches older history at a bounded rate;
 //   - one sender per conversation with queued messages, started on demand
 //     and gone once that conversation's queue is empty.
 type account struct {
+	*ledger
 	d        *daemon
-	name     string
 	conn     connector.Connector
-	st       *store.Store
 	ownStore bool
-	log      *slog.Logger
 
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	// wmu serialises store writes in this process, so a writer waits its
-	// turn in order instead of in SQLite's busy handler, whose growing sleeps
-	// would let a run of backfill writes hold up a live update. Batches are
-	// written in small chunks for the same reason.
-	wmu sync.Mutex
+	bfWake chan struct{} // backfill has new work
+	rooms  *openRooms
 
-	stateCh  chan struct{} // connection state may have changed
-	peopleCh chan struct{} // an event named an unknown handle
-	bfWake   chan struct{} // backfill has new work
-
-	mu sync.Mutex
+	// The fields below are guarded by the ledger's mu.
+	//
 	// online is true once connected and caught up; senders and backfill
 	// wait for it. changed is closed and replaced whenever it or state moves.
-	state     connector.ConnState
-	me        model.Person // as the connector last reported it
-	online    bool
-	changed   chan struct{}
-	syncing   bool
-	backfill  bool
-	openRooms []model.Conversation
-	// listing is the open-rooms refresh in flight, if any.
-	listing *listing
-	// listedAt is when openRooms was last read from the server.
-	listedAt time.Time
-	known    map[string]bool
+	online  bool
+	changed chan struct{}
 	// Outbox senders: workers holds conversations with a running sender;
 	// dirty records a kick that arrived while it ran.
-	workers  map[string]bool
-	dirty    map[string]bool
-	requeued map[string]time.Time
+	workers map[string]bool
+	dirty   map[string]bool
 	// Backfill: floor is the oldest Seq known to be fetched per conversation,
 	// which may be below the store's OldestSeq when an event was rejected.
 	floor    map[string]int64
 	priority string
 }
 
+// ledger is what the drain goroutine works with: the store, the cached
+// connection state and identity, and announcing changes to subscribers. It
+// holds no connector, so nothing drain reaches can make a connector request.
+type ledger struct {
+	name string
+	st   *store.Store
+	log  *slog.Logger
+	srv  *ipc.Server
+
+	// wmu serialises store writes in this process, so a writer waits its
+	// turn in order instead of in SQLite's busy handler, whose growing sleeps
+	// would let a run of backfill writes hold up a live update. Live pushes
+	// and sync pages are written in small chunks for the same reason.
+	wmu sync.Mutex
+
+	stateCh  chan struct{} // connection state may have changed
+	peopleCh chan struct{} // an event named an unknown handle
+
+	// mu guards the fields below and the account's that say so.
+	mu       sync.Mutex
+	state    connector.ConnState
+	me       model.Person // as the connector last reported it
+	syncing  bool
+	backfill bool
+	known    map[string]bool
+}
+
 func newAccount(d *daemon, name string, conn connector.Connector, st *store.Store, own bool) *account {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &account{
-		d: d, name: name, conn: conn, st: st, ownStore: own, log: d.log.With("account", name),
+	a := &account{
+		ledger: &ledger{
+			name: name, st: st, log: d.log.With("account", name), srv: d.srv,
+			stateCh: make(chan struct{}, 1), peopleCh: make(chan struct{}, 1),
+			state: connector.StateOffline, me: conn.Me(), known: map[string]bool{},
+		},
+		d: d, conn: conn, ownStore: own,
 		ctx: ctx, cancel: cancel,
-		stateCh: make(chan struct{}, 1), peopleCh: make(chan struct{}, 1), bfWake: make(chan struct{}, 1),
-		state: connector.StateOffline, me: conn.Me(), changed: make(chan struct{}),
-		known: map[string]bool{}, workers: map[string]bool{}, dirty: map[string]bool{},
-		requeued: map[string]time.Time{}, floor: map[string]int64{},
+		bfWake: make(chan struct{}, 1), changed: make(chan struct{}),
+		workers: map[string]bool{}, dirty: map[string]bool{}, floor: map[string]int64{},
 	}
+	a.rooms = &openRooms{clock: d.clock, fetch: func(ctx context.Context) ([]model.Conversation, error) {
+		_, open, err := conn.Conversations(ctx)
+		return open, err
+	}}
+	return a
 }
 
 func (a *account) start() {
@@ -90,7 +107,7 @@ func (a *account) start() {
 	}
 	a.goRun(func() { _ = a.conn.Run(a.ctx) })
 	updates := a.conn.Updates()
-	a.goRun(func() { a.drain(updates) })
+	a.goRun(func() { a.drain(a.ctx, updates) })
 	a.goRun(a.supervise)
 	a.goRun(a.backfillLoop)
 	// Queued items are checked for expiry at once, connected or not.
@@ -116,11 +133,13 @@ func (a *account) shutdown() {
 	}
 }
 
-func (a *account) write(fn func() error) error {
-	a.wmu.Lock()
-	defer a.wmu.Unlock()
+func (l *ledger) write(fn func() error) error {
+	l.wmu.Lock()
+	defer l.wmu.Unlock()
 	return fn()
 }
+
+func (l *ledger) emit(ev ipc.Event) { l.srv.Broadcast(ev) }
 
 func signal(ch chan struct{}) {
 	select {
@@ -178,168 +197,120 @@ func (a *account) waitOnline(deadline <-chan time.Time) bool {
 	}
 }
 
-func (a *account) setSyncing(v bool) {
-	a.mu.Lock()
-	moved := a.syncing != v
-	a.syncing = v
-	a.mu.Unlock()
+func (l *ledger) setSyncing(v bool) {
+	l.mu.Lock()
+	moved := l.syncing != v
+	l.syncing = v
+	l.mu.Unlock()
 	if moved {
-		a.emitStatus()
+		l.emitStatus()
 	}
 }
 
-func (a *account) setBackfilling(v bool) {
-	a.mu.Lock()
-	moved := a.backfill != v
-	a.backfill = v
-	a.mu.Unlock()
+func (l *ledger) setBackfilling(v bool) {
+	l.mu.Lock()
+	moved := l.backfill != v
+	l.backfill = v
+	l.mu.Unlock()
 	if moved {
-		a.emitStatus()
+		l.emitStatus()
 	}
 }
 
-func (a *account) status() ipc.Status {
-	s := ipc.Status{Account: a.name}
-	if items, err := a.st.Pending(); err == nil {
+func (l *ledger) status() ipc.Status {
+	s := ipc.Status{Account: l.name}
+	if items, err := l.st.Pending(); err == nil {
 		s.Pending = len(items)
 	}
-	// Cached values only: status is reached from the drain goroutine, which
-	// must not call into the connector.
-	a.mu.Lock()
-	s.Me, s.Conn = a.me, a.state
-	s.Syncing = a.syncing || a.backfill
-	a.mu.Unlock()
+	// Cached values only: the ledger has no connector to ask.
+	l.mu.Lock()
+	s.Me, s.Conn = l.me, l.state
+	s.Syncing = l.syncing || l.backfill
+	l.mu.Unlock()
 	return s
 }
 
-func (a *account) emitStatus() {
-	s := a.status()
-	a.d.emit(ipc.Event{Kind: ipc.KindStatus, Status: &s})
+func (l *ledger) emitStatus() {
+	if !l.srv.HasSubscribers() {
+		return
+	}
+	s := l.status()
+	l.emit(ipc.Event{Kind: ipc.KindStatus, Status: &s})
 }
 
 // view returns the user's conversation conv as listed.
-func (a *account) view(conv string) (store.ConvView, bool) {
-	views, err := a.st.Conversations()
+func (l *ledger) view(conv string) (store.ConvView, bool) {
+	v, err := l.st.ConvView(conv)
 	if err != nil {
-		a.log.Error("list conversations", "err", err)
+		if !errors.Is(err, store.ErrNotFound) {
+			l.log.Error("list conversations", "err", err)
+		}
 		return store.ConvView{}, false
 	}
-	i := slices.IndexFunc(views, func(v store.ConvView) bool { return v.ID == conv })
-	if i < 0 {
-		return store.ConvView{}, false
-	}
-	return views[i], true
+	return v, true
 }
 
-func (a *account) emitConv(conv string) { a.emitConvs([]string{conv}) }
+func (l *ledger) emitConv(conv string) { l.emitConvs([]string{conv}) }
 
-// emitConvs announces the current view of each listed conversation, reading
-// the list once.
-func (a *account) emitConvs(convs []string) {
-	if len(convs) == 0 {
+// emitConvs announces the current view of each listed conversation, in the
+// order Conversations lists them. One is read on its own; several read the
+// list once.
+func (l *ledger) emitConvs(convs []string) {
+	if len(convs) == 0 || !l.srv.HasSubscribers() {
 		return
 	}
-	views, err := a.st.Conversations()
+	if len(convs) == 1 {
+		if v, ok := l.view(convs[0]); ok {
+			l.emit(ipc.Event{Kind: ipc.KindConv, Conv: &v})
+		}
+		return
+	}
+	views, err := l.st.Conversations()
 	if err != nil {
-		a.log.Error("list conversations", "err", err)
+		l.log.Error("list conversations", "err", err)
 		return
 	}
 	for _, v := range views {
 		if slices.Contains(convs, v.ID) {
-			a.d.emit(ipc.Event{Kind: ipc.KindConv, Conv: &v})
+			l.emit(ipc.Event{Kind: ipc.KindConv, Conv: &v})
 		}
 	}
 }
 
-func (a *account) emitRemoved(conv string) {
-	a.d.emit(ipc.Event{Kind: ipc.KindConv, Conv: &store.ConvView{Conversation: model.Conversation{ID: conv}}, Removed: true})
+func (l *ledger) emitRemoved(conv string) {
+	l.emit(ipc.Event{Kind: ipc.KindConv, Conv: &store.ConvView{Conversation: model.Conversation{ID: conv}}, Removed: true})
 }
 
-func (a *account) emitMessage(conv, msgID string) {
-	m, err := a.st.ByMsgID(conv, msgID)
+func (l *ledger) emitMessage(conv, msgID string) {
+	if !l.srv.HasSubscribers() {
+		return
+	}
+	m, err := l.st.ByMsgID(conv, msgID)
 	if err != nil {
 		return
 	}
-	a.d.emit(ipc.Event{Kind: ipc.KindMessage, Message: &m})
+	l.emit(ipc.Event{Kind: ipc.KindMessage, Message: &m})
 }
 
 // learn records handles the store knows a person for.
-func (a *account) learn(people []model.Person) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+func (l *ledger) learn(people []model.Person) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	for _, p := range people {
-		a.known[p.Handle] = true
+		l.known[p.Handle] = true
 	}
 }
 
-func (a *account) unknown(handles ...string) bool {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+func (l *ledger) unknown(handles ...string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	for _, h := range handles {
-		if h != "" && !a.known[h] {
+		if h != "" && !l.known[h] {
 			return true
 		}
 	}
 	return false
 }
 
-// listing is one refresh of the open-rooms list that concurrent requests share.
-type listing struct {
-	done chan struct{}
-	err  error
-}
-
-// refreshOpenRooms re-reads the open rooms the user has not joined from the
-// server. The server does not announce a new open room to non-members, so
-// requests that need the list ask for it. Concurrent calls share one server
-// request. On failure the cached list stays. It must not run on the goroutine
-// that drains the connector's updates. Each call asks the server; callers
-// that can use a slightly old list check openRoomsStale first.
-func (a *account) refreshOpenRooms(ctx context.Context) error {
-	a.mu.Lock()
-	if l := a.listing; l != nil {
-		a.mu.Unlock()
-		select {
-		case <-l.done:
-			return l.err
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-	l := &listing{done: make(chan struct{})}
-	a.listing = l
-	a.mu.Unlock()
-
-	lctx, cancel := context.WithTimeout(ctx, chatsRefreshTimeout)
-	_, open, err := a.conn.Conversations(lctx)
-	cancel()
-
-	a.mu.Lock()
-	if err == nil {
-		a.openRooms, a.listedAt = open, a.d.clock.Now()
-	}
-	a.listing = nil
-	a.mu.Unlock()
-	l.err = err
-	close(l.done)
-	return err
-}
-
-// openRoomsStale reports whether the cached list is older than the window.
-func (a *account) openRoomsStale() bool {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.d.clock.Now().Sub(a.listedAt) >= chatsRefreshAfter
-}
-
 // connected reports whether the connector is connected right now.
 func (a *account) connected() bool { return a.conn.State() == connector.StateConnected }
-
-const (
-	// chatsRefreshAfter is how long a successful open-rooms refresh answers
-	// Chats requests before the next one asks the server again.
-	chatsRefreshAfter = 5 * time.Second
-	// chatsRefreshTimeout bounds one refresh, so a slow server cannot hold
-	// up a request that has a cached answer.
-	chatsRefreshTimeout = 3 * time.Second
-)

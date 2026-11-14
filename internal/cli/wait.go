@@ -203,7 +203,7 @@ func runWait(cmd *cobra.Command, args []string) error {
 		defer cancel()
 	}
 
-	err := withClientCtx(cmd, ctx, func(c *ipc.Client) error {
+	err := withClient(cmd, ctx, func(c *ipc.Client) error {
 		me, err := whoAmI(c)
 		if err != nil {
 			return err

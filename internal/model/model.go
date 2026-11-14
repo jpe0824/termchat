@@ -2,6 +2,7 @@
 package model
 
 import (
+	"errors"
 	"regexp"
 	"strings"
 	"time"
@@ -77,8 +78,33 @@ type Person struct {
 
 var nameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
 
+// NameRule states what ValidName accepts, for messages to people.
+const NameRule = "use lowercase letters, digits, - and _, starting with a letter or digit, at most 32 characters"
+
 // ValidName reports whether s is a legal handle or room name.
 func ValidName(s string) bool { return nameRE.MatchString(s) }
+
+// MaxTextBytes is the longest message text a client sends, in bytes.
+const MaxTextBytes = 8192
+
+// Reasons CheckText refuses a message text.
+var (
+	ErrEmptyText   = errors.New("message text is empty")
+	ErrTextTooLong = errors.New("message text is too long")
+)
+
+// CheckText reports whether text may be sent: ErrEmptyText when nothing but
+// space is left after trimming, ErrTextTooLong when it is over MaxTextBytes.
+// Callers word the refusal for their own audience.
+func CheckText(text string) error {
+	switch {
+	case strings.TrimSpace(text) == "":
+		return ErrEmptyText
+	case len(text) > MaxTextBytes:
+		return ErrTextTooLong
+	}
+	return nil
+}
 
 // NormalizeName trims surrounding space, strips one leading @ or #, and
 // lowercases. The result is not guaranteed valid; check it with ValidName.

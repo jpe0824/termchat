@@ -77,11 +77,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	parent := cmd.Context()
-	if parent == nil {
-		parent = context.Background()
-	}
-	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(cmdContext(cmd), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	out := cmd.OutOrStdout()

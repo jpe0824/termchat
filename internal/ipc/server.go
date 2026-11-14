@@ -193,6 +193,19 @@ func (s *Server) Broadcast(ev Event) {
 	}
 }
 
+// HasSubscribers reports whether any connection is subscribed, so a caller
+// can skip building events nobody would receive.
+func (s *Server) HasSubscribers() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for c := range s.conns {
+		if c.isSubscribed() {
+			return true
+		}
+	}
+	return false
+}
+
 // Subscribers lists the subscribed connections.
 func (s *Server) Subscribers() []Subscriber {
 	s.mu.Lock()

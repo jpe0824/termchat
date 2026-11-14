@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 const outboxCols = `msg_id, conv, text, mentions, source, created_at, state, err`
@@ -78,12 +79,13 @@ func (s *Store) MarkFailed(msgID, reason string) error {
 	return requireAffected(res, "outbox message "+msgID)
 }
 
-// Requeue returns a failed item to "sending" with its creation time reset, so
-// it sends after items queued meanwhile. An item already sending is untouched.
-func (s *Store) Requeue(msgID string) error {
+// Requeue returns a failed item to "sending" with its creation time reset to
+// now, so it sends after items queued meanwhile. An item already sending is
+// untouched.
+func (s *Store) Requeue(msgID string, now time.Time) error {
 	return s.write(func(tx *sql.Tx) error {
 		res, err := tx.Exec(`UPDATE outbox SET state = ?, err = '', created_at = ?
-			WHERE msg_id = ? AND state = ?`, StatusSending, toMS(s.now()), msgID, StatusFailed)
+			WHERE msg_id = ? AND state = ?`, StatusSending, toMS(now), msgID, StatusFailed)
 		if err != nil {
 			return err
 		}
@@ -108,20 +110,40 @@ func (s *Store) Discard(msgID string) error {
 	return requireAffected(res, "outbox message "+msgID)
 }
 
-// outboxMessage shows an outbox item as a message from the user.
-func (s *Store) outboxMessage(it OutboxItem) Message {
-	me := s.Me()
-	m := Message{
-		ConvID: it.ConvID, MsgID: it.MsgID, Author: me, AuthorName: me,
-		At: it.CreatedAt, Text: it.Text, Mentions: it.Mentions, Status: it.State,
+// OutboxItem returns the item with msgID, or ErrNotFound.
+func (s *Store) OutboxItem(msgID string) (OutboxItem, error) {
+	it, err := scanOutbox(s.db.QueryRow(`SELECT `+outboxCols+` FROM outbox WHERE msg_id = ?`, msgID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return OutboxItem{}, fmt.Errorf("%w: outbox message %s", ErrNotFound, msgID)
 	}
+	return it, err
+}
+
+// outboxAuthor is the user as the author of outbox items.
+type outboxAuthor struct {
+	handle, name string
+	agent        bool
+}
+
+// outboxAuthor reads the user's identity once for showing outbox items.
+func (s *Store) outboxAuthor() outboxAuthor {
+	me := s.Me()
+	a := outboxAuthor{handle: me, name: me}
 	var name string
 	var agent int
 	if err := s.db.QueryRow(`SELECT display_name, agent FROM people WHERE handle = ?`, me).Scan(&name, &agent); err == nil {
-		m.Agent = agent != 0
+		a.agent = agent != 0
 		if name != "" {
-			m.AuthorName = name
+			a.name = name
 		}
 	}
-	return m
+	return a
+}
+
+// outboxMessage shows an outbox item as a message from the user.
+func outboxMessage(it OutboxItem, by outboxAuthor) Message {
+	return Message{
+		ConvID: it.ConvID, MsgID: it.MsgID, Author: by.handle, AuthorName: by.name, Agent: by.agent,
+		At: it.CreatedAt, Text: it.Text, Mentions: it.Mentions, Status: it.State,
+	}
 }

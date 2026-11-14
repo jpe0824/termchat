@@ -70,8 +70,11 @@ func (s *Store) Messages(conv string, beforeSeq int64, limit int) ([]Message, er
 	if err != nil {
 		return nil, err
 	}
-	for _, it := range items {
-		out = append(out, s.outboxMessage(it))
+	if len(items) > 0 {
+		by := s.outboxAuthor()
+		for _, it := range items {
+			out = append(out, outboxMessage(it, by))
+		}
 	}
 	return out, nil
 }
@@ -94,5 +97,5 @@ func (s *Store) ByMsgID(conv, msgID string) (Message, error) {
 	if len(items) == 0 {
 		return Message{}, fmt.Errorf("%w: message %s in %s", ErrNotFound, msgID, conv)
 	}
-	return s.outboxMessage(items[0]), nil
+	return outboxMessage(items[0], s.outboxAuthor()), nil
 }

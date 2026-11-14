@@ -26,11 +26,8 @@ type msgKey struct{ conv, msgID string }
 // body, or the message is deleted, the bodies of the superseded events are
 // cleared here, so old text never outlives its replacement in any table.
 func (s *Store) Apply(evs ...model.Event) error {
+	me := s.Me()
 	return s.write(func(tx *sql.Tx) error {
-		var me string
-		if err := tx.QueryRow(`SELECT value FROM meta WHERE key = 'me'`).Scan(&me); err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
 		var touched []msgKey
 		seen := map[msgKey]bool{}
 		touch := func(conv, msgID string) {
@@ -85,18 +82,8 @@ func (s *Store) Apply(evs ...model.Event) error {
 			}
 		}
 
-		purged := false
 		for _, k := range touched {
-			p, err := refreshMessage(tx, k.conv, k.msgID)
-			if err != nil {
-				return err
-			}
-			purged = purged || p
-		}
-		if purged {
-			// Deleting from an FTS5 index leaves the old terms in its segments
-			// until they are merged; rewriting the index drops them now.
-			if _, err := tx.Exec(`INSERT INTO msg_fts(msg_fts) VALUES ('optimize')`); err != nil {
+			if err := refreshMessage(tx, k.conv, k.msgID); err != nil {
 				return err
 			}
 		}
@@ -177,12 +164,11 @@ func loadMessageEvents(tx *sql.Tx, conv, msgID string) ([]heldEvent, error) {
 }
 
 // refreshMessage rebuilds the messages row and index entry for one message
-// from the events held for it. It reports whether previously indexed text was
-// removed or replaced.
-func refreshMessage(tx *sql.Tx, conv, msgID string) (purged bool, err error) {
+// from the events held for it.
+func refreshMessage(tx *sql.Tx, conv, msgID string) error {
 	held, err := loadMessageEvents(tx, conv, msgID)
 	if err != nil {
-		return false, err
+		return err
 	}
 	var (
 		posted, best *heldEvent
@@ -210,20 +196,20 @@ func refreshMessage(tx *sql.Tx, conv, msgID string) (purged bool, err error) {
 	err = tx.QueryRow(`SELECT m.id, m.text, EXISTS (SELECT 1 FROM msg_fts WHERE rowid = m.id)
 		FROM messages m WHERE m.conv = ? AND m.msg_id = ?`, conv, msgID).Scan(&id, &oldText, &oldIndexed)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return false, err
+		return err
 	}
 
 	if posted == nil {
 		if id == 0 {
-			return false, nil
+			return nil
 		}
 		if oldIndexed {
 			if _, err := tx.Exec(`DELETE FROM msg_fts WHERE rowid = ?`, id); err != nil {
-				return false, err
+				return err
 			}
 		}
 		_, err := tx.Exec(`DELETE FROM messages WHERE id = ?`, id)
-		return oldIndexed, err
+		return err
 	}
 
 	// Superseded and deleted bodies are cleared from the stored events.
@@ -233,7 +219,7 @@ func refreshMessage(tx *sql.Tx, conv, msgID string) (purged bool, err error) {
 	}
 	if _, err := tx.Exec(`UPDATE events SET body_format = NULL, body_data = NULL
 		WHERE conv = ? AND msg_id = ? AND msg_id <> '' AND body_format IS NOT NULL AND seq <> ?`, conv, msgID, keep); err != nil {
-		return false, err
+		return err
 	}
 
 	var text, mentions string
@@ -253,29 +239,28 @@ func refreshMessage(tx *sql.Tx, conv, msgID string) (purged bool, err error) {
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			conv, msgID, posted.seq, posted.at, posted.actor, text, mentions, boolInt(isEdited), boolInt(gone))
 		if err != nil {
-			return false, err
+			return err
 		}
 		if id, err = res.LastInsertId(); err != nil {
-			return false, err
+			return err
 		}
 	} else if _, err := tx.Exec(`UPDATE messages SET seq = ?, at = ?, author = ?, text = ?, mentions = ?, edited = ?, deleted = ?
 		WHERE id = ?`, posted.seq, posted.at, posted.actor, text, mentions, boolInt(isEdited), boolInt(gone), id); err != nil {
-		return false, err
+		return err
 	}
 
 	if oldIndexed && !(indexed && oldText == text) {
 		if _, err := tx.Exec(`DELETE FROM msg_fts WHERE rowid = ?`, id); err != nil {
-			return false, err
+			return err
 		}
-		purged = true
 		oldIndexed = false
 	}
 	if indexed && !oldIndexed {
 		if _, err := tx.Exec(`INSERT INTO msg_fts (rowid, text) VALUES (?, ?)`, id, text); err != nil {
-			return false, err
+			return err
 		}
 	}
-	return purged, nil
+	return nil
 }
 
 // syncGone marks a conversation gone, or clears the mark, according to the

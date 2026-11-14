@@ -27,6 +27,32 @@ func errMaybe(what string) error {
 	return fmt.Errorf("%w: the server did not answer, so it is not known whether the %s took effect", ipc.ErrTimeout, what)
 }
 
+// onAccount runs fn with the running account, or fails with ErrNoAccount.
+func onAccount[T any](d *daemon, fn func(a *account) (T, error)) (T, error) {
+	a, err := d.account()
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	return fn(a)
+}
+
+// withAccount is onAccount for a request with no result.
+func (d *daemon) withAccount(fn func(a *account) error) error {
+	_, err := onAccount(d, func(a *account) (struct{}, error) { return struct{}{}, fn(a) })
+	return err
+}
+
+// settle runs a change request. When its outcome is unknown, verify finds
+// out what happened and its answer stands in for the request's.
+func settle[T any](do, verify func() (T, error)) (T, error) {
+	v, err := do()
+	if errors.Is(err, connector.ErrUnknownOutcome) {
+		return verify()
+	}
+	return v, err
+}
+
 // errNotMade reports a change request that went unanswered and, as a
 // follow-up read showed, did not take effect.
 func errNotMade(what string) error {
@@ -44,134 +70,112 @@ func (d *daemon) Status(context.Context) (ipc.Status, error) {
 }
 
 func (d *daemon) Chats(ctx context.Context) (ipc.Chats, error) {
-	a, err := d.account()
-	if err != nil {
-		return ipc.Chats{}, err
-	}
-	if a.connected() && a.openRoomsStale() {
-		// A failure leaves the cached list, which is still the best answer.
-		_ = a.refreshOpenRooms(ctx)
-	}
-	mine, err := a.st.Conversations()
-	if err != nil {
-		return ipc.Chats{}, err
-	}
-	out := ipc.Chats{Mine: mine}
-	a.mu.Lock()
-	open := slices.Clone(a.openRooms)
-	a.mu.Unlock()
-	for _, c := range open {
-		if !slices.ContainsFunc(mine, func(v store.ConvView) bool { return v.ID == c.ID }) {
-			out.Open = append(out.Open, c)
+	return onAccount(d, func(a *account) (ipc.Chats, error) {
+		if a.connected() {
+			a.rooms.refreshOlder(ctx, chatsRefreshAfter)
 		}
-	}
-	return out, nil
+		mine, err := a.st.Conversations()
+		if err != nil {
+			return ipc.Chats{}, err
+		}
+		return ipc.Chats{Mine: mine, Open: a.rooms.notMine(mine)}, nil
+	})
 }
 
 func (d *daemon) Messages(ctx context.Context, conv string, beforeSeq int64, limit int) ([]store.Message, error) {
-	a, err := d.account()
-	if err != nil {
-		return nil, err
-	}
-	if limit <= 0 {
-		limit = defaultLimit
-	}
-	limit = min(limit, maxLimit)
-	for range maxHistoryPages {
-		msgs, err := a.st.Messages(conv, beforeSeq, limit)
-		if err != nil {
-			return nil, err
+	return onAccount(d, func(a *account) ([]store.Message, error) {
+		if limit <= 0 {
+			limit = defaultLimit
 		}
-		stored := 0
-		for _, m := range msgs {
-			if m.Status == "" {
-				stored++
+		limit = min(limit, maxLimit)
+		for range maxHistoryPages {
+			msgs, err := a.st.Messages(conv, beforeSeq, limit)
+			if err != nil {
+				return nil, err
 			}
+			stored := 0
+			for _, m := range msgs {
+				if m.Status == "" {
+					stored++
+				}
+			}
+			if stored >= limit {
+				return msgs, nil
+			}
+			floor := a.floorOf(conv)
+			if floor == 1 || !a.connected() {
+				return msgs, nil
+			}
+			a.prioritize(conv)
+			evs, err := a.conn.History(ctx, conv, floor, historyPage)
+			if err != nil {
+				a.log.Warn("history for reader failed", "conv", conv, "err", err)
+				return msgs, nil
+			}
+			a.storeHistory(conv, evs)
+			a.emitConv(conv)
 		}
-		floor := a.floorOf(conv)
-		if stored >= limit || floor == 1 || a.conn.State() != connector.StateConnected {
-			break
-		}
-		a.prioritize(conv)
-		evs, err := a.conn.History(ctx, conv, floor, historyPage)
-		if err != nil {
-			a.log.Warn("history for reader failed", "conv", conv, "err", err)
-			break
-		}
-		a.storeHistory(conv, evs)
-		a.emitConv(conv)
-	}
-	return a.st.Messages(conv, beforeSeq, limit)
+		return a.st.Messages(conv, beforeSeq, limit)
+	})
 }
 
 func (d *daemon) Outbox(_ context.Context, conv string) ([]store.OutboxItem, error) {
-	a, err := d.account()
-	if err != nil {
-		return nil, err
-	}
-	return a.st.Outbox(conv)
+	return onAccount(d, func(a *account) ([]store.OutboxItem, error) {
+		return a.st.Outbox(conv)
+	})
 }
 
 func (d *daemon) Send(_ context.Context, conv, text, source string) (string, error) {
-	a, err := d.account()
-	if err != nil {
-		return "", err
-	}
-	switch source {
-	case "cli":
-		d.mu.Lock()
-		deny := d.cfg.CLI.Send == "deny"
-		d.mu.Unlock()
-		if deny {
-			return "", ipc.ErrSendDenied
+	return onAccount(d, func(a *account) (string, error) {
+		switch source {
+		case "cli":
+			d.mu.Lock()
+			deny := d.cfg.CLI.Send == "deny"
+			d.mu.Unlock()
+			if deny {
+				return "", ipc.ErrSendDenied
+			}
+		case "tui":
+		default:
+			return "", fmt.Errorf("%w: unknown source %q", ipc.ErrInvalid, source)
 		}
-	case "tui":
-	default:
-		return "", fmt.Errorf("%w: unknown source %q", ipc.ErrInvalid, source)
-	}
-	if err := checkText(text); err != nil {
-		return "", err
-	}
-	return a.enqueue(conv, text, source)
+		return a.enqueue(conv, text, source)
+	})
 }
 
 func (d *daemon) Edit(ctx context.Context, conv, msgID, text string) error {
-	a, err := d.account()
-	if err != nil {
+	return d.withAccount(func(a *account) error {
+		body, ments, err := a.compose(conv, text)
+		if err != nil {
+			return err
+		}
+		_, err = settle(func() (model.Event, error) {
+			return a.ingestReply(a.conn.Edit(ctx, conv, msgID, body, ments))
+		}, func() (model.Event, error) {
+			return model.Event{}, a.confirm(ctx, conv, "edit", func(m store.Message) bool { return m.Edited && m.Text == text }, msgID)
+		})
 		return err
-	}
-	if err := checkText(text); err != nil {
-		return err
-	}
-	v, ok := a.view(conv)
-	if !ok {
-		return fmt.Errorf("%w: conversation %s", ipc.ErrNotFound, conv)
-	}
-	ev, err := a.conn.Edit(ctx, conv, msgID, textBody(text), mentions(text, v.Members))
-	if errors.Is(err, connector.ErrUnknownOutcome) {
-		return a.confirm(ctx, conv, "edit", func(m store.Message) bool { return m.Edited && m.Text == text }, msgID)
-	}
-	if err != nil {
-		return err
-	}
-	a.announce(a.apply([]model.Event{ev}), true)
-	return nil
+	})
 }
 
 func (d *daemon) Delete(ctx context.Context, conv, msgID string) error {
-	a, err := d.account()
-	if err != nil {
+	return d.withAccount(func(a *account) error {
+		_, err := settle(func() (model.Event, error) {
+			return a.ingestReply(a.conn.Delete(ctx, conv, msgID))
+		}, func() (model.Event, error) {
+			return model.Event{}, a.confirm(ctx, conv, "delete", func(m store.Message) bool { return m.Deleted }, msgID)
+		})
 		return err
+	})
+}
+
+// ingestReply stores and announces the event a successful change request
+// returned.
+func (a *account) ingestReply(ev model.Event, err error) (model.Event, error) {
+	if err == nil {
+		a.ingest([]model.Event{ev})
 	}
-	ev, err := a.conn.Delete(ctx, conv, msgID)
-	if errors.Is(err, connector.ErrUnknownOutcome) {
-		return a.confirm(ctx, conv, "delete", func(m store.Message) bool { return m.Deleted }, msgID)
-	}
-	if err != nil {
-		return err
-	}
-	a.announce(a.apply([]model.Event{ev}), true)
-	return nil
+	return ev, err
 }
 
 // confirm syncs conv after an unanswered change to msgID and reports
@@ -188,122 +192,104 @@ func (a *account) confirm(ctx context.Context, conv, what string, done func(stor
 }
 
 func (d *daemon) Retry(_ context.Context, msgID string) error {
-	a, err := d.account()
-	if err != nil {
-		return err
-	}
-	return a.retry(msgID)
+	return d.withAccount(func(a *account) error {
+		return a.retry(msgID)
+	})
 }
 
 func (d *daemon) Discard(_ context.Context, msgID string) error {
-	a, err := d.account()
-	if err != nil {
-		return err
-	}
-	return a.discard(msgID)
+	return d.withAccount(func(a *account) error {
+		return a.discard(msgID)
+	})
 }
 
 func (d *daemon) MarkRead(ctx context.Context, conv string) error {
-	a, err := d.account()
-	if err != nil {
-		return err
-	}
-	if _, ok := a.view(conv); !ok {
-		return fmt.Errorf("%w: conversation %s", ipc.ErrNotFound, conv)
-	}
-	seq := a.st.Cursor(conv)
-	if newest, err := a.st.Messages(conv, 0, 1); err == nil {
-		for _, m := range newest {
-			if m.Status == "" {
-				seq = max(seq, m.Seq)
+	return d.withAccount(func(a *account) error {
+		if _, ok := a.view(conv); !ok {
+			return fmt.Errorf("%w: conversation %s", ipc.ErrNotFound, conv)
+		}
+		seq := a.st.Cursor(conv)
+		if newest, err := a.st.Messages(conv, 0, 1); err == nil {
+			for _, m := range newest {
+				if m.Status == "" {
+					seq = max(seq, m.Seq)
+				}
 			}
 		}
-	}
-	if seq == 0 {
-		return nil
-	}
-	if err := a.write(func() error { return a.st.SetRead(conv, seq) }); err != nil {
-		return err
-	}
-	a.emitConv(conv)
-	// Offline, the local position is enough: the next catch-up pushes it.
-	if a.conn.State() != connector.StateConnected {
-		return nil
-	}
-	err = a.conn.MarkRead(ctx, conv, seq)
-	if errors.Is(err, connector.ErrUnknownOutcome) {
-		// The marker only moves forward, so asking again is safe.
-		if err = a.conn.MarkRead(ctx, conv, seq); errors.Is(err, connector.ErrUnknownOutcome) {
-			return errMaybe("read position update")
+		if seq == 0 {
+			return nil
 		}
-	}
-	if errors.Is(err, connector.ErrOffline) {
-		return nil
-	}
-	return err
+		if err := a.write(func() error { return a.st.SetRead(conv, seq) }); err != nil {
+			return err
+		}
+		a.emitConv(conv)
+		// Offline, the local position is enough: the next catch-up pushes it.
+		if !a.connected() {
+			return nil
+		}
+		markRead := func() (struct{}, error) { return struct{}{}, a.conn.MarkRead(ctx, conv, seq) }
+		_, err := settle(markRead, func() (struct{}, error) {
+			// The marker only moves forward, so asking again is safe.
+			return settle(markRead, func() (struct{}, error) { return struct{}{}, errMaybe("read position update") })
+		})
+		if errors.Is(err, connector.ErrOffline) {
+			return nil
+		}
+		return err
+	})
 }
 
 func (d *daemon) Search(_ context.Context, q string, limit int) ([]store.Message, error) {
-	a, err := d.account()
-	if err != nil {
-		return nil, err
-	}
-	return a.st.Search(q, min(limit, maxLimit))
+	return onAccount(d, func(a *account) ([]store.Message, error) {
+		return a.st.Search(q, min(limit, maxLimit))
+	})
 }
 
 func (d *daemon) Resolve(ctx context.Context, ref string) (model.Conversation, error) {
-	a, err := d.account()
-	if err != nil {
-		return model.Conversation{}, err
-	}
-	c, err := a.resolve(ref)
-	// A room may have been opened since the list was read; look once more
-	// after refreshing it. A DM reference is never an open room.
-	if errors.Is(err, ipc.ErrNotFound) && !strings.HasPrefix(strings.TrimSpace(ref), "@") && a.connected() {
-		if a.refreshOpenRooms(ctx) == nil {
-			return a.resolve(ref)
+	return onAccount(d, func(a *account) (model.Conversation, error) {
+		c, err := a.resolve(ref)
+		// A room may have been opened since the list was read; look once more
+		// after refreshing it. A DM reference is never an open room.
+		if errors.Is(err, ipc.ErrNotFound) && !strings.HasPrefix(strings.TrimSpace(ref), "@") && a.connected() {
+			if a.rooms.refresh(ctx) == nil {
+				return a.resolve(ref)
+			}
 		}
-	}
-	return c, err
+		return c, err
+	})
 }
 
 func (d *daemon) OpenDM(ctx context.Context, handle string) (model.Conversation, error) {
-	a, err := d.account()
-	if err != nil {
-		return model.Conversation{}, err
-	}
-	handle = model.NormalizeName(handle)
-	c, err := a.conn.OpenDM(ctx, handle)
-	if errors.Is(err, connector.ErrUnknownOutcome) {
-		c, err = a.verifyConv(ctx, "conversation", func(c model.Conversation) bool {
-			return c.Kind == model.ConvDM && slices.Contains(c.Members, handle)
-		})
-	}
-	if err != nil {
-		return model.Conversation{}, err
-	}
-	a.joined(ctx, c)
-	return c, nil
+	return onAccount(d, func(a *account) (model.Conversation, error) {
+		handle = model.NormalizeName(handle)
+		c, err := settle(func() (model.Conversation, error) { return a.conn.OpenDM(ctx, handle) },
+			func() (model.Conversation, error) {
+				return a.verifyConv(ctx, "conversation", func(c model.Conversation) bool {
+					return c.Kind == model.ConvDM && slices.Contains(c.Members, handle)
+				})
+			})
+		if err != nil {
+			return model.Conversation{}, err
+		}
+		a.joined(ctx, c)
+		return c, nil
+	})
 }
 
 func (d *daemon) Room(ctx context.Context, op connector.RoomOp) (model.Conversation, error) {
-	a, err := d.account()
-	if err != nil {
-		return model.Conversation{}, err
-	}
-	c, err := a.conn.Room(ctx, op)
-	if errors.Is(err, connector.ErrUnknownOutcome) {
-		c, err = a.verifyRoom(ctx, op)
-	}
-	if err != nil {
-		return model.Conversation{}, err
-	}
-	if op.Kind == connector.RoomLeave {
-		a.markGone(op.Conv)
+	return onAccount(d, func(a *account) (model.Conversation, error) {
+		c, err := settle(func() (model.Conversation, error) { return a.conn.Room(ctx, op) },
+			func() (model.Conversation, error) { return a.verifyRoom(ctx, op) })
+		if err != nil {
+			return model.Conversation{}, err
+		}
+		if op.Kind == connector.RoomLeave {
+			a.markGone(op.Conv)
+			return c, nil
+		}
+		a.joined(ctx, c)
 		return c, nil
-	}
-	a.joined(ctx, c)
-	return c, nil
+	})
 }
 
 // joined stores a conversation the user is now in and fetches its newest
@@ -376,33 +362,24 @@ func (a *account) verifyRoom(ctx context.Context, op connector.RoomOp) (model.Co
 }
 
 func (d *daemon) DeviceInvite(ctx context.Context) (string, error) {
-	a, err := d.account()
-	if err != nil {
-		return "", err
-	}
-	return invite(a.conn.DeviceInvite(ctx))
+	return onAccount(d, func(a *account) (string, error) {
+		return invite(func() (string, error) { return a.conn.DeviceInvite(ctx) })
+	})
 }
 
 func (d *daemon) CreateAgent(ctx context.Context, handle, name string) (string, error) {
-	a, err := d.account()
-	if err != nil {
-		return "", err
-	}
-	return invite(a.conn.CreateAgent(ctx, handle, name))
+	return onAccount(d, func(a *account) (string, error) {
+		return invite(func() (string, error) { return a.conn.CreateAgent(ctx, handle, name) })
+	})
 }
 
 func (d *daemon) AdminInvite(ctx context.Context, handle, name string) (string, error) {
-	a, err := d.account()
-	if err != nil {
-		return "", err
-	}
-	return invite(a.conn.AdminInvite(ctx, handle, name))
+	return onAccount(d, func(a *account) (string, error) {
+		return invite(func() (string, error) { return a.conn.AdminInvite(ctx, handle, name) })
+	})
 }
 
 // invite passes a code through; an unanswered request cannot be checked.
-func invite(code string, err error) (string, error) {
-	if errors.Is(err, connector.ErrUnknownOutcome) {
-		return "", errMaybe("invite")
-	}
-	return code, err
+func invite(do func() (string, error)) (string, error) {
+	return settle(do, func() (string, error) { return "", errMaybe("invite") })
 }

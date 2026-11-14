@@ -16,10 +16,9 @@ import (
 )
 
 const (
-	// outboxExpiry: an item not sent this long after it was queued (or
-	// requeued) is failed with reason "expired" rather than sent late.
+	// outboxExpiry: an item not sent this long after its CreatedAt, which a
+	// requeue resets, is failed with reason "expired" rather than sent late.
 	outboxExpiry = 10 * time.Minute
-	maxTextBytes = 8192
 	maxBackoff   = 30 * time.Second
 	maxReasonLen = 200
 	formatText   = "text/plain"
@@ -50,14 +49,20 @@ func mentions(text string, members []string) []string {
 	return out
 }
 
-func checkText(text string) error {
-	if strings.TrimSpace(text) == "" {
-		return fmt.Errorf("%w: the message is empty", ipc.ErrInvalid)
+// compose checks text and returns its body and the members of conv it
+// mentions.
+func (a *account) compose(conv, text string) (model.Body, []string, error) {
+	switch model.CheckText(text) {
+	case model.ErrEmptyText:
+		return model.Body{}, nil, fmt.Errorf("%w: the message is empty", ipc.ErrInvalid)
+	case model.ErrTextTooLong:
+		return model.Body{}, nil, fmt.Errorf("%w: the message is %d bytes, over the limit of %d", ipc.ErrInvalid, len(text), model.MaxTextBytes)
 	}
-	if len(text) > maxTextBytes {
-		return fmt.Errorf("%w: the message is %d bytes, over the limit of %d", ipc.ErrInvalid, len(text), maxTextBytes)
+	v, ok := a.view(conv)
+	if !ok {
+		return model.Body{}, nil, fmt.Errorf("%w: conversation %s", ipc.ErrNotFound, conv)
 	}
-	return nil
+	return textBody(text), mentions(text, v.Members), nil
 }
 
 func textBody(text string) model.Body { return model.Body{Format: formatText, Data: []byte(text)} }
@@ -65,12 +70,12 @@ func textBody(text string) model.Body { return model.Body{Format: formatText, Da
 // enqueue writes the outbox row, announces it and wakes the conversation's
 // sender. The row is durable before the caller hears of the message id.
 func (a *account) enqueue(conv, text, source string) (string, error) {
-	v, ok := a.view(conv)
-	if !ok {
-		return "", fmt.Errorf("%w: conversation %s", ipc.ErrNotFound, conv)
+	_, ments, err := a.compose(conv, text)
+	if err != nil {
+		return "", err
 	}
 	it := store.OutboxItem{
-		MsgID: newMsgID(), ConvID: conv, Text: text, Mentions: mentions(text, v.Members),
+		MsgID: newMsgID(), ConvID: conv, Text: text, Mentions: ments,
 		Source: source, CreatedAt: a.d.clock.Now(),
 	}
 	if err := a.write(func() error { return a.st.Enqueue(it) }); err != nil {
@@ -88,7 +93,7 @@ func (a *account) emitOutbox(it store.OutboxItem) {
 		// Discarded: show the item as gone.
 		m = store.Message{ConvID: it.ConvID, MsgID: it.MsgID, Deleted: true}
 	}
-	a.d.emit(ipc.Event{Kind: ipc.KindOutbox, Message: &m, Outbox: &it})
+	a.emit(ipc.Event{Kind: ipc.KindOutbox, Message: &m, Outbox: &it})
 	a.emitStatus()
 }
 
@@ -142,17 +147,6 @@ func (a *account) nextItem(conv string) (store.OutboxItem, bool, error) {
 	return store.OutboxItem{}, false, nil
 }
 
-// expiresAt is when it stops being worth sending.
-func (a *account) expiresAt(it store.OutboxItem) time.Time {
-	base := it.CreatedAt
-	a.mu.Lock()
-	if t, ok := a.requeued[it.MsgID]; ok && t.After(base) {
-		base = t
-	}
-	a.mu.Unlock()
-	return base.Add(outboxExpiry)
-}
-
 // finish ends conv's sender unless a kick arrived since it last looked.
 func (a *account) finish(conv string) bool {
 	a.mu.Lock()
@@ -185,7 +179,7 @@ func (a *account) sendLoop(conv string) {
 			}
 			continue
 		}
-		expiry := a.expiresAt(it)
+		expiry := it.CreatedAt.Add(outboxExpiry)
 		if a.d.clock.Now().After(expiry) {
 			a.fail(it, reasonExpire)
 			failures = 0
@@ -265,9 +259,6 @@ func (a *account) delivered(it store.OutboxItem, ev model.Event) {
 	if err := a.write(func() error { return a.st.Discard(it.MsgID) }); err != nil && !errors.Is(err, store.ErrNotFound) {
 		a.log.Error("clear sent outbox item", "msg", it.MsgID, "err", err)
 	}
-	a.mu.Lock()
-	delete(a.requeued, it.MsgID)
-	a.mu.Unlock()
 	a.announce([]model.Event{ev}, true)
 	a.emitStatus()
 }
@@ -286,12 +277,9 @@ func (a *account) fail(it store.OutboxItem, why string) {
 
 // retry requeues a failed item.
 func (a *account) retry(msgID string) error {
-	if err := a.write(func() error { return a.st.Requeue(msgID) }); err != nil {
+	if err := a.write(func() error { return a.st.Requeue(msgID, a.d.clock.Now()) }); err != nil {
 		return err
 	}
-	a.mu.Lock()
-	a.requeued[msgID] = a.d.clock.Now()
-	a.mu.Unlock()
 	it, ok := a.findItem(msgID)
 	if !ok {
 		return nil // sent or discarded meanwhile
@@ -306,31 +294,21 @@ func (a *account) discard(msgID string) error {
 	if err := a.write(func() error { return a.st.Discard(msgID) }); err != nil {
 		return err
 	}
-	a.mu.Lock()
-	delete(a.requeued, msgID)
-	a.mu.Unlock()
 	if found {
 		a.emitOutbox(it)
 	}
 	return nil
 }
 
-// findItem looks msgID up among every conversation's outbox.
+// findItem looks msgID up in the outbox of the conversations the user is in.
 func (a *account) findItem(msgID string) (store.OutboxItem, bool) {
-	views, err := a.st.Conversations()
+	it, err := a.st.OutboxItem(msgID)
 	if err != nil {
 		return store.OutboxItem{}, false
 	}
-	for _, v := range views {
-		items, err := a.st.Outbox(v.ID)
-		if err != nil {
-			continue
-		}
-		for _, it := range items {
-			if it.MsgID == msgID {
-				return it, true
-			}
-		}
+	ids, err := a.st.ConvIDs()
+	if err != nil || !slices.Contains(ids, it.ConvID) {
+		return store.OutboxItem{}, false
 	}
-	return store.OutboxItem{}, false
+	return it, true
 }

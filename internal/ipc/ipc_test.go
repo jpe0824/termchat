@@ -336,3 +336,31 @@ func waitUntil(t *testing.T, cond func() bool) {
 		time.Sleep(5 * time.Millisecond)
 	}
 }
+
+func TestHasSubscribers(t *testing.T) {
+	srv, sock := startServer(t, &stubBackend{})
+	if srv.HasSubscribers() {
+		t.Fatal("HasSubscribers with no connection")
+	}
+	plain := dialTest(t, sock)
+	if _, err := plain.Status(); err != nil {
+		t.Fatal(err)
+	}
+	if srv.HasSubscribers() {
+		t.Fatal("HasSubscribers with only an unsubscribed connection")
+	}
+	c := dialTest(t, sock)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if _, err := c.Subscribe(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !srv.HasSubscribers() {
+		t.Fatal("HasSubscribers = false after Subscribe returned")
+	}
+	cancel()
+	waitUntil(t, func() bool { return !srv.HasSubscribers() })
+	if len(srv.Subscribers()) != 0 {
+		t.Fatalf("Subscribers = %v after the subscription ended", srv.Subscribers())
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -40,6 +41,20 @@ func emit(cmd *cobra.Command, v any, text func(w io.Writer) error) error {
 		return enc.Encode(v)
 	}
 	return text(out)
+}
+
+func table(out io.Writer) *tabwriter.Writer { return tabwriter.NewWriter(out, 0, 0, 2, ' ', 0) }
+
+// shown is a handle as the server stores it, safe to print.
+func shown(handle string) string { return sanitize.Text(model.NormalizeName(handle)) }
+
+func cell(s string) string {
+	s = sanitize.Text(s)
+	s = strings.NewReplacer("\n", " ", "\t", " ").Replace(s)
+	if s == "" {
+		return "-"
+	}
+	return s
 }
 
 func rfc3339(t time.Time) string { return t.UTC().Format(time.RFC3339) }

@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"strings"
-	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -152,20 +151,6 @@ func runInvite(cmd *cobra.Command, args []string) error {
 		printJoinHint(out, code)
 		return nil
 	})
-}
-
-func table(out io.Writer) *tabwriter.Writer { return tabwriter.NewWriter(out, 0, 0, 2, ' ', 0) }
-
-// shown is a handle as the server stores it, safe to print.
-func shown(handle string) string { return sanitize.Text(model.NormalizeName(handle)) }
-
-func cell(s string) string {
-	s = sanitize.Text(s)
-	s = strings.NewReplacer("\n", " ", "\t", " ").Replace(s)
-	if s == "" {
-		return "-"
-	}
-	return s
 }
 
 func runUserList(cmd *cobra.Command, _ []string) error {

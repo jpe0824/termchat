@@ -58,15 +58,10 @@ func checkAccount(cmd *cobra.Command) error {
 }
 
 // withClient runs fn against the background process, starting it when none
-// is running. A process that is shutting down ran nothing, so after a short
-// wait the command is repeated once against a fresh connection. Errors come
-// back mapped by fail.
-func withClient(cmd *cobra.Command, fn func(c *ipc.Client) error) error {
-	return withClientCtx(cmd, cmdContext(cmd), fn)
-}
-
-// withClientCtx is withClient with ctx bounding the dial.
-func withClientCtx(cmd *cobra.Command, ctx context.Context, fn func(c *ipc.Client) error) error {
+// is running; ctx bounds the dial. A process that is shutting down ran
+// nothing, so after a short wait the command is repeated once against a
+// fresh connection. Errors come back mapped by fail.
+func withClient(cmd *cobra.Command, ctx context.Context, fn func(c *ipc.Client) error) error {
 	if err := checkAccount(cmd); err != nil {
 		return fail(err)
 	}
@@ -103,22 +98,12 @@ func argRange(lo, hi int) cobra.PositionalArgs {
 	}
 }
 
-const nameRule = "use lowercase letters, digits, - and _, starting with a letter or digit, at most 32 characters"
-
-// handleArg normalises a handle given on the command line.
-func handleArg(s string) (string, error) {
-	h := model.NormalizeName(s)
-	if !model.ValidName(h) {
-		return "", usagef("invalid handle %q: %s", s, nameRule)
-	}
-	return h, nil
-}
-
-// roomArg normalises a room name given on the command line.
-func roomArg(s string) (string, error) {
+// nameArg normalises a handle or room name given on the command line; what
+// names it in the usage error.
+func nameArg(what, s string) (string, error) {
 	n := model.NormalizeName(s)
 	if !model.ValidName(n) {
-		return "", usagef("invalid room name %q: %s", s, nameRule)
+		return "", usagef("invalid %s %q: %s", what, s, model.NameRule)
 	}
 	return n, nil
 }
@@ -145,7 +130,7 @@ func newJoinCmd() *cobra.Command {
 			if code == "" {
 				return usagef("--invite is required")
 			}
-			return withClient(cmd, func(c *ipc.Client) error {
+			return withClient(cmd, cmdContext(cmd), func(c *ipc.Client) error {
 				if err := c.Join(args[0], code); err != nil {
 					return err
 				}
@@ -170,7 +155,7 @@ func newStatusCmd() *cobra.Command {
 		Short: "Show the account and connection state",
 		Args:  exactArgs(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return withClient(cmd, func(c *ipc.Client) error {
+			return withClient(cmd, cmdContext(cmd), func(c *ipc.Client) error {
 				s, err := c.Status()
 				if err != nil {
 					return err
@@ -245,7 +230,7 @@ func newChatsCmd() *cobra.Command {
 		Args:  exactArgs(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			all, _ := cmd.Flags().GetBool("all")
-			return withClient(cmd, func(c *ipc.Client) error {
+			return withClient(cmd, cmdContext(cmd), func(c *ipc.Client) error {
 				me, err := whoAmI(c)
 				if err != nil {
 					return err
@@ -256,6 +241,7 @@ func newChatsCmd() *cobra.Command {
 				}
 				slices.SortStableFunc(mine, func(a, b store.ConvView) int { return b.LastAt.Compare(a.LastAt) })
 				list := make([]chatJSON, 0, len(mine)+len(open))
+				labels := make([]string, 0, cap(list))
 				for _, v := range mine {
 					j := chatJSON{ID: v.ID, Kind: string(v.Kind), Name: convName(v.Conversation, me), Unread: v.Unread}
 					if !v.LastAt.IsZero() {
@@ -263,20 +249,19 @@ func newChatsCmd() *cobra.Command {
 						j.LastAt = &at
 					}
 					list = append(list, j)
+					labels = append(labels, convLabel(v.Conversation, me))
 				}
 				if all {
 					notJoined := false
 					for _, o := range open {
 						list = append(list, chatJSON{ID: o.ID, Kind: string(o.Kind), Name: convName(o, me), Joined: &notJoined})
+						labels = append(labels, convLabel(o, me))
 					}
 				}
 				return emit(cmd, list, func(w io.Writer) error {
 					tw := table(w)
-					for _, j := range list {
-						label := "#" + cell(j.Name)
-						if j.Kind == string(model.ConvDM) {
-							label = "@" + cell(j.Name)
-						}
+					for i, j := range list {
+						label := labels[i]
 						last, note := "-", ""
 						if j.LastAt != nil {
 							last = *j.LastAt
@@ -301,7 +286,7 @@ func newMarkReadCmd() *cobra.Command {
 		Short: "Mark a conversation read up to its newest message",
 		Args:  exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withClient(cmd, func(c *ipc.Client) error {
+			return withClient(cmd, cmdContext(cmd), func(c *ipc.Client) error {
 				conv, err := resolveChat(c, args[0])
 				if err != nil {
 					return err
@@ -318,11 +303,11 @@ func newDMCmd() *cobra.Command {
 		Short: "Open or create the direct conversation with a person and print its id",
 		Args:  exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			handle, err := handleArg(args[0])
+			handle, err := nameArg("handle", args[0])
 			if err != nil {
 				return err
 			}
-			return withClient(cmd, func(c *ipc.Client) error {
+			return withClient(cmd, cmdContext(cmd), func(c *ipc.Client) error {
 				me, err := whoAmI(c)
 				if err != nil {
 					return err
@@ -352,7 +337,7 @@ func inviteCmd(use, short, who string, args cobra.PositionalArgs, call func(c *i
 		Args:  args,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, _ := cmd.Flags().GetString("name")
-			return withClient(cmd, func(c *ipc.Client) error {
+			return withClient(cmd, cmdContext(cmd), func(c *ipc.Client) error {
 				code, err := call(c, args, name)
 				if err != nil {
 					return err
@@ -384,7 +369,7 @@ func newAgentCmd() *cobra.Command {
 	cmd.AddCommand(inviteCmd("create <handle>", "Create an agent identity you own and print its invite code",
 		"on the machine the agent runs on, run:", exactArgs(1),
 		func(c *ipc.Client, args []string, name string) (string, error) {
-			handle, err := handleArg(args[0])
+			handle, err := nameArg("handle", args[0])
 			if err != nil {
 				return "", err
 			}
@@ -397,7 +382,7 @@ func newInviteCmd() *cobra.Command {
 	return inviteCmd("invite <handle>", "Invite a person to the server (admins only)",
 		"the person you invited runs:", exactArgs(1),
 		func(c *ipc.Client, args []string, name string) (string, error) {
-			handle, err := handleArg(args[0])
+			handle, err := nameArg("handle", args[0])
 			if err != nil {
 				return "", err
 			}

@@ -82,16 +82,11 @@ func (a *account) nextBackfill(prev string) (conv string, floor int64, ok bool) 
 		}
 		a.mu.Unlock()
 	}
-	views, err := a.st.Conversations()
+	ids, err := a.st.ConvIDs()
 	if err != nil {
 		a.log.Error("list conversations", "err", err)
 		return "", 0, false
 	}
-	ids := make([]string, 0, len(views))
-	for _, v := range views {
-		ids = append(ids, v.ID)
-	}
-	slices.Sort(ids)
 	start, _ := slices.BinarySearch(ids, prev)
 	if start < len(ids) && ids[start] == prev {
 		start++
@@ -136,7 +131,7 @@ func (a *account) storeHistory(conv string, evs []model.Event) {
 		lowest = min(lowest, ev.Seq)
 	}
 	prior := a.floorOf(conv)
-	a.apply(evs)
+	a.applyIn(evs, historyPage)
 	if prior > 0 && lowest >= prior {
 		lowest = 1 // the page reached no further back; stop rather than repeat it
 	}

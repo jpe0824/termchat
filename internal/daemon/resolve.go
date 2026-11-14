@@ -23,9 +23,7 @@ func (a *account) resolve(ref string) (model.Conversation, error) {
 	for _, v := range views {
 		mine = append(mine, v.Conversation)
 	}
-	a.mu.Lock()
-	all := append(slices.Clone(mine), a.openRooms...)
-	a.mu.Unlock()
+	all := append(slices.Clone(mine), a.rooms.list()...)
 	me := a.st.Me()
 	name := model.NormalizeName(ref)
 

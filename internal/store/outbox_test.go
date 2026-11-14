@@ -170,7 +170,7 @@ func TestMarkFailedRequeueDiscard(t *testing.T) {
 		t.Fatalf("failed item = %+v", all[0])
 	}
 
-	must(t, s.Requeue("q1"))
+	must(t, s.Requeue("q1", s.now()))
 	all, _ = s.Outbox("c1")
 	if all[1].MsgID != "q1" || all[1].State != "sending" || all[1].Err != "" {
 		t.Fatalf("requeued item = %+v", all[1])
@@ -197,7 +197,7 @@ func TestOutboxMutationsOnMissingItems(t *testing.T) {
 	s := openTest(t)
 	for name, err := range map[string]error{
 		"MarkFailed": s.MarkFailed("nope", "x"),
-		"Requeue":    s.Requeue("nope"),
+		"Requeue":    s.Requeue("nope", s.now()),
 		"Discard":    s.Discard("nope"),
 	} {
 		if !errors.Is(err, ErrNotFound) {
@@ -210,7 +210,7 @@ func TestRequeueOfSendingItemIsNoOp(t *testing.T) {
 	s := openTest(t)
 	enqueue(t, s, "c1", "q1", "hello")
 	before, _ := s.Outbox("c1")
-	must(t, s.Requeue("q1"))
+	must(t, s.Requeue("q1", s.now()))
 	after, _ := s.Outbox("c1")
 	if !reflect.DeepEqual(before, after) {
 		t.Fatalf("Requeue changed a sending item: %+v -> %+v", before, after)

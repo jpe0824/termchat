@@ -102,6 +102,13 @@ CREATE TABLE skipped (
 	PRIMARY KEY (conv, seq)
 );
 `,
+	`
+-- events_kind_at answers a conversation's newest message event of each kind
+-- with one seek; messages_unread covers the unread count, so it reads only
+-- the index entries after the read position.
+CREATE INDEX events_kind_at ON events(conv, kind, at);
+CREATE INDEX messages_unread ON messages(conv, seq, author, deleted);
+`,
 }
 
 // migrate brings db up to the latest schema inside one immediate transaction,

@@ -49,6 +49,8 @@ const (
 	codeInternal        = "internal"
 )
 
+// codes maps each wire code to the errors sent as it. The first error of an
+// entry is the sentinel a client gets back for the code.
 var codes = []struct {
 	code string
 	errs []error
@@ -100,15 +102,10 @@ func decodeError(w *wireError) error {
 	if w == nil {
 		return nil
 	}
-	sentinels := map[string]error{
-		codeNotFound: ErrNotFound, codeAmbiguous: ErrAmbiguous, codeSendDenied: ErrSendDenied,
-		codeNotConnected: ErrNotConnected, codeNotAuthorised: ErrNotAuthorised,
-		codeForbidden: ErrForbidden, codeInvalid: ErrInvalid, codeTimeout: ErrTimeout,
-		codeVersionMismatch: ErrVersionMismatch, codeNoAccount: ErrNoAccount,
-		codeShuttingDown: ErrShuttingDown,
-	}
-	if s, ok := sentinels[w.Code]; ok {
-		return &codedError{msg: w.Msg, sentinel: s}
+	for _, c := range codes {
+		if c.code == w.Code {
+			return &codedError{msg: w.Msg, sentinel: c.errs[0]}
+		}
 	}
 	return errors.New(w.Msg)
 }

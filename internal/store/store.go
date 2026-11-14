@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go driver; the build must stay cgo-free
@@ -38,6 +39,10 @@ type Store struct {
 	db *sql.DB
 	// now is the clock for stored timestamps; tests replace it.
 	now func() time.Time
+
+	// me caches the meta table's handle; SetMe is its only writer.
+	meMu sync.Mutex
+	me   string
 }
 
 // Message is one message as displayed. Stored messages have Status "";
@@ -71,7 +76,9 @@ type OutboxItem struct {
 //
 // Every transaction begins IMMEDIATE so a read-then-write cannot interleave
 // with another writer; busy_timeout makes contending writers wait. secure_delete
-// zeroes freed pages so purged message text does not linger in the file.
+// zeroes freed pages so purged message text does not linger in the file, and
+// the full-text index's own secure-delete removes a deleted row's terms from
+// its segments at once, rather than when they are next merged.
 func Open(dataDir, account string) (*Store, error) {
 	if account == "" || account == "." || account == ".." || strings.ContainsAny(account, `/\`) {
 		return nil, fmt.Errorf("%w: account name %q", ErrInvalid, account)
@@ -107,7 +114,16 @@ func Open(dataDir, account string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	return &Store{db: db, now: time.Now}, nil
+	if _, err := db.Exec(`INSERT INTO msg_fts(msg_fts, rank) VALUES ('secure-delete', 1)`); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	var me string
+	if err := db.QueryRow(`SELECT value FROM meta WHERE key = 'me'`).Scan(&me); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		_ = db.Close()
+		return nil, err
+	}
+	return &Store{db: db, now: time.Now, me: me}, nil
 }
 
 // Close releases the database. It is safe to call more than once.
@@ -149,18 +165,21 @@ func splitHandles(s string) []string {
 // SetMe records the signed-in user's handle, used for unread counts and for
 // attributing outbox messages.
 func (s *Store) SetMe(handle string) error {
-	_, err := s.db.Exec(`INSERT INTO meta(key, value) VALUES ('me', ?)
-		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, handle)
-	return err
+	s.meMu.Lock()
+	defer s.meMu.Unlock()
+	if _, err := s.db.Exec(`INSERT INTO meta(key, value) VALUES ('me', ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, handle); err != nil {
+		return err
+	}
+	s.me = handle
+	return nil
 }
 
 // Me returns the handle recorded by SetMe, or "" if none.
 func (s *Store) Me() string {
-	var me string
-	if err := s.db.QueryRow(`SELECT value FROM meta WHERE key = 'me'`).Scan(&me); err != nil {
-		return ""
-	}
-	return me
+	s.meMu.Lock()
+	defer s.meMu.Unlock()
+	return s.me
 }
 
 // UpsertPeople inserts or updates identities; they are the source of

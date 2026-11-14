@@ -18,66 +18,67 @@ const (
 	// past it subscribers get one conv event and re-read, so a long catch-up
 	// cannot overflow their queues.
 	maxMessageEvents = 256
-	// applyChunk is the most events written in one store transaction.
+	// applyChunk is the most events of a live push or sync page written in
+	// one store transaction. A history page is written whole: it is fetched
+	// at a bounded rate, so it holds up a live update at most once per page.
 	applyChunk = 10
 	// resyncAfter is how long a failed catch-up waits before trying again.
 	resyncAfter = 30 * time.Second
 )
 
-// drain applies pushes from the connector. It blocks on nothing but the
-// store and the updates channel, and calls no connector method: identity
-// and state come from the account's cached copies.
-func (a *account) drain(updates <-chan connector.Update) {
+// drain applies pushes from the connector until ctx ends. It blocks on
+// nothing but the store and the updates channel.
+func (l *ledger) drain(ctx context.Context, updates <-chan connector.Update) {
 	for {
 		select {
-		case <-a.ctx.Done():
+		case <-ctx.Done():
 			return
 		case u := <-updates:
-			a.handleUpdate(u)
+			l.handleUpdate(u)
 		}
 	}
 }
 
-func (a *account) handleUpdate(u connector.Update) {
+func (l *ledger) handleUpdate(u connector.Update) {
 	switch {
 	case u.Event != nil:
 		ev := *u.Event
-		a.announce(a.apply([]model.Event{ev}), true)
-		if a.unknown(ev.Actor, ev.Target) {
-			signal(a.peopleCh)
+		l.ingest([]model.Event{ev})
+		if l.unknown(ev.Actor, ev.Target) {
+			signal(l.peopleCh)
 		}
 	case u.Read != nil:
-		if err := a.write(func() error { return a.st.SetRead(u.Read.ConvID, u.Read.Seq) }); err != nil {
-			a.log.Warn("read position for unknown conversation", "conv", u.Read.ConvID)
+		if err := l.write(func() error { return l.st.SetRead(u.Read.ConvID, u.Read.Seq) }); err != nil {
+			l.log.Warn("read position for unknown conversation", "conv", u.Read.ConvID)
 			return
 		}
-		a.emitConv(u.Read.ConvID)
+		l.emitConv(u.Read.ConvID)
 	case u.Conv != nil:
-		a.upsertConv(*u.Conv)
+		l.upsertConv(*u.Conv)
 	default:
-		signal(a.stateCh)
+		signal(l.stateCh)
 	}
 }
 
 // upsertConv stores the server's view of a conversation and announces it.
-func (a *account) upsertConv(c model.Conversation) {
-	if err := a.write(func() error { return a.st.UpsertConversation(c) }); err != nil {
-		a.log.Error("store conversation", "conv", c.ID, "err", err)
+func (l *ledger) upsertConv(c model.Conversation) {
+	if err := l.write(func() error { return l.st.UpsertConversation(c) }); err != nil {
+		l.log.Error("store conversation", "conv", c.ID, "err", err)
 		return
 	}
-	if me := a.st.Me(); me != "" && len(c.Members) > 0 && !slices.Contains(c.Members, me) {
-		a.markGone(c.ID)
+	if me := l.st.Me(); me != "" && len(c.Members) > 0 && !slices.Contains(c.Members, me) {
+		l.markGone(c.ID)
 		return
 	}
-	a.emitConv(c.ID)
+	l.emitConv(c.ID)
 }
 
-func (a *account) markGone(conv string) {
-	if err := a.write(func() error { return a.st.MarkGone(conv) }); err != nil {
-		a.log.Warn("mark conversation gone", "conv", conv, "err", err)
+func (l *ledger) markGone(conv string) {
+	if err := l.write(func() error { return l.st.MarkGone(conv) }); err != nil {
+		l.log.Warn("mark conversation gone", "conv", conv, "err", err)
 		return
 	}
-	a.emitRemoved(conv)
+	l.emitRemoved(conv)
 }
 
 // supervise reacts to connection changes and people refresh requests.
@@ -174,9 +175,7 @@ func (a *account) catchUp() error {
 			return err
 		}
 	}
-	a.mu.Lock()
-	a.openRooms, a.listedAt = open, a.d.clock.Now()
-	a.mu.Unlock()
+	a.rooms.set(open)
 	for _, v := range local {
 		if !listed[v.ID] {
 			a.markGone(v.ID)
@@ -234,7 +233,7 @@ func (a *account) syncCursors(ctx context.Context, cursors map[string]int64) err
 		if err != nil {
 			return err
 		}
-		a.announce(a.apply(evs), len(evs) <= maxMessageEvents)
+		a.ingest(evs)
 		for _, ev := range evs {
 			if _, ok := cursors[ev.ConvID]; ok && ev.Seq > cursors[ev.ConvID] {
 				cursors[ev.ConvID] = ev.Seq
@@ -261,25 +260,28 @@ func (a *account) syncConv(ctx context.Context, conv string) error {
 }
 
 // apply stores events and returns those the store accepted. It writes in
-// chunks so a live update waits for one chunk at most. The store rejects a
-// whole batch for one malformed event, so a rejected chunk is retried one
-// event at a time and the bad ones recorded as skipped, which lets the
-// cursor move past them.
-func (a *account) apply(evs []model.Event) []model.Event {
+// chunks so a live update waits for one chunk at most.
+func (l *ledger) apply(evs []model.Event) []model.Event { return l.applyIn(evs, applyChunk) }
+
+// applyIn is apply with chunks of size events. The store rejects a whole
+// batch for one malformed event, so a rejected chunk is retried one event at
+// a time and the bad ones recorded as skipped, which lets the cursor move
+// past them.
+func (l *ledger) applyIn(evs []model.Event, size int) []model.Event {
 	var ok []model.Event
-	for chunk := range slices.Chunk(evs, applyChunk) {
-		if err := a.write(func() error { return a.st.Apply(chunk...) }); err == nil {
+	for chunk := range slices.Chunk(evs, size) {
+		if err := l.write(func() error { return l.st.Apply(chunk...) }); err == nil {
 			ok = append(ok, chunk...)
 			continue
 		}
 		for _, ev := range chunk {
-			if err := a.write(func() error { return a.st.Apply(ev) }); err != nil {
-				a.log.Warn("skipping event the store rejected", "conv", ev.ConvID, "seq", ev.Seq, "kind", ev.Kind, "err", err)
+			if err := l.write(func() error { return l.st.Apply(ev) }); err != nil {
+				l.log.Warn("skipping event the store rejected", "conv", ev.ConvID, "seq", ev.Seq, "kind", ev.Kind, "err", err)
 				// Only a malformed event is recorded as skipped; a storage
 				// failure leaves the gap so the next sync fetches it again.
 				if errors.Is(err, store.ErrInvalid) && ev.ConvID != "" && ev.Seq >= 1 {
-					if err := a.write(func() error { return a.st.Skip(ev.ConvID, ev.Seq) }); err != nil {
-						a.log.Error("record skipped event", "conv", ev.ConvID, "seq", ev.Seq, "err", err)
+					if err := l.write(func() error { return l.st.Skip(ev.ConvID, ev.Seq) }); err != nil {
+						l.log.Error("record skipped event", "conv", ev.ConvID, "seq", ev.Seq, "err", err)
 					}
 				}
 				continue
@@ -290,14 +292,21 @@ func (a *account) apply(evs []model.Event) []model.Event {
 	return ok
 }
 
+// ingest stores events, then announces those the store accepted: each
+// message as well when the batch is short enough for subscribers to take one
+// event per message.
+func (l *ledger) ingest(evs []model.Event) {
+	l.announce(l.apply(evs), len(evs) <= maxMessageEvents)
+}
+
 // announce tells subscribers about stored events: each message when
 // perMessage, and every conversation touched.
-func (a *account) announce(evs []model.Event, perMessage bool) {
+func (l *ledger) announce(evs []model.Event, perMessage bool) {
 	var convs []string
 	type key struct{ conv, msgID string }
 	seen := map[key]bool{}
 	own := false
-	me := a.st.Me()
+	me := l.st.Me()
 	for _, ev := range evs {
 		if !slices.Contains(convs, ev.ConvID) {
 			convs = append(convs, ev.ConvID)
@@ -308,11 +317,11 @@ func (a *account) announce(evs []model.Event, perMessage bool) {
 		k := key{ev.ConvID, ev.MsgID}
 		if perMessage && ev.MsgID != "" && !seen[k] {
 			seen[k] = true
-			a.emitMessage(ev.ConvID, ev.MsgID)
+			l.emitMessage(ev.ConvID, ev.MsgID)
 		}
 	}
-	a.emitConvs(convs)
+	l.emitConvs(convs)
 	if own {
-		a.emitStatus()
+		l.emitStatus()
 	}
 }

@@ -8,11 +8,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jpe0824/termchat/internal/ipc"
+	"github.com/jpe0824/termchat/internal/model"
 	"github.com/jpe0824/termchat/internal/store"
 )
-
-// maxMessageBytes is the longest message the server accepts.
-const maxMessageBytes = 8192
 
 // printMessages writes messages as a JSON array (one object when single),
 // or as table lines. labels, when set, names each message's conversation.
@@ -53,7 +51,7 @@ func newReadCmd() *cobra.Command {
 			if before < 0 {
 				return usagef("--before must not be negative")
 			}
-			return withClient(cmd, func(c *ipc.Client) error {
+			return withClient(cmd, cmdContext(cmd), func(c *ipc.Client) error {
 				conv, err := resolveChat(c, args[0])
 				if err != nil {
 					return err
@@ -109,7 +107,7 @@ func newSearchCmd() *cobra.Command {
 			if n < 1 {
 				return usagef("-n must be at least 1")
 			}
-			return withClient(cmd, func(c *ipc.Client) error {
+			return withClient(cmd, cmdContext(cmd), func(c *ipc.Client) error {
 				me, err := whoAmI(c)
 				if err != nil {
 					return err
@@ -143,11 +141,11 @@ func messageText(cmd *cobra.Command, args []string) (string, error) {
 		}
 		text = strings.TrimSuffix(strings.TrimSuffix(string(b), "\n"), "\r")
 	}
-	switch {
-	case strings.TrimSpace(text) == "":
+	switch model.CheckText(text) {
+	case model.ErrEmptyText:
 		return "", usagef("no message text; give it as an argument or on stdin")
-	case len(text) > maxMessageBytes:
-		return "", usagef("the message is %d bytes; the limit is %d", len(text), maxMessageBytes)
+	case model.ErrTextTooLong:
+		return "", usagef("the message is %d bytes; the limit is %d", len(text), model.MaxTextBytes)
 	}
 	return text, nil
 }
@@ -168,7 +166,7 @@ before the chat also works.`,
 			if err != nil {
 				return err
 			}
-			return withClient(cmd, func(c *ipc.Client) error {
+			return withClient(cmd, cmdContext(cmd), func(c *ipc.Client) error {
 				conv, err := resolveChat(c, args[0])
 				if err != nil {
 					return err

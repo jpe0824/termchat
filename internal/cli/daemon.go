@@ -23,7 +23,7 @@ func newDaemonCmd() *cobra.Command {
 		Short:  "Run the background process in the foreground",
 		Args:   noSubcommand,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			ctx, stop := signal.NotifyContext(cmdContext(cmd), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			return daemon.Run(ctx, daemon.Options{})
 		},

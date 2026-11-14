@@ -253,8 +253,6 @@ func (d *daemon) account() (*account, error) {
 	return d.acct, nil
 }
 
-func (d *daemon) emit(ev ipc.Event) { d.srv.Broadcast(ev) }
-
 // Stop implements ipc.Backend.
 func (d *daemon) Stop() { d.stop() }
 

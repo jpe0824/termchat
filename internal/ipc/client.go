@@ -115,16 +115,35 @@ func (c *Client) detach(sub *subscription, why error) {
 	}()
 }
 
-// Dial connects to the background process, starting it if none is running,
-// and performs the version handshake.
-func Dial(ctx context.Context) (*Client, error) {
+// ErrNotRunning is DialRunning's error when no background process is
+// listening.
+var ErrNotRunning = errors.New("no background process is running")
+
+// DialRunning connects to the background process and performs the version
+// handshake. Unlike Dial it never starts one: when none is listening it
+// returns an error matching ErrNotRunning.
+func DialRunning(ctx context.Context) (*Client, error) {
 	sock, err := SocketPath()
 	if err != nil {
 		return nil, err
 	}
 	c, err := dialPath(ctx, sock)
-	if err == nil || !notRunning(err) {
+	if err != nil && notRunning(err) {
+		return nil, fmt.Errorf("%w: %w", ErrNotRunning, err)
+	}
+	return c, err
+}
+
+// Dial connects to the background process, starting it if none is running,
+// and performs the version handshake.
+func Dial(ctx context.Context) (*Client, error) {
+	c, err := DialRunning(ctx)
+	if !errors.Is(err, ErrNotRunning) {
 		return c, err
+	}
+	sock, err := SocketPath()
+	if err != nil {
+		return nil, err
 	}
 	if err := StartDaemon(ctx); err != nil {
 		return nil, fmt.Errorf("start background process: %w", err)
@@ -260,6 +279,13 @@ func (c *Client) call(op string, a *args, out any) error {
 	}
 }
 
+// result runs one request and decodes its result as a T.
+func result[T any](c *Client, op string, a *args) (T, error) {
+	var out T
+	err := c.call(op, a, &out)
+	return out, err
+}
+
 func (c *Client) forget(id uint64) {
 	c.mu.Lock()
 	delete(c.pending, id)
@@ -268,15 +294,12 @@ func (c *Client) forget(id uint64) {
 
 // Status reports the account, connection and outbox state.
 func (c *Client) Status() (Status, error) {
-	var s Status
-	err := c.call(opStatus, nil, &s)
-	return s, err
+	return result[Status](c, opStatus, nil)
 }
 
 // Chats returns the user's conversations and the open rooms not joined.
 func (c *Client) Chats() ([]store.ConvView, []model.Conversation, error) {
-	var r Chats
-	err := c.call(opChats, nil, &r)
+	r, err := result[Chats](c, opChats, nil)
 	return r.Mine, r.Open, err
 }
 
@@ -285,25 +308,19 @@ func (c *Client) Chats() ([]store.ConvView, []model.Conversation, error) {
 // from the server when the local copy runs out. It never moves the read
 // position.
 func (c *Client) Messages(conv string, beforeSeq int64, limit int) ([]store.Message, error) {
-	var out []store.Message
-	err := c.call(opMessages, &args{Conv: conv, BeforeSeq: beforeSeq, Limit: limit}, &out)
-	return out, err
+	return result[[]store.Message](c, opMessages, &args{Conv: conv, BeforeSeq: beforeSeq, Limit: limit})
 }
 
 // Outbox returns the user's unsent items of conv, oldest first: those still
 // sending and those that failed, with the reason in Err.
 func (c *Client) Outbox(conv string) ([]store.OutboxItem, error) {
-	var out []store.OutboxItem
-	err := c.call(opOutbox, &args{Conv: conv}, &out)
-	return out, err
+	return result[[]store.OutboxItem](c, opOutbox, &args{Conv: conv})
 }
 
 // Send queues text for conv and returns its message id at once; delivery
 // is reported through Subscribe. source is "tui" or "cli".
 func (c *Client) Send(conv, text, source string) (string, error) {
-	var id string
-	err := c.call(opSend, &args{Conv: conv, Text: text, Source: source}, &id)
-	return id, err
+	return result[string](c, opSend, &args{Conv: conv, Text: text, Source: source})
 }
 
 // Edit replaces the text of one of the user's messages.
@@ -333,53 +350,39 @@ func (c *Client) MarkRead(conv string) error {
 
 // Search returns messages containing every word of q, newest first.
 func (c *Client) Search(q string, limit int) ([]store.Message, error) {
-	var out []store.Message
-	err := c.call(opSearch, &args{Query: q, Limit: limit}, &out)
-	return out, err
+	return result[[]store.Message](c, opSearch, &args{Query: q, Limit: limit})
 }
 
 // Resolve finds a conversation by "@handle" (the DM), "#room", id, or bare
 // name. It returns ErrNotFound or ErrAmbiguous.
 func (c *Client) Resolve(ref string) (model.Conversation, error) {
-	var conv model.Conversation
-	err := c.call(opResolve, &args{Ref: ref}, &conv)
-	return conv, err
+	return result[model.Conversation](c, opResolve, &args{Ref: ref})
 }
 
 // OpenDM returns the DM with handle, creating it on the server if needed.
 func (c *Client) OpenDM(handle string) (model.Conversation, error) {
-	var conv model.Conversation
-	err := c.call(opOpenDM, &args{Handle: handle}, &conv)
-	return conv, err
+	return result[model.Conversation](c, opOpenDM, &args{Handle: handle})
 }
 
 // Room runs one room operation.
 func (c *Client) Room(op connector.RoomOp) (model.Conversation, error) {
-	var conv model.Conversation
-	err := c.call(opRoom, &args{Room: &op}, &conv)
-	return conv, err
+	return result[model.Conversation](c, opRoom, &args{Room: &op})
 }
 
 // DeviceInvite returns a code that adds another device to this account.
 func (c *Client) DeviceInvite() (string, error) {
-	var code string
-	err := c.call(opDeviceInvite, nil, &code)
-	return code, err
+	return result[string](c, opDeviceInvite, nil)
 }
 
 // CreateAgent creates an agent identity owned by the user and returns its
 // invite code.
 func (c *Client) CreateAgent(handle, name string) (string, error) {
-	var code string
-	err := c.call(opCreateAgent, &args{Handle: handle, Name: name}, &code)
-	return code, err
+	return result[string](c, opCreateAgent, &args{Handle: handle, Name: name})
 }
 
 // AdminInvite creates an invite for a new person (admins only).
 func (c *Client) AdminInvite(handle, name string) (string, error) {
-	var code string
-	err := c.call(opAdminInvite, &args{Handle: handle, Name: name}, &code)
-	return code, err
+	return result[string](c, opAdminInvite, &args{Handle: handle, Name: name})
 }
 
 // Join registers this machine with a server using an invite code and brings

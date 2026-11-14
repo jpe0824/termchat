@@ -12,10 +12,6 @@ import (
 	"github.com/jpe0824/termchat/internal/ipc"
 )
 
-// errNoDaemon is what Dial reports for "stop" when nothing is listening: the
-// command must not start a process just to stop it.
-var errNoDaemon = errors.New("no background process is running")
-
 // stopWait bounds how long "daemon stop" waits for the process to go away.
 const stopWait = 10 * time.Second
 
@@ -25,7 +21,7 @@ func newDaemonStartCmd() *cobra.Command {
 		Short: "Make sure the background process is running",
 		Args:  exactArgs(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return withClient(cmd, func(c *ipc.Client) error {
+			return withClient(cmd, cmdContext(cmd), func(c *ipc.Client) error {
 				s, err := c.Status()
 				if err != nil {
 					return err
@@ -55,15 +51,14 @@ func newDaemonStopCmd() *cobra.Command {
 }
 
 // stopDaemon asks the process to stop and waits until nothing answers any
-// more. It succeeds when none is running.
+// more. It succeeds when none is running, and never starts one.
 func stopDaemon(ctx context.Context) error {
-	ipc.StartDaemon = func(context.Context) error { return errNoDaemon }
 	deadline := time.Now().Add(stopWait)
 	asked := false
 	for {
-		c, err := ipc.Dial(ctx)
+		c, err := ipc.DialRunning(ctx)
 		switch {
-		case errors.Is(err, errNoDaemon):
+		case errors.Is(err, ipc.ErrNotRunning):
 			return nil
 		case err == nil:
 			if !asked {

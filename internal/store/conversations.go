@@ -34,6 +34,7 @@ func (s *Store) UpsertConversation(c model.Conversation) error {
 	if c.ID == "" {
 		return fmt.Errorf("%w: conversation without id", ErrInvalid)
 	}
+	me := s.Me()
 	return s.write(func(tx *sql.Tx) error {
 		var oldSnap int64
 		err := tx.QueryRow(`SELECT snap_seq FROM conversations WHERE id = ?`, c.ID).Scan(&oldSnap)
@@ -61,10 +62,6 @@ func (s *Store) UpsertConversation(c model.Conversation) error {
 					return err
 				}
 			}
-		}
-		var me string
-		if err := tx.QueryRow(`SELECT value FROM meta WHERE key = 'me'`).Scan(&me); err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
 		}
 		if me == "" {
 			return nil
@@ -106,9 +103,60 @@ func requireAffected(res sql.Result, what string) error {
 // Conversations lists the conversations the user is in, most recent activity
 // first; those with no messages follow, ordered by name.
 func (s *Store) Conversations() ([]ConvView, error) {
+	out, err := s.views(`WHERE gone = 0`)
+	if err != nil {
+		return nil, err
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if !a.LastAt.Equal(b.LastAt) {
+			return a.LastAt.After(b.LastAt)
+		}
+		if a.Name != b.Name {
+			return a.Name < b.Name
+		}
+		return a.ID < b.ID
+	})
+	return out, nil
+}
+
+// ConvView returns conv as Conversations lists it, or ErrNotFound when the
+// user is not in it.
+func (s *Store) ConvView(conv string) (ConvView, error) {
+	out, err := s.views(`WHERE id = ? AND gone = 0`, conv)
+	if err != nil {
+		return ConvView{}, err
+	}
+	if len(out) == 0 {
+		return ConvView{}, fmt.Errorf("%w: conversation %s", ErrNotFound, conv)
+	}
+	return out[0], nil
+}
+
+// ConvIDs returns the ids of the conversations Conversations lists, in id
+// order.
+func (s *Store) ConvIDs() ([]string, error) {
+	rows, err := s.db.Query(`SELECT id FROM conversations WHERE gone = 0 ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// views reads the conversations matching where and derives each one's view.
+func (s *Store) views(where string, args ...any) ([]ConvView, error) {
 	me := s.Me()
 	rows, err := s.db.Query(`SELECT id, kind, name, open, creator, last_seq, read_seq, snap_seq
-		FROM conversations WHERE gone = 0`)
+		FROM conversations `+where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -139,18 +187,21 @@ func (s *Store) Conversations() ([]ConvView, error) {
 			return nil, err
 		}
 	}
-	sort.SliceStable(out, func(i, j int) bool {
-		a, b := out[i], out[j]
-		if !a.LastAt.Equal(b.LastAt) {
-			return a.LastAt.After(b.LastAt)
-		}
-		if a.Name != b.Name {
-			return a.Name < b.Name
-		}
-		return a.ID < b.ID
-	})
 	return out, nil
 }
+
+// unreadSQL counts conv's unread messages; messages_unread covers it, so only
+// the rows after the read position are visited.
+const unreadSQL = `SELECT count(*) FROM messages
+	WHERE conv = ?1 AND seq > ?2 AND author <> ?3 AND deleted = 0`
+
+// lastActivitySQL is the time of conv's newest message event. One MAX per
+// kind lets each be answered by a single seek on events_kind_at; a combined
+// "kind IN (...)" would read every message event of the conversation.
+const lastActivitySQL = `SELECT MAX(at) FROM (
+	SELECT (SELECT MAX(at) FROM events WHERE conv = ?1 AND kind = ?2) AS at
+	UNION ALL SELECT (SELECT MAX(at) FROM events WHERE conv = ?1 AND kind = ?3)
+	UNION ALL SELECT (SELECT MAX(at) FROM events WHERE conv = ?1 AND kind = ?4))`
 
 func (s *Store) fillView(v *ConvView, snap int64, me string) error {
 	// A rename newer than the snapshot wins.
@@ -169,8 +220,7 @@ func (s *Store) fillView(v *ConvView, snap int64, me string) error {
 	}
 	v.Members = members
 
-	if err := s.db.QueryRow(`SELECT count(*) FROM messages
-		WHERE conv = ? AND seq > ? AND author <> ? AND deleted = 0`, v.ID, v.ReadSeq, me).Scan(&v.Unread); err != nil {
+	if err := s.db.QueryRow(unreadSQL, v.ID, v.ReadSeq, me).Scan(&v.Unread); err != nil {
 		return err
 	}
 	var text string
@@ -182,7 +232,7 @@ func (s *Store) fillView(v *ConvView, snap int64, me string) error {
 		return err
 	}
 	var lastAt sql.NullInt64
-	if err := s.db.QueryRow(`SELECT MAX(at) FROM events WHERE conv = ? AND kind IN (?, ?, ?)`, v.ID,
+	if err := s.db.QueryRow(lastActivitySQL, v.ID,
 		string(model.MessagePosted), string(model.MessageEdited), string(model.MessageDeleted)).Scan(&lastAt); err != nil {
 		return err
 	}
@@ -250,11 +300,16 @@ func (s *Store) Skip(conv string, seq int64) error {
 	return err
 }
 
+// oldestSQL takes the lowest Seq of each table separately, so each is a
+// single seek on its primary key.
+const oldestSQL = `SELECT MIN(seq) FROM (
+	SELECT (SELECT MIN(seq) FROM events WHERE conv = ?1) AS seq
+	UNION ALL SELECT (SELECT MIN(seq) FROM skipped WHERE conv = ?1))`
+
 // OldestSeq is the lowest Seq held or skipped for conv, 0 when none.
 func (s *Store) OldestSeq(conv string) int64 {
 	var n sql.NullInt64
-	if err := s.db.QueryRow(`SELECT MIN(seq) FROM (SELECT seq FROM events WHERE conv = ?1
-		UNION ALL SELECT seq FROM skipped WHERE conv = ?1)`, conv).Scan(&n); err != nil {
+	if err := s.db.QueryRow(oldestSQL, conv).Scan(&n); err != nil {
 		return 0
 	}
 	return n.Int64

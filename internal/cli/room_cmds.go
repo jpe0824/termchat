@@ -20,77 +20,80 @@ func newRoomCmd() *cobra.Command {
 		Short: "Create a room (open to everyone unless --private)",
 		Args:  exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name, err := roomArg(args[0])
+			name, err := nameArg("room name", args[0])
 			if err != nil {
 				return err
 			}
 			private, _ := cmd.Flags().GetBool("private")
-			return roomOp(cmd, "", func(*ipc.Client, model.Conversation) connector.RoomOp {
+			return roomOp(cmd, "", func(model.Conversation) connector.RoomOp {
 				return connector.RoomOp{Kind: connector.RoomCreate, Name: name, Open: !private}
 			}, func(r model.Conversation) string { return "created " + convLabel(r, "") + " " + cell(r.ID) })
 		},
 	})
 	create.Flags().Bool("private", false, "invite-only instead of open to everyone")
 
-	cmd.AddCommand(create,
-		roomChange("join <room>", "Join an open room", 1, "",
-			func(_ []string, conv model.Conversation) connector.RoomOp {
-				return connector.RoomOp{Kind: connector.RoomJoin, Conv: conv.ID}
-			},
-			func(r model.Conversation, _ string) string { return "joined " + convLabel(r, "") }),
-		roomChange("leave <room>", "Leave a room", 1, "",
-			func(_ []string, conv model.Conversation) connector.RoomOp {
-				return connector.RoomOp{Kind: connector.RoomLeave, Conv: conv.ID}
-			},
-			func(r model.Conversation, _ string) string { return "left " + convLabel(r, "") }),
-		roomChange("invite <room> <handle>", "Invite a person to a room", 2, "handle",
-			func(args []string, conv model.Conversation) connector.RoomOp {
-				return connector.RoomOp{Kind: connector.RoomInvite, Conv: conv.ID, Handle: model.NormalizeName(args[1])}
-			},
-			func(r model.Conversation, arg string) string {
-				return "invited @" + cell(arg) + " to " + convLabel(r, "")
-			}),
-		roomChange("remove <room> <handle>", "Remove a person from a room", 2, "handle",
-			func(args []string, conv model.Conversation) connector.RoomOp {
-				return connector.RoomOp{Kind: connector.RoomRemove, Conv: conv.ID, Handle: model.NormalizeName(args[1])}
-			},
-			func(r model.Conversation, arg string) string {
-				return "removed @" + cell(arg) + " from " + convLabel(r, "")
-			}),
-		roomChange("rename <room> <name>", "Rename a room", 2, "name",
-			func(args []string, conv model.Conversation) connector.RoomOp {
-				return connector.RoomOp{Kind: connector.RoomRename, Conv: conv.ID, Name: model.NormalizeName(args[1])}
-			},
-			func(r model.Conversation, _ string) string { return "renamed to " + convLabel(r, "") }),
-	)
+	cmd.AddCommand(create)
+	for _, c := range roomChanges {
+		cmd.AddCommand(roomChange(c))
+	}
 	return cmd
 }
 
-// roomChange builds a room subcommand that acts on an existing room named by
-// its first argument. A second argument, when argKind is set, is validated
-// as a "handle" or a room "name" and passed to said as its text.
-func roomChange(use, short string, nargs int, argKind string,
-	op func(args []string, conv model.Conversation) connector.RoomOp,
-	said func(r model.Conversation, arg string) string) *cobra.Command {
+// roomChangeSpec describes a room subcommand that acts on an existing room
+// named by its first argument. A second argument, when arg is set, is
+// validated as a "handle" or a "room name", and goes into the operation's
+// Handle or Name.
+type roomChangeSpec struct {
+	use, short string
+	kind       string
+	arg        string
+	// said is what the command prints; arg is the validated second argument.
+	said func(r model.Conversation, arg string) string
+}
+
+var roomChanges = []roomChangeSpec{
+	{"join <room>", "Join an open room", connector.RoomJoin, "",
+		func(r model.Conversation, _ string) string { return "joined " + convLabel(r, "") }},
+	{"leave <room>", "Leave a room", connector.RoomLeave, "",
+		func(r model.Conversation, _ string) string { return "left " + convLabel(r, "") }},
+	{"invite <room> <handle>", "Invite a person to a room", connector.RoomInvite, "handle",
+		func(r model.Conversation, arg string) string {
+			return "invited @" + cell(arg) + " to " + convLabel(r, "")
+		}},
+	{"remove <room> <handle>", "Remove a person from a room", connector.RoomRemove, "handle",
+		func(r model.Conversation, arg string) string {
+			return "removed @" + cell(arg) + " from " + convLabel(r, "")
+		}},
+	{"rename <room> <name>", "Rename a room", connector.RoomRename, "room name",
+		func(r model.Conversation, _ string) string { return "renamed to " + convLabel(r, "") }},
+}
+
+func roomChange(spec roomChangeSpec) *cobra.Command {
+	nargs := 1
+	if spec.arg != "" {
+		nargs = 2
+	}
 	return clientCmd(&cobra.Command{
-		Use:   use,
-		Short: short,
+		Use:   spec.use,
+		Short: spec.short,
 		Args:  exactArgs(nargs),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var arg string
-			var err error
-			switch argKind {
-			case "handle":
-				arg, err = handleArg(args[1])
-			case "name":
-				arg, err = roomArg(args[1])
+			if spec.arg != "" {
+				var err error
+				if arg, err = nameArg(spec.arg, args[1]); err != nil {
+					return err
+				}
 			}
-			if err != nil {
-				return err
-			}
-			return roomOp(cmd, args[0], func(_ *ipc.Client, conv model.Conversation) connector.RoomOp {
-				return op(args, conv)
-			}, func(r model.Conversation) string { return said(r, arg) })
+			return roomOp(cmd, args[0], func(conv model.Conversation) connector.RoomOp {
+				op := connector.RoomOp{Kind: spec.kind, Conv: conv.ID}
+				if spec.arg == "handle" {
+					op.Handle = arg
+				} else {
+					op.Name = arg
+				}
+				return op
+			}, func(r model.Conversation) string { return spec.said(r, arg) })
 		},
 	})
 }
@@ -98,9 +101,9 @@ func roomChange(use, short string, nargs int, argKind string,
 // roomOp resolves ref (when set) to a room, runs the operation and prints the
 // resulting room. Fields the server leaves out of its answer are taken from
 // the room as it was resolved.
-func roomOp(cmd *cobra.Command, ref string, op func(*ipc.Client, model.Conversation) connector.RoomOp,
+func roomOp(cmd *cobra.Command, ref string, op func(model.Conversation) connector.RoomOp,
 	said func(r model.Conversation) string) error {
-	return withClient(cmd, func(c *ipc.Client) error {
+	return withClient(cmd, cmdContext(cmd), func(c *ipc.Client) error {
 		me, err := whoAmI(c)
 		if err != nil {
 			return err
@@ -114,7 +117,7 @@ func roomOp(cmd *cobra.Command, ref string, op func(*ipc.Client, model.Conversat
 				return exitf(exitNotFound, fmt.Sprintf("not a room: %s", ref))
 			}
 		}
-		rop := op(c, before)
+		rop := op(before)
 		res, err := c.Room(rop)
 		if errors.Is(err, ipc.ErrNotFound) && rop.Handle != "" {
 			return exitf(exitNotFound, "no such person: "+rop.Handle)
