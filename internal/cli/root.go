@@ -74,6 +74,6 @@ func Root() *cobra.Command {
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
 		return &usageError{msg: err.Error()}
 	})
-	root.AddCommand(newServeCmd(), newServerCmd())
+	root.AddCommand(newServeCmd(), newServerCmd(), newDaemonCmd())
 	return root
 }

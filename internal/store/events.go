@@ -148,9 +148,12 @@ type heldEvent struct {
 	mentions string
 }
 
+// The queries below repeat the partial index's condition (msg_id not
+// empty) so SQLite can use events_msg instead of scanning every event of the
+// conversation for each message.
 func loadMessageEvents(tx *sql.Tx, conv, msgID string) ([]heldEvent, error) {
 	rows, err := tx.Query(`SELECT seq, kind, actor, at, body_format, body_data, mentions
-		FROM events WHERE conv = ? AND msg_id = ? ORDER BY seq`, conv, msgID)
+		FROM events INDEXED BY events_msg WHERE conv = ? AND msg_id = ? AND msg_id <> '' ORDER BY seq`, conv, msgID)
 	if err != nil {
 		return nil, err
 	}
@@ -224,7 +227,7 @@ func refreshMessage(tx *sql.Tx, conv, msgID string) (purged bool, err error) {
 		keep = best.seq
 	}
 	if _, err := tx.Exec(`UPDATE events SET body_format = NULL, body_data = NULL
-		WHERE conv = ? AND msg_id = ? AND body_format IS NOT NULL AND seq <> ?`, conv, msgID, keep); err != nil {
+		WHERE conv = ? AND msg_id = ? AND msg_id <> '' AND body_format IS NOT NULL AND seq <> ?`, conv, msgID, keep); err != nil {
 		return false, err
 	}
 
