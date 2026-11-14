@@ -12,7 +12,7 @@ const (
 	// Version is the protocol version exchanged in hello.
 	Version = 1
 	// MaxFrame is the largest encoded frame, excluding the newline.
-	MaxFrame = 64 << 10
+	MaxFrame = 1 << 20
 )
 
 // Frame is one protocol message. Requests carry a non-zero ID that the
@@ -46,6 +46,7 @@ const (
 	CodeTooLarge        = "too_large"
 	CodeRateLimited     = "rate_limited"
 	CodeVersionMismatch = "version_mismatch"
+	CodeInternal        = "internal"
 )
 
 // Request and push frame types.
@@ -125,8 +126,14 @@ type ConvSyncReq struct {
 	Cursors map[string]int64 `json:"cursors"`
 }
 
+// ConvSyncRes holds events after each cursor, ascending per conversation.
+// Gone lists conversations the caller no longer belongs to; nothing is
+// returned for them. More is set when events were held back to bound the
+// response, and the client repeats the call with advanced cursors.
 type ConvSyncRes struct {
 	Events []model.Event `json:"events"`
+	More   bool          `json:"more,omitempty"`
+	Gone   []string      `json:"gone,omitempty"`
 }
 
 type MsgSendReq struct {
@@ -148,6 +155,16 @@ type MsgEditReq struct {
 	MsgID    string     `json:"msg_id"`
 	Body     model.Body `json:"body"`
 	Mentions []string   `json:"mentions,omitempty"`
+}
+
+// MsgEditRes and MsgDeleteRes carry the new event, which the requesting
+// session does not receive as a push.
+type MsgEditRes struct {
+	Event model.Event `json:"event"`
+}
+
+type MsgDeleteRes struct {
+	Event model.Event `json:"event"`
 }
 
 type MsgDeleteReq struct {

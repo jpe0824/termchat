@@ -161,7 +161,7 @@ func TestHandlerPanicRecovered(t *testing.T) {
 	c := h.Dial(t, h.NewPerson(t, "alice"))
 	testutil.Hello(t, c)
 	f := testutil.Request(t, c, proto.TypePeopleList, nil)
-	if f.Error == nil || f.Error.Code != proto.CodeInvalid {
+	if f.Error == nil || f.Error.Code != proto.CodeInternal || f.Error.Message != "internal error" {
 		t.Fatalf("got %+v", f)
 	}
 	if got := testutil.Hello(t, c); got.Person == nil {

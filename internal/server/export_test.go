@@ -24,3 +24,7 @@ func SetHandshakeTimeout(s *Server, d time.Duration) {
 	s.handshake = d
 	s.mu.Unlock()
 }
+
+// SetStoreClock replaces the clock the store uses for timestamps and invite
+// expiry.
+func SetStoreClock(st *Store, now func() time.Time) { st.now = now }

@@ -20,7 +20,7 @@ import (
 )
 
 // Session is one client connection. Person and Known are written only by the
-// session's own goroutine; other goroutines must go through Server.Sessions.
+// session's own goroutine; other goroutines must use Identity.
 type Session struct {
 	Person      model.Person
 	Fingerprint string
@@ -36,6 +36,10 @@ type Session struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// out carries every frame written after the loop starts, so pushes and
+	// responses reach the client in the order they were queued.
+	out chan outFrame
 
 	mu        sync.Mutex // guards Person and Known against readers on other goroutines
 	closeOnce sync.Once
@@ -67,11 +71,15 @@ func (s *Server) newSession(conn net.Conn, sconn *ssh.ServerConn) (*Session, err
 	default:
 		return nil, fmt.Errorf("lookup key: %w", err)
 	}
+	sess.out = make(chan outFrame, outboxSize)
 	sess.ctx, sess.cancel = context.WithCancel(context.Background())
 	return sess, nil
 }
 
-func (s *Session) identity() (model.Person, bool) {
+// Identity returns the session's person and whether the key is known. It is
+// safe from any goroutine; only it, not the Person and Known fields, may be
+// used outside the session's own goroutine.
+func (s *Session) Identity() (model.Person, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.Person, s.Known
@@ -91,13 +99,65 @@ func (s *Session) Close() {
 	})
 }
 
-// Push writes an unsolicited frame with ID 0. It is safe from any goroutine.
+// Push writes an unsolicited frame with ID 0 directly, blocking until it is
+// written. It is safe from any goroutine but is not ordered against frames
+// the server queues itself; fan-out uses enqueue.
 func (s *Session) Push(typ string, payload any) error {
 	b, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
 	return s.write(proto.Frame{Type: typ, Payload: b})
+}
+
+// outboxSize is how many queued pushes a session may fall behind by before the
+// server drops it; the client reconnects and catches up with conv.sync.
+const outboxSize = 256
+
+// outFrame is a queued frame. done is non-nil for responses, whose writer
+// needs the result.
+type outFrame struct {
+	f    proto.Frame
+	done chan error
+}
+
+// enqueue queues an unsolicited frame without blocking. A session that has
+// fallen outboxSize frames behind is closed rather than skipped, so a client
+// never silently misses a push.
+func (s *Session) enqueue(typ string, payload []byte) {
+	select {
+	case s.out <- outFrame{f: proto.Frame{Type: typ, Payload: payload}}:
+	default:
+		s.srv.log.Warn("dropping session that fell behind", "fingerprint", s.Fingerprint)
+		s.Close()
+	}
+}
+
+// drain writes queued frames in order until the session ends or a write fails.
+func (s *Session) drain() {
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case o := <-s.out:
+			err := s.write(o.f)
+			if o.done != nil {
+				o.done <- err
+			}
+			switch {
+			case err == nil:
+			case errors.Is(err, proto.ErrFrameTooLarge):
+				// Only this frame is lost, and the caller of a response
+				// is told; the connection is still usable.
+				if o.done == nil {
+					s.srv.log.Error("push exceeds frame limit", "type", o.f.Type)
+				}
+			default:
+				s.Close()
+				return
+			}
+		}
+	}
 }
 
 // write bounds how long a client that stops reading can hold a writer.
@@ -114,10 +174,14 @@ func (s *Session) run(ch ssh.Channel) {
 	s.srv.mu.Unlock()
 
 	var watcher sync.WaitGroup
-	watcher.Add(1)
+	watcher.Add(2)
 	go func() {
 		defer watcher.Done()
 		s.watchKey()
+	}()
+	go func() {
+		defer watcher.Done()
+		s.drain()
 	}()
 	defer func() {
 		s.Close()
@@ -162,7 +226,7 @@ func (s *Session) watchKey() {
 // keyPresent is true for unknown sessions and when the store cannot answer,
 // so a store error does not disconnect everyone.
 func (s *Session) keyPresent() bool {
-	if _, known := s.identity(); !known {
+	if _, known := s.Identity(); !known {
 		return true
 	}
 	ok, err := s.srv.store.HasKey(s.Fingerprint)
@@ -223,7 +287,7 @@ func (s *Session) dispatch(h HandlerFunc, f proto.Frame) (res any, perr *proto.E
 	defer func() {
 		if r := recover(); r != nil {
 			s.srv.log.Error("handler panic", "type", f.Type, "id", f.ID, "panic", fmt.Sprint(r), "stack", string(debug.Stack()))
-			res, perr = nil, &proto.Error{Code: proto.CodeInvalid, Message: "internal error"}
+			res, perr = nil, internalError()
 		}
 	}()
 	return h(s.ctx, s, f)
@@ -241,17 +305,34 @@ func (s *Session) reply(f proto.Frame, res any, perr *proto.Error) bool {
 		b, err := json.Marshal(res)
 		if err != nil {
 			s.srv.log.Error("encode response", "type", f.Type, "err", err)
-			out.Error = &proto.Error{Code: proto.CodeInvalid, Message: "internal error"}
+			out.Error = internalError()
 		} else {
 			out.Payload = b
 		}
 	}
-	err := s.write(out)
+	err := s.queue(out)
 	if errors.Is(err, proto.ErrFrameTooLarge) {
 		out = proto.Frame{ID: f.ID, Type: f.Type, Error: &proto.Error{Code: proto.CodeTooLarge, Message: "response too large"}}
-		err = s.write(out)
+		err = s.queue(out)
 	}
 	return err == nil
+}
+
+// queue sends a response behind everything already queued and waits for the
+// write, so a push queued before a response is on the wire before it.
+func (s *Session) queue(f proto.Frame) error {
+	o := outFrame{f: f, done: make(chan error, 1)}
+	select {
+	case s.out <- o:
+	case <-s.ctx.Done():
+		return s.ctx.Err()
+	}
+	select {
+	case err := <-o.done:
+		return err
+	case <-s.ctx.Done():
+		return s.ctx.Err()
+	}
 }
 
 func (s *Server) handleHello(_ context.Context, sess *Session, f proto.Frame) (any, *proto.Error) {
@@ -288,6 +369,6 @@ func (s *Server) handleRedeem(_ context.Context, sess *Session, f proto.Frame) (
 		return nil, &proto.Error{Code: proto.CodeNotAuthorised, Message: "invite not valid"}
 	default:
 		s.log.Error("redeem failed", "err", err)
-		return nil, &proto.Error{Code: proto.CodeInvalid, Message: "internal error"}
+		return nil, internalError()
 	}
 }

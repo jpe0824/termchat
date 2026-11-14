@@ -114,6 +114,13 @@ func (s *Store) ConversationsFor(handle string) ([]model.Conversation, error) {
 	return out, nil
 }
 
+// readSeq is handle's read marker in conv, zero when none is stored.
+func (s *Store) readSeq(handle, conv string) (int64, error) {
+	var seq int64
+	err := s.db.QueryRow(`SELECT COALESCE((SELECT seq FROM reads WHERE handle = ? AND conv = ?), 0)`, handle, conv).Scan(&seq)
+	return seq, err
+}
+
 // IsMember reports whether handle belongs to the conversation.
 func (s *Store) IsMember(conv, handle string) (bool, error) {
 	h, err := cleanName(handle)

@@ -77,6 +77,7 @@ type Server struct {
 	limits  Limits
 	log     *slog.Logger
 	store   *Store
+	hub     *Hub
 	ln      net.Listener
 	cfg     *ssh.ServerConfig
 	hostKey ssh.PublicKey
@@ -132,10 +133,12 @@ func New(opts Options) (*Server, error) {
 		handshake: handshakeTimeout,
 		fails:     map[string][]time.Time{},
 	}
+	s.hub = newHub(s)
 	s.cfg = &ssh.ServerConfig{PublicKeyCallback: publicKeyCallback}
 	s.cfg.AddHostKey(signer)
 	s.Handle(proto.TypeHello, s.handleHello)
 	s.Handle(proto.TypeInviteRedeem, s.handleRedeem)
+	s.registerHandlers()
 	return s, nil
 }
 
@@ -210,7 +213,7 @@ func (s *Server) Sessions(handle string) []*Session {
 	defer s.mu.Unlock()
 	var out []*Session
 	for sess := range s.sessions {
-		if p, known := sess.identity(); known && p.Handle == handle {
+		if p, known := sess.Identity(); known && p.Handle == handle {
 			out = append(out, sess)
 		}
 	}

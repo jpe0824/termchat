@@ -260,6 +260,11 @@ func (s *Store) After(conv string, seq int64) ([]model.Event, error) {
 	return queryEvents(s.db, `SELECT `+eventCols+` FROM events WHERE conv = ? AND seq > ? ORDER BY seq`, conv, seq)
 }
 
+// afterLimit is After capped at limit events.
+func (s *Store) afterLimit(conv string, seq int64, limit int) ([]model.Event, error) {
+	return queryEvents(s.db, `SELECT `+eventCols+` FROM events WHERE conv = ? AND seq > ? ORDER BY seq LIMIT ?`, conv, seq, limit)
+}
+
 // SetRead records how far handle has read a conversation. The marker only
 // moves forward.
 func (s *Store) SetRead(handle, conv string, seq int64) error {
