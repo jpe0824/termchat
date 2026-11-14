@@ -3,14 +3,17 @@ module github.com/jpe0824/termchat
 go 1.27.4
 
 require (
+	filippo.io/age v1.3.2
 	github.com/BurntSushi/toml v1.6.0
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/crypto v0.59.0
+	golang.org/x/term v0.48.0
 	golang.org/x/time v0.16.0
 	modernc.org/sqlite v1.62.0
 )
 
 require (
+	filippo.io/hpke v0.4.0 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect

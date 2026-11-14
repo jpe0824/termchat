@@ -77,30 +77,15 @@ func (s *Server) adminRemovePerson(_ context.Context, c call, req proto.AdminRem
 	if target == c.me.Handle {
 		return nil, fail(proto.CodeInvalid, "admins cannot remove themselves")
 	}
-	if _, err := s.store.Person(target); err != nil {
-		return nil, err
-	}
-	keys, err := s.store.Keys(target)
+	res, err := RemovePersonFully(s.store, c.me.Handle, target, RemovalHooks{
+		Lock: s.hub.lock,
+		Emit: func(ev model.Event) { s.publish(ev, c.sess, target) },
+	})
 	if err != nil {
 		return nil, err
 	}
-	convs, err := s.store.ConversationsFor(target)
-	if err != nil {
-		return nil, err
-	}
-	for _, conv := range convs {
-		if conv.Kind != model.ConvRoom {
-			continue
-		}
-		if _, err := s.removeMember(c, conv.ID, target); err != nil {
-			return nil, err
-		}
-	}
-	if err := s.store.RemovePerson(target); err != nil {
-		return nil, err
-	}
-	for _, k := range keys {
-		s.Kick(k.Fingerprint)
+	for _, fp := range res.Keys {
+		s.Kick(fp)
 	}
 	return struct{}{}, nil
 }

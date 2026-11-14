@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
-	"time"
 
 	"github.com/jpe0824/termchat/internal/model"
 	"github.com/jpe0824/termchat/internal/proto"
@@ -15,7 +14,7 @@ const (
 	maxHistoryLimit = 200
 	maxMsgIDLen     = 64
 	maxMentions     = 50
-	inviteTTL       = 24 * time.Hour
+	inviteTTL       = InviteTTL
 
 	// responseBudget bounds the events in one history or sync response so a
 	// frame of maximum-size bodies stays under proto.MaxFrame.
@@ -47,6 +46,8 @@ func (s *Server) protoError(typ string, err error) *proto.Error {
 		return &proto.Error{Code: proto.CodeForbidden, Message: "not allowed"}
 	case errors.Is(err, ErrExists):
 		return &proto.Error{Code: proto.CodeInvalid, Message: "already exists"}
+	case errors.Is(err, ErrLastAdmin):
+		return &proto.Error{Code: proto.CodeInvalid, Message: "that is the last admin"}
 	case errors.Is(err, ErrInvalidName):
 		return &proto.Error{Code: proto.CodeInvalid, Message: "invalid name"}
 	case errors.Is(err, ErrInviteInvalid):
