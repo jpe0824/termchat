@@ -45,7 +45,11 @@ func TestConfigRoundTrip(t *testing.T) {
 	if !reflect.DeepEqual(c, got) {
 		t.Fatalf("round trip mismatch:\n saved  %+v\n loaded %+v", c, got)
 	}
-	st, err := os.Stat(filepath.Join(paths.Config(), "config.toml"))
+	dir, err := paths.Config()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := os.Stat(filepath.Join(dir, "config.toml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,5 +70,19 @@ func TestConfigPartialFileKeepsDefaults(t *testing.T) {
 	}
 	if c.Splash || !c.MarkRead || c.CLI.Send != "allow" {
 		t.Fatalf("unexpected: %+v", c)
+	}
+}
+
+func TestLoadFailsWhenConfigDirUncreatable(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TERMCHAT_CONFIG_DIR", filepath.Join(blocker, "sub"))
+	if _, err := paths.Config(); err == nil {
+		t.Fatal("paths.Config() returned nil error")
+	}
+	if c, err := Load(); err == nil {
+		t.Fatalf("Load() = %+v, want error", c)
 	}
 }

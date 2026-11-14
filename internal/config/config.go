@@ -44,13 +44,23 @@ func defaults() *Config {
 	return c
 }
 
-func file() string { return filepath.Join(paths.Config(), "config.toml") }
+func file() (string, error) {
+	dir, err := paths.Config()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "config.toml"), nil
+}
 
 // Load reads config.toml, filling unset keys with defaults. A missing file
 // yields the defaults.
 func Load() (*Config, error) {
 	c := defaults()
-	_, err := toml.DecodeFile(file(), c)
+	f, err := file()
+	if err != nil {
+		return nil, err
+	}
+	_, err = toml.DecodeFile(f, c)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, err
 	}
@@ -60,7 +70,10 @@ func Load() (*Config, error) {
 // Save writes config.toml with mode 0600 via a temp file and rename, so a
 // crash never leaves a truncated file.
 func (c *Config) Save() error {
-	dest := file()
+	dest, err := file()
+	if err != nil {
+		return err
+	}
 	tmp, err := os.CreateTemp(filepath.Dir(dest), "config-*.toml")
 	if err != nil {
 		return err

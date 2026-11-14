@@ -9,7 +9,7 @@ import (
 const appDir = "termchat"
 
 // Config returns the directory holding config.toml.
-func Config() string {
+func Config() (string, error) {
 	return ensure(resolve("TERMCHAT_CONFIG_DIR", func() string {
 		base, err := os.UserConfigDir()
 		if err != nil {
@@ -20,13 +20,13 @@ func Config() string {
 }
 
 // Data returns the directory holding the local message store and keys.
-func Data() string {
+func Data() (string, error) {
 	return ensure(dataDir())
 }
 
 // Runtime returns the directory holding sockets and pid files. It falls back
 // to a subdirectory of Data when XDG_RUNTIME_DIR is unset.
-func Runtime() string {
+func Runtime() (string, error) {
 	return ensure(resolve("TERMCHAT_RUNTIME_DIR", func() string {
 		if x := os.Getenv("XDG_RUNTIME_DIR"); x != "" {
 			return filepath.Join(x, appDir)
@@ -58,9 +58,11 @@ func home() string {
 	return "."
 }
 
-// ensure creates dir with mode 0700. Callers use the returned path directly,
-// so a creation failure surfaces on their first write to it.
-func ensure(dir string) string {
-	_ = os.MkdirAll(dir, 0o700)
-	return dir
+// ensure creates dir with mode 0700 and returns it. A directory that cannot
+// be created is an error, never a path to a directory that does not exist.
+func ensure(dir string) (string, error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	return dir, nil
 }
