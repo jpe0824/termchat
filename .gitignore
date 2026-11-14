@@ -1,0 +1,24 @@
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Build output
+/dist/
+/build/
+/target/
+/bin/
+
+# AI working files (local session state, never commit)
+docs/plans/
+docs/specs/
+docs/superpowers/
+docs/memory/active/
+docs/memory/archive/
+.claude/settings.local.json
