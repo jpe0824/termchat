@@ -20,12 +20,14 @@ type timing struct {
 	// any key or paste last arrived.
 	lastTyped, lastKey time.Time
 	// exitKind is a key waiting out the paste gap before it acts; exitKey
-	// and exitAsk hold what it will do.
+	// and exitAsk hold what it will do, and exitOn what exitKey was pressed
+	// on, which it must still be on when it acts.
 	exitKind exitKind
 	exitGen  int
 	exitConv string
 	exitKey  tea.KeyPressMsg
-	exitAsk  func() tea.Cmd
+	exitOn   string
+	exitAsk  *notice
 	// quitAsked is when the quit warning was shown, for the key quitKey.
 	quitAsked time.Time
 	quitKey   string
@@ -35,9 +37,13 @@ type timing struct {
 	// input focused with nothing to type into.
 	swallow bool
 	// banner is a warning drawn over the window's last row, so it shows in
-	// every layout and view.
-	banner    string
-	bannerGen int
+	// every layout and view; bannerShort is what it says instead when the
+	// window has too few rows for all of it.
+	banner, bannerShort string
+	bannerGen           int
+	// hint says the banner is the note left by a key that types nothing
+	// here; it stays up through the rest of that key's burst.
+	hint bool
 }
 
 // guarded are the command keys that change something. Outside the input
@@ -75,8 +81,49 @@ func (m *Model) guardKey(k tea.KeyPressMsg, g geom, recent bool) tea.Cmd {
 	if recent {
 		return nil
 	}
-	m.tm.exitKey = k
+	m.tm.exitKey, m.tm.exitOn = k, m.target(g)
 	return m.deferExit(exitGuarded)
+}
+
+// target names what a command key acts on: the chat list's row, or the
+// thread's selected message.
+func (m *Model) target(g geom) string {
+	switch {
+	case m.listActive(g):
+		return "row " + m.cursorID()
+	case m.thread != nil:
+		return "message " + m.thread.sel
+	}
+	return ""
+}
+
+// hintToType is what a key that would type, pressed outside the input,
+// does instead of typing: it names the key that leads to the input from
+// where the keyboard is. One timer serves a whole burst of them.
+func (m *Model) hintToType(list bool) tea.Cmd {
+	text := "press i to type"
+	if list {
+		text = "press enter to open a chat"
+	}
+	if m.b == nil || m.procDown || m.tm.hint && m.tm.banner == text {
+		return nil
+	}
+	cmd := m.showBanner(text, "", noticeFor)
+	m.tm.hint = true
+	return cmd
+}
+
+// scrollKey scrolls the thread for a movement key. Text can carry j and k,
+// so a preview they scroll is opened only once the paste gap passes with
+// no key after.
+func (m *Model) scrollKey(d int) tea.Cmd {
+	was := m.preview
+	cmd := m.scroll(d)
+	if !was || m.preview || m.opts.PasteGap < 0 {
+		return cmd
+	}
+	m.preview, m.readOpen = true, false
+	return tea.Batch(cmd, m.deferExit(exitPromote))
 }
 
 // answer takes a key while a y/n question is shown. Any key ends the
@@ -88,12 +135,12 @@ func (m *Model) answer(n *notice, s string, recent bool) tea.Cmd {
 	}
 	gap := m.opts.PasteGap
 	if gap < 0 {
-		return n.ask()
+		return m.confirm(n)
 	}
 	if recent || m.opts.Now().Sub(m.tm.askedAt) < gap {
 		return nil
 	}
-	m.tm.exitAsk = n.ask
+	m.tm.exitAsk = n
 	return m.deferExit(exitConfirm)
 }
 
@@ -118,23 +165,28 @@ func (m *Model) onPaste(s string) tea.Cmd {
 }
 
 // setBanner shows text over the last row until a key or noticeFor passes.
-func (m *Model) setBanner(text string) tea.Cmd {
+func (m *Model) setBanner(text string) tea.Cmd { return m.showBanner(text, "", noticeFor) }
+
+// showBanner shows text over the last rows until a key or d passes, or
+// short when the window has too few rows for text.
+func (m *Model) showBanner(text, short string, d time.Duration) tea.Cmd {
 	m.tm.bannerGen++
-	m.tm.banner = sanitize.Line(text)
-	return m.opts.Tick(noticeFor, bannerExpiredMsg{gen: m.tm.bannerGen})
+	m.tm.banner, m.tm.bannerShort, m.tm.hint = sanitize.Line(text), short, false
+	return m.opts.Tick(d, bannerExpiredMsg{gen: m.tm.bannerGen})
 }
 
-func (m *Model) clearBanner() { m.tm.banner = "" }
+func (m *Model) clearBanner() { m.tm.banner, m.tm.hint = "", false }
 
 func (m *Model) onBannerExpired(msg bannerExpiredMsg) {
 	if msg.gen == m.tm.bannerGen {
-		m.tm.banner = ""
+		m.clearBanner()
 	}
 }
 
 // withBanner draws the banner over the frame's last rows: in the footer's
-// place when it fits there, else wrapped over as many rows as it needs, so
-// it shows in every layout and view, however narrow or short.
+// place when it fits there, else wrapped over as many rows as it needs, or
+// its short form when the frame has fewer rows than that, so it shows in
+// every layout and view, however narrow or short.
 func (m *Model) withBanner(content string) string {
 	if m.tm.banner == "" || m.w <= 0 {
 		return content
@@ -147,6 +199,9 @@ func (m *Model) withBanner(content string) string {
 		return strings.Join(rows, "\n")
 	}
 	lines := wrap(b, m.w)
+	if len(lines) > len(rows) && m.tm.bannerShort != "" {
+		lines = wrap(m.tm.bannerShort, m.w)
+	}
 	n := min(len(lines), len(rows))
 	for i := range n {
 		rows[len(rows)-n+i] = fit(m.st.bad.Render(lines[i]), m.w)

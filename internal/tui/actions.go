@@ -72,14 +72,14 @@ func (m *Model) saveEdit(conv string, c *compose) tea.Cmd {
 
 func (m *Model) askDelete(it item) {
 	conv, id := m.openID, it.m.MsgID
-	m.ask("delete this message? y/n", func() tea.Cmd {
+	m.ask("delete this message? y/n", opDelete, id, func() tea.Cmd {
 		return m.act(opDelete, conv, id, func(b Backend) error { return b.Delete(conv, id) })
 	})
 }
 
 func (m *Model) askDiscard(it item) {
 	conv, id := m.openID, it.m.MsgID
-	m.ask("discard this message? y/n", func() tea.Cmd {
+	m.ask("discard this message? y/n", opDiscard, id, func() tea.Cmd {
 		return m.act(opDiscard, conv, id, func(b Backend) error { return b.Discard(id) })
 	})
 }

@@ -138,7 +138,8 @@ func (m *Model) clickThread(g geom, x, y int) tea.Cmd {
 	return nil
 }
 
-// commandKey handles a key when the input does not have it.
+// commandKey handles a key when the input does not have it. Only commands
+// act here.
 func (m *Model) commandKey(k tea.KeyPressMsg, g geom) tea.Cmd {
 	s := k.String()
 	list := m.listActive(g)
@@ -166,7 +167,7 @@ func (m *Model) commandKey(k tea.KeyPressMsg, g geom) tea.Cmd {
 		case hasSel:
 			m.moveSel(d)
 		default:
-			return m.scroll(d)
+			return m.scrollKey(d)
 		}
 	case "enter", "i":
 		if list && s == "enter" {
@@ -199,10 +200,9 @@ func (m *Model) commandKey(k tea.KeyPressMsg, g geom) tea.Cmd {
 			m.askDiscard(sel)
 		}
 	default:
-		if t := keyText(k); t != "" && !list && m.inputUsable(g) {
-			m.promote()
-			m.toInput()
-			m.composeFor(m.openID).in.insert(cleanInput(t))
+		// Only the input takes text: here a key that would type does nothing.
+		if keyText(k) != "" {
+			return m.hintToType(list)
 		}
 	}
 	return nil

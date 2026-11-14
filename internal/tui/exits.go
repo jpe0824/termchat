@@ -21,6 +21,7 @@ const (
 	exitQuit
 	exitGuarded
 	exitConfirm
+	exitPromote
 )
 
 // deferExit acts on k once the paste gap passes with no other key; at once
@@ -68,9 +69,14 @@ func (m *Model) doExit(k exitKind) tea.Cmd {
 	case exitQuit:
 		return m.confirmQuit("ctrl+c")
 	case exitGuarded:
-		return m.commandKey(m.tm.exitKey, g)
+		// The key acts on what it was pressed on, or on nothing.
+		if m.target(g) == m.tm.exitOn {
+			return m.commandKey(m.tm.exitKey, g)
+		}
 	case exitConfirm:
-		return m.tm.exitAsk()
+		return m.confirm(m.tm.exitAsk)
+	case exitPromote:
+		m.promote()
 	}
 	return nil
 }
@@ -94,7 +100,7 @@ func (m *Model) confirmQuit(key string) tea.Cmd {
 		return m.quit()
 	}
 	m.tm.quitAsked, m.tm.quitKey = now, key
-	return m.setBanner(m.quitWarning(key))
+	return m.showBanner(m.quitWarning(key), key+" again to quit", quitAgain)
 }
 
 func (m *Model) hasDrafts() bool {

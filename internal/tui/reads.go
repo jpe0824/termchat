@@ -105,6 +105,9 @@ func (m *Model) onThread(msg threadMsg) tea.Cmd {
 	if _, ok := m.selected(); !ok {
 		m.thread.sel = ""
 	}
+	if n := m.note; n != nil && n.ask != nil && n.conv == msg.conv && !m.holds(n) {
+		cmds = append(cmds, m.dropQuestion(n))
+	}
 	if m.thread.hasFailed() {
 		cmds = append(cmds, m.requestOutbox())
 	}

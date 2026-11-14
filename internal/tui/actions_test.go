@@ -58,8 +58,14 @@ func TestUpInEmptyInputSelectsOwnMessagesOnly(t *testing.T) {
 	}
 	h.key("up")
 	h.typeText("w")
+	if h.m.focus != focusThread || h.draft() != "" || selectedText(h) != "pushing a fix now" {
+		t.Errorf("a letter on a selection: focus %v draft %q selected %q", h.m.focus, h.draft(), selectedText(h))
+	}
+	mustContain(t, h.view(), "press i to type")
+	h.key("i")
+	h.typeText("w")
 	if h.m.focus != focusInput || h.draft() != "w" {
-		t.Errorf("typing on a selection: focus %v draft %q", h.m.focus, h.draft())
+		t.Errorf("i then typing on a selection: focus %v draft %q", h.m.focus, h.draft())
 	}
 	h.key("up")
 	if h.m.focus != focusInput {

@@ -82,7 +82,11 @@ func (m *Model) footer(g geom) string {
 	}
 	for n := len(keys); n > 0; n-- {
 		left := "└─ " + strings.Join(keys[:n], "  ") + " "
-		if lipgloss.Width(left)+1 <= m.w {
+		switch lw := lipgloss.Width(left); {
+		case lw+1 == m.w:
+			// spread keeps a cell of fill, which an exact fit has no room for.
+			return left + "┘"
+		case lw+1 < m.w:
 			return spread(left, "┘", m.w, "─")
 		}
 	}
@@ -122,9 +126,9 @@ func (m *Model) footerKeys(g geom) []string {
 		case m.delivered(sel.m):
 			keys = []string{"e edit", "d delete"}
 		}
-		return append(append(keys, "↑↓ select", "esc back"), tail...)
+		return append(append(keys, "i type", "↑↓ select", "esc back"), tail...)
 	case g.mode == Tiny:
-		return []string{"esc chats", "? help"}
+		return []string{"esc chats", "i type", "? help"}
 	case wide:
 		return []string{"i type", "↑↓ scroll", "tab pane", "pgup/pgdn scroll", "? help", "q quit"}
 	}

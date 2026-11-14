@@ -56,11 +56,17 @@ func TestLaunchPreviewNarrow(t *testing.T) {
 		t.Errorf("narrow launch marked read")
 	}
 	h.typeText("h")
+	if h.m.focus != focusThread || h.draft() != "" || f.writes("markread ") != nil {
+		t.Errorf("a letter on the preview: focus %v draft %q marks %q", h.m.focus, h.draft(), f.writes("markread "))
+	}
+	mustContain(t, h.view(), "press i to type")
+	h.key("i")
+	h.typeText("h")
 	if h.m.focus != focusInput || h.draft() != "h" {
-		t.Errorf("typing on the preview: focus %v draft %q", h.m.focus, h.draft())
+		t.Errorf("i then typing on the preview: focus %v draft %q", h.m.focus, h.draft())
 	}
 	if got := f.writes("markread "); !slices.Equal(got, []string{"markread r-platform"}) {
-		t.Errorf("typing opened it but marked %q", got)
+		t.Errorf("i opened it but marked %q", got)
 	}
 }
 

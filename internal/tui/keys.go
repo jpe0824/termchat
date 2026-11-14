@@ -13,7 +13,7 @@ var helpKeys = [][2]string{
 	{"tab", "input: types a tab. chat list and thread: switch between them"},
 	{"↑ ↓  k j", "chat list: move. thread: step through your messages, or scroll"},
 	{"↑", "empty input: select your newest message"},
-	{"i", "thread: go to the input"},
+	{"i", "thread: go to the input — letters type only in the input"},
 	{"e  d", "thread: edit or delete your selected message"},
 	{"r  x", "thread: retry or discard a failed message. r: start a stopped background process"},
 	{"pgup pgdn", "scroll the thread"},
@@ -38,7 +38,9 @@ func (m *Model) onKey(k tea.KeyPressMsg) tea.Cmd {
 	s := k.String()
 	recent := m.stamp()
 	pending := m.cancelExit()
-	m.clearBanner()
+	if !recent || !m.tm.hint {
+		m.clearBanner()
+	}
 	if s == "ctrl+c" {
 		if pending {
 			return nil
@@ -91,6 +93,11 @@ func (m *Model) onClick(p tea.Mouse) tea.Cmd {
 	}
 	if p.Button != tea.MouseLeft {
 		return nil
+	}
+	// A command key waiting out the paste gap was pressed for what was
+	// selected then, which a click is about to change.
+	if m.tm.exitKind == exitGuarded {
+		m.cancelExit()
 	}
 	// A click moves on from a question, so a later y cannot act on a
 	// message the user has left.
@@ -156,12 +163,14 @@ func (m *Model) onWheel(p tea.Mouse) tea.Cmd {
 const downNote = "background process not running — r to start, esc to leave the input"
 
 // disabledKey handles a key for the input while the background process is
-// down: nothing typed may run as a command. r starts the process, a lone
-// esc leaves the input, and every other key leaves a note saying so.
+// down: nothing typed may run as a command. A lone r starts the process, a
+// lone esc leaves the input, and every other key leaves a note saying so.
 func (m *Model) disabledKey(k tea.KeyPressMsg, g geom, burst bool) tea.Cmd {
 	switch s := k.String(); s {
 	case "r":
-		return m.startProcess()
+		if !burst || m.opts.PasteGap < 0 {
+			return m.guardKey(k, g, false)
+		}
 	case "esc":
 		if burst {
 			return nil

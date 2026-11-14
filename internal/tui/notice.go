@@ -21,6 +21,8 @@ type notice struct {
 	text string
 	ask  func() tea.Cmd
 	info bool
+	// op and msgID are the action a question asks about, and its message.
+	op, msgID string
 }
 
 // setNotice shows an error; a timed one also clears after noticeFor.
@@ -40,11 +42,42 @@ func (m *Model) setInfo(conv, text string) tea.Cmd {
 	return cmd
 }
 
-// ask puts a yes/no question in the notice line; y runs yes.
-func (m *Model) ask(question string, yes func() tea.Cmd) {
+// ask puts a yes/no question about doing op to message msgID in the notice
+// line; y runs yes.
+func (m *Model) ask(question, op, msgID string, yes func() tea.Cmd) {
 	m.noteGen++
-	m.note = &notice{conv: m.openID, text: question, ask: yes}
+	m.note = &notice{conv: m.openID, text: question, ask: yes, op: op, msgID: msgID}
 	m.tm.askedAt = m.opts.Now()
+}
+
+// holds reports whether the message question n is about is still held and
+// can still be acted on as asked: its ID alone would act on whatever it has
+// become.
+func (m *Model) holds(n *notice) bool {
+	if m.thread == nil || m.thread.conv != n.conv {
+		return false
+	}
+	for _, it := range m.thread.items() {
+		if it.m.MsgID != n.msgID {
+			continue
+		}
+		if n.op == opDiscard && it.m.Status == ipc.MsgFailed || n.op == opDelete && m.delivered(it.m) {
+			return true
+		}
+	}
+	return false
+}
+
+// confirm runs the action of question n, answered yes, if it still holds.
+func (m *Model) confirm(n *notice) tea.Cmd {
+	if !m.holds(n) {
+		return m.dropQuestion(n)
+	}
+	return n.ask()
+}
+
+func (m *Model) dropQuestion(n *notice) tea.Cmd {
+	return m.setInfo(n.conv, "message changed — "+n.op+" cancelled")
 }
 
 func (m *Model) onNoticeExpired(msg noticeExpiredMsg) {
