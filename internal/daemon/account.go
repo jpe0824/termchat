@@ -96,7 +96,7 @@ func newAccount(d *daemon, name string, conn connector.Connector, st *store.Stor
 		bfWake: make(chan struct{}, 1), changed: make(chan struct{}),
 		workers: map[string]bool{}, dirty: map[string]bool{}, floor: map[string]int64{},
 	}
-	a.nt = newNotifications(d.cfg, d.notifier, d.srv, st, a.log)
+	a.nt = newNotifications(d.cfg, d.notifier, d.srv, st, a.log, d.clock)
 	a.rooms = &openRooms{clock: d.clock, fetch: func(ctx context.Context) ([]model.Conversation, error) {
 		_, open, err := conn.Conversations(ctx)
 		return open, err
@@ -112,6 +112,7 @@ func (a *account) start() {
 	updates := a.conn.Updates()
 	a.goRun(func() { a.drain(a.ctx, updates) })
 	a.goRun(a.supervise)
+	a.goRun(func() { a.nt.run(a.ctx) })
 	a.goRun(a.backfillLoop)
 	// Queued items are checked for expiry at once, connected or not.
 	a.kickAll()

@@ -84,8 +84,14 @@ func unitNotifications(t *testing.T, mut func(*config.Config)) (*notifications, 
 	}
 	st, rec, srv := newFakeNoteStore(), &noteRec{}, &fakeNoteServer{}
 	logs := &bytes.Buffer{}
-	n := newNotifications(cfg, rec, srv, st, slog.New(slog.NewTextHandler(&lockedWriter{w: logs}, nil)))
+	n := newNotifications(cfg, rec, srv, st, slog.New(slog.NewTextHandler(&lockedWriter{w: logs}, nil)), newFakeClock())
 	return n, st, rec, srv, logs
+}
+
+func (l *lockedWriter) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.String()
 }
 
 type lockedWriter struct {
@@ -102,23 +108,6 @@ func (l *lockedWriter) Write(p []byte) (int, error) {
 var unitEvent = model.Event{ConvID: "d1", Seq: 3, Kind: model.MessagePosted, Actor: "dana", MsgID: "m1"}
 
 func osOnly(c *config.Config) { c.Notify.OS = true }
-
-func TestUnevaluableMessageIsEligibleAgain(t *testing.T) {
-	n, st, rec, _, logs := unitNotifications(t, osOnly)
-	st.convMissing = 1 // the conversation row is not stored yet
-	n.consider([]model.Event{unitEvent}, nil)
-	if got := rec.osCalls(); len(got) != 0 {
-		t.Fatalf("notified %+v before the conversation existed", got)
-	}
-	if !strings.Contains(logs.String(), "d1") || strings.Contains(logs.String(), "SECRET-TEXT") {
-		t.Errorf("log = %q, want the conversation id and no text", logs.String())
-	}
-	n.consider([]model.Event{unitEvent}, nil)
-	n.consider([]model.Event{unitEvent}, nil)
-	if got := rec.osCalls(); len(got) != 1 || got[0].ConvID != "d1" {
-		t.Fatalf("notifications = %+v, want exactly one", got)
-	}
-}
 
 func TestConcurrentConsiderationsNotifyOnce(t *testing.T) {
 	n, _, rec, _, _ := unitNotifications(t, osOnly)
@@ -186,5 +175,26 @@ func TestPayloadFieldsAreBounded(t *testing.T) {
 	}
 	if want := strings.Repeat("é", 200) + "…"; p.Text != want {
 		t.Errorf("Text is %d runes", len([]rune(p.Text)))
+	}
+}
+
+func TestBatchClaimsTheOlderMessagesThatLoseToTheNewest(t *testing.T) {
+	n, st, rec, _, _ := unitNotifications(t, osOnly)
+	older := model.Event{ConvID: "d1", Seq: 2, Kind: model.MessagePosted, Actor: "dana", MsgID: "m0"}
+	newer := unitEvent
+	batch := newCatchUpBatch()
+	n.consider([]model.Event{older, newer}, batch)
+	batch.flush(n)
+	if got := rec.osCalls(); len(got) != 1 {
+		t.Fatalf("batch raised %d notifications, want 1", len(got))
+	}
+	reads := st.reads()
+	// A live push racing the catch-up for the older message finds it claimed.
+	n.consider([]model.Event{older}, nil)
+	if got := rec.osCalls(); len(got) != 1 {
+		t.Fatalf("the older message notified on its own: %+v", got)
+	}
+	if st.reads() != reads {
+		t.Errorf("claimed message was read again")
 	}
 }

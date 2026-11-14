@@ -158,6 +158,10 @@ func (f *Fake) Push(ev model.Event) {
 	f.updates <- connector.Update{Event: &ev}
 }
 
+// Inject delivers u on Updates as the connector would, for updates Push does
+// not cover: a conversation upsert or a read position moved on another device.
+func (f *Fake) Inject(u connector.Update) { f.updates <- u }
+
 // appendLocked stores ev, filling Seq and At, and keeps LastSeq current.
 // Events stay sorted by Seq, and a filled Seq always exceeds every Seq seen
 // for the conversation.
