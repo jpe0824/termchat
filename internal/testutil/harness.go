@@ -64,11 +64,18 @@ func StartServerWith(t *testing.T, adjust func(*server.Options)) *Harness {
 	return h
 }
 
-// Stop cancels the server and waits for Serve to return, closing any clients
-// the harness opened. It returns Serve's result and is safe to call twice.
-func (h *Harness) Stop() error {
+// StopServer cancels the server and waits for Serve to return, leaving the
+// harness's clients open so a test can observe the server closing them.
+func (h *Harness) StopServer() error {
 	h.cancel()
 	<-h.done
+	return h.err
+}
+
+// Stop is StopServer followed by closing any clients the harness opened. It is
+// safe to call twice.
+func (h *Harness) Stop() error {
+	h.StopServer()
 	h.mu.Lock()
 	for _, c := range h.clients {
 		c.Close()

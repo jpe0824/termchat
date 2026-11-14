@@ -245,8 +245,8 @@ func TestAuthFailureCap(t *testing.T) {
 			t.Fatalf("attempt %d: %+v", i, f)
 		}
 	}
-	if _, err := testutil.ReadErr(c, 2*time.Second); err == nil {
-		t.Fatal("connection still open after exceeding the cap")
+	if _, err := testutil.ReadErr(c, 2*time.Second); !errors.Is(err, io.EOF) {
+		t.Fatalf("read after exceeding the cap: %v, want io.EOF", err)
 	}
 	if _, err := h.TryDial(testutil.NewKey(t)); err == nil {
 		t.Fatal("new connection accepted from a blocked address")
@@ -295,8 +295,8 @@ func TestRemovedKeyCaughtOnNextFrame(t *testing.T) {
 		t.Fatal(err)
 	}
 	testutil.Send(t, c, proto.TypeHello, proto.HelloReq{Version: proto.Version})
-	if f, err := testutil.ReadErr(c, time.Second); err == nil {
-		t.Fatalf("got a response on a removed key: %+v", f)
+	if f, err := testutil.ReadErr(c, time.Second); !errors.Is(err, io.EOF) {
+		t.Fatalf("read on removed key: %+v, %v, want io.EOF", f, err)
 	}
 }
 
@@ -306,8 +306,8 @@ func TestKickClosesSessions(t *testing.T) {
 	c := h.Dial(t, key)
 	testutil.Hello(t, c)
 	h.Server.Kick(fingerprint(key))
-	if _, err := testutil.ReadErr(c, time.Second); err == nil {
-		t.Fatal("session survived Kick")
+	if _, err := testutil.ReadErr(c, time.Second); !errors.Is(err, io.EOF) {
+		t.Fatalf("read after Kick: %v, want io.EOF", err)
 	}
 }
 
@@ -358,12 +358,13 @@ func TestServeReturnsOnCancelAndClosesSessions(t *testing.T) {
 	h := testutil.StartServer(t)
 	c := h.Dial(t, h.NewPerson(t, "alice"))
 	testutil.Hello(t, c)
-	if err := h.Stop(); err != nil {
+	if err := h.StopServer(); err != nil {
 		t.Fatalf("Serve = %v", err)
 	}
-	if _, err := testutil.ReadErr(c, time.Second); err == nil {
-		t.Fatal("session open after Serve returned")
+	if _, err := testutil.ReadErr(c, time.Second); !errors.Is(err, io.EOF) {
+		t.Fatalf("read after Serve returned: %v, want io.EOF", err)
 	}
+	h.Stop()
 	if len(h.Server.Sessions("alice")) != 0 {
 		t.Fatal("sessions remain after Serve returned")
 	}
