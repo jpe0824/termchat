@@ -245,6 +245,10 @@ func (d *daemon) Search(_ context.Context, q string, limit int) ([]store.Message
 	})
 }
 
+func (d *daemon) People(context.Context) ([]model.Person, error) {
+	return onAccount(d, func(a *account) ([]model.Person, error) { return a.st.People() })
+}
+
 func (d *daemon) Resolve(ctx context.Context, ref string) (model.Conversation, error) {
 	return onAccount(d, func(a *account) (model.Conversation, error) {
 		c, err := a.resolve(ref)

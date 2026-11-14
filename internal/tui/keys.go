@@ -5,32 +5,6 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// helpKeys are the keys that work, for the ? overlay.
-var helpKeys = [][2]string{
-	{"enter", "input: send, or save an edit. chat list: open. thread: go to the input"},
-	{"alt+enter", "input: new line (also ctrl+j)"},
-	{"esc", "input: cancel an edit, else leave the input. thread: go to the input or the list"},
-	{"tab", "input: types a tab. chat list and thread: switch between them"},
-	{"↑ ↓  k j", "chat list: move. thread: step through your messages, or scroll"},
-	{"↑", "empty input: select your newest message"},
-	{"i", "thread: go to the input — letters type only in the input"},
-	{"e  d", "thread: edit or delete your selected message"},
-	{"r  x", "thread: retry or discard a failed message. r: start a stopped background process"},
-	{"pgup pgdn", "scroll the thread"},
-	{"home end", "oldest / newest message"},
-	{"?", "show or hide this help"},
-	{"q  ctrl+c", "quit (q outside the input); asked twice when drafts are unsent"},
-	{"mouse", "click a chat, your message or the input; the wheel scrolls"},
-}
-
-func (m *Model) helpLines() []string {
-	out := []string{m.st.heading.Render("Keys"), ""}
-	for _, k := range helpKeys {
-		out = append(out, fit(k[0], 12)+k[1])
-	}
-	return out
-}
-
 // onKey routes a key: to the opening screen, a question in the notice
 // line, the help overlay, the input when it has focus, and otherwise to
 // the single-key commands.
@@ -62,10 +36,11 @@ func (m *Model) onKey(k tea.KeyPressMsg) tea.Cmd {
 		return cmd
 	}
 	if m.help {
-		if s == "?" || s == "esc" {
-			m.help = false
-		}
+		m.helpKey(s)
 		return nil
+	}
+	if m.ov != nil {
+		return m.overlayKey(k, recent)
 	}
 	g := m.geom()
 	if m.inputActive(g) {
@@ -96,7 +71,7 @@ func (m *Model) onClick(p tea.Mouse) tea.Cmd {
 	}
 	// A command key waiting out the paste gap was pressed for what was
 	// selected then, which a click is about to change.
-	if m.tm.exitKind == exitGuarded {
+	if k := m.tm.exitKind; k == exitGuarded || k == exitOverlay || k == exitOvConfirm {
 		m.cancelExit()
 	}
 	// A click moves on from a question, so a later y cannot act on a
@@ -107,6 +82,9 @@ func (m *Model) onClick(p tea.Mouse) tea.Cmd {
 	if m.help {
 		m.help = false
 		return nil
+	}
+	if m.ov != nil {
+		return m.ovClick(p.X, p.Y)
 	}
 	g := m.geom()
 	y := p.Y - g.bodyY
@@ -133,7 +111,7 @@ func (m *Model) onClick(p tea.Mouse) tea.Cmd {
 }
 
 func (m *Model) onWheel(p tea.Mouse) tea.Cmd {
-	if m.splashShown() || m.help {
+	if m.splashShown() {
 		return nil
 	}
 	d := 3
@@ -145,6 +123,15 @@ func (m *Model) onWheel(p tea.Mouse) tea.Cmd {
 		return nil
 	}
 	g := m.geom()
+	switch {
+	case m.help:
+		m.helpTop += d
+		m.clampHelp(g)
+		return nil
+	case m.ov != nil:
+		m.ovWheel(d < 0)
+		return nil
+	}
 	switch {
 	case g.side.has(p.X):
 		m.move(d / 3)

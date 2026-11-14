@@ -149,6 +149,14 @@ func (m *Model) inputKey(k tea.KeyPressMsg, g geom, burst bool) tea.Cmd {
 	case "pgup", "pgdown":
 		typed = false
 		return m.pageKey(s, g)
+	case "ctrl+k", "ctrl+n", "ctrl+o":
+		// Pasted text can carry these control bytes: they open an overlay
+		// only as a lone press.
+		typed = false
+		if burst {
+			return nil
+		}
+		return m.guardKey(k, g, false)
 	default:
 		if t := keyText(k); t != "" {
 			in.insert(cleanInput(t))
@@ -331,6 +339,9 @@ func (m *Model) inputArea(g geom, l tlayout) []string {
 func (m *Model) inputCursor() *tea.Cursor {
 	if m.splashShown() || m.w < minW || m.h < minH {
 		return nil
+	}
+	if m.ov != nil {
+		return m.ovCursor()
 	}
 	g := m.geom()
 	if !m.inputActive(g) {

@@ -22,6 +22,8 @@ const (
 	exitGuarded
 	exitConfirm
 	exitPromote
+	exitOverlay
+	exitOvConfirm
 )
 
 // deferExit acts on k once the paste gap passes with no other key; at once
@@ -70,13 +72,21 @@ func (m *Model) doExit(k exitKind) tea.Cmd {
 		return m.confirmQuit("ctrl+c")
 	case exitGuarded:
 		// The key acts on what it was pressed on, or on nothing.
-		if m.target(g) == m.tm.exitOn {
+		if m.ov == nil && m.target(g) == m.tm.exitOn {
 			return m.commandKey(m.tm.exitKey, g)
 		}
 	case exitConfirm:
 		return m.confirm(m.tm.exitAsk)
 	case exitPromote:
 		m.promote()
+	case exitOverlay:
+		if m.ov != nil && m.target(g) == m.tm.exitOn {
+			return m.ovDo(m.tm.exitAct)
+		}
+	case exitOvConfirm:
+		if m.ov != nil && m.target(g) == m.tm.exitOn {
+			return m.ovConfirm(m.tm.ovAsk)
+		}
 	}
 	return nil
 }

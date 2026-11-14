@@ -1,0 +1,24 @@
+┌ termchat ──────────────────────────────────────────────────── team.example ● connected ┐
+│ Direct             │ # platform                                              4 members │
+│ ● dana           2 │ ───────────────────────────────────────────────────────────────── │
+│   sam              │ 10:02  dana    did the meter import finish?                       │
+│   ci-bot           │ 10:03  you     yes, 10 min ago                                    │
+│ Rooms              │ 10:41  dana    great. one row looks off                           │
+│ ● # platform     5 │ 10:42  ci-bot  [agent] build 812 passed                           │
+│   # deploys        │ 10:44  sam     @jason can you look? (edited)                      │
+│   # random         │ 10:45  you     on it                                              │
+│            ┌─ New room ───────────────────────────────────────────────────┐            │
+│            │ > Bad x                                                      │            │
+│            │ invalid name: use lowercase letters, digits, - and _,        │            │
+│            │ starting with a letter or digit, at most 32 characters       │            │
+│            │ › private room: by invitation — tab to change                │            │
+│            └─ ⏎ create  tab open/private  esc back  ↑↓ move ──────────────┘            │
+│                    │                                                                   │
+│                    │                                                                   │
+│                    │                                                                   │
+│                    │                                                                   │
+│                    │                                                                   │
+│                    │                                                                   │
+│                    │ ───────────────────────────────────────────────────────────────── │
+│                    │ >                                                                 │
+└────────────────────────────────────────────────────────────────────────────────────────┘

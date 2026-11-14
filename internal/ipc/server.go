@@ -51,6 +51,8 @@ type Backend interface {
 	CreateAgent(ctx context.Context, handle, name string) (string, error)
 	AdminInvite(ctx context.Context, handle, name string) (string, error)
 	Join(ctx context.Context, server, code string) error
+	// People returns every known identity, ordered by handle.
+	People(ctx context.Context) ([]model.Person, error)
 	// Stop asks the process to shut down. It must not block: the server
 	// is closed by whoever owns it, after the reply has been queued.
 	Stop()
@@ -468,6 +470,8 @@ func dispatch(ctx context.Context, b Backend, op string, a args) (any, error) {
 		return b.AdminInvite(ctx, a.Handle, a.Name)
 	case opJoin:
 		return nil, b.Join(ctx, a.Server, a.Code)
+	case opPeople:
+		return b.People(ctx)
 	}
 	return nil, fmt.Errorf("%w: unknown operation %q", ErrInvalid, op)
 }

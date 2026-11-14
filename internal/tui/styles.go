@@ -9,7 +9,7 @@ import (
 // (reverse, bold) or a glyph, so the screen reads the same without colour.
 type styles struct {
 	selected, open, heading, faint, unread, agent, failed lipgloss.Style
-	good, warn, bad                                       lipgloss.Style
+	good, warn, bad, match                                lipgloss.Style
 }
 
 func newStyles(color bool) styles {
@@ -24,6 +24,7 @@ func newStyles(color bool) styles {
 		good:     lipgloss.NewStyle(),
 		warn:     lipgloss.NewStyle(),
 		bad:      lipgloss.NewStyle().Bold(true),
+		match:    lipgloss.NewStyle().Bold(true).Underline(true),
 	}
 	if !color {
 		return s

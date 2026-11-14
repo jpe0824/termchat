@@ -196,7 +196,8 @@ func TestHelpOverlayListsWorkingKeys(t *testing.T) {
 	h.key("?")
 	v := h.view()
 	mustContain(t, v, "tab", "pgup", "enter", "quit")
-	mustNotContain(t, v, "ctrl+k", "ctrl+n", "/ search", "did the meter import")
+	mustContain(t, v, "ctrl+k", "ctrl+n", "ctrl+o")
+	mustNotContain(t, v, "did the meter import")
 	h.key("?")
 	mustContain(t, h.view(), "did the meter import")
 	h.key("?")
@@ -209,7 +210,7 @@ func TestFooterShowsOnlyWorkingKeys(t *testing.T) {
 	h.key("esc")
 	foot := h.lines()[19]
 	mustContain(t, foot, "↑↓ move", "⏎ open", "tab pane", "? help")
-	mustNotContain(t, foot, "ctrl+k", "ctrl+n", "search")
+	mustContain(t, foot, "ctrl+k jump", "ctrl+n new", "/ search")
 }
 
 func TestQuitKeys(t *testing.T) {

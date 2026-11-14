@@ -34,6 +34,12 @@ type thread struct {
 	sel string
 	// reasons holds why unsent items failed, by message id.
 	reasons map[string]string
+	// flash is a row shown marked for a while: a message opened from
+	// search. jump is the seq of one still to be brought into view, and
+	// want how many of the newest messages the first read takes to reach it.
+	flash string
+	jump  int64
+	want  int
 }
 
 func newThread(conv string) *thread { return &thread{conv: conv, atBottom: true} }
@@ -214,7 +220,7 @@ func (m *Model) body(msg ipc.Message, reason string, selected bool) string {
 func (m *Model) itemBody(it item) (string, lipgloss.Style, bool) {
 	sel := it.key == m.thread.sel
 	st := m.bodyStyle(it.m)
-	if sel {
+	if sel || it.key == m.thread.flash {
 		st = st.Reverse(true)
 	}
 	return m.body(it.m, m.thread.reasons[it.m.MsgID], sel), st, sel

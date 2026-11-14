@@ -219,7 +219,11 @@ func TestBracketedPasteOutsideInputIgnored(t *testing.T) {
 			if h.draft() != "" || h.m.focus == focusInput {
 				t.Errorf("draft %q focus %v", h.draft(), h.m.focus)
 			}
-			mustContain(t, flat(h), "paste ignored — press i to type")
+			note := "paste ignored — press i to type"
+			if w >= 70 {
+				note = "paste ignored — press enter to open a chat"
+			}
+			mustContain(t, flat(h), note)
 			noWrites(t, f)
 		})
 	}

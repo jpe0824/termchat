@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync/atomic"
@@ -75,6 +76,9 @@ func (b *stubBackend) AdminInvite(context.Context, string, string) (string, erro
 	return "code", b.err
 }
 func (b *stubBackend) Join(context.Context, string, string) error { return b.err }
+func (b *stubBackend) People(context.Context) ([]model.Person, error) {
+	return []model.Person{{Handle: "ann", DisplayName: "Ann A"}, {Handle: "bot", Agent: true}}, b.err
+}
 func (b *stubBackend) Stop() {
 	if b.stopped != nil {
 		close(b.stopped)
@@ -151,6 +155,20 @@ func TestRequestsRoundTrip(t *testing.T) {
 	if err != nil || conv.ID != "r1" || conv.Name != "new" {
 		t.Fatalf("Room = %+v, %v", conv, err)
 	}
+	people, err := c.People()
+	want := []Person{{Handle: "ann", DisplayName: "Ann A"}, {Handle: "bot", Agent: true}}
+	if err != nil || !reflect.DeepEqual(people, want) {
+		t.Fatalf("People = %+v, %v; want %+v", people, err, want)
+	}
+	if _, err := dialTest(t, startSock(t, &stubBackend{err: ErrNoAccount})).People(); !errors.Is(err, ErrNoAccount) {
+		t.Fatalf("People error = %v, want ErrNoAccount", err)
+	}
+}
+
+func startSock(t *testing.T, b Backend) string {
+	t.Helper()
+	_, sock := startServer(t, b)
+	return sock
 }
 
 func TestEverySentinelSurvivesTheSocket(t *testing.T) {

@@ -124,7 +124,7 @@ func (m *Model) frame() string {
 	g := m.geom()
 	var cols [][]string
 	if m.help {
-		cols = append(cols, pad(m.helpLines(), region{1, m.w - 2}, g.bodyH))
+		cols = append(cols, pad(m.helpView(g), region{1, m.w - 2}, g.bodyH))
 	} else {
 		if g.side.w > 0 {
 			cols = append(cols, pad(m.sidebarLines(g), g.side, g.bodyH))
@@ -133,7 +133,11 @@ func (m *Model) frame() string {
 			cols = append(cols, pad(m.threadView(g), g.thr, g.bodyH))
 		}
 		if g.memb.w > 0 {
-			cols = append(cols, pad(m.membersLines(), g.memb, g.bodyH))
+			panel := m.membersLines()
+			if m.docked(g) {
+				panel = m.ovPlace().lines
+			}
+			cols = append(cols, pad(panel, g.memb, g.bodyH))
 		}
 	}
 	rows := make([]string, 0, m.h)
@@ -151,6 +155,9 @@ func (m *Model) frame() string {
 	}
 	if g.foot {
 		rows = append(rows, m.footer(g))
+	}
+	if m.ov != nil && !m.help {
+		return m.ovFrame(g, strings.Join(rows, "\n"))
 	}
 	return strings.Join(rows, "\n")
 }

@@ -35,6 +35,16 @@ type Backend interface {
 	// SetFocus tells the background process which conversation this
 	// connection shows ("" for none) and whether the terminal has focus.
 	SetFocus(conv string, focused bool) error
+
+	// People lists every known identity, for the agent tags and pickers.
+	People() ([]model.Person, error)
+	// Search returns messages holding every word of q, newest first.
+	Search(q string, limit int) ([]ipc.Message, error)
+	// OpenDM returns the DM with handle, starting it if there is none.
+	OpenDM(handle string) (model.Conversation, error)
+	// Room creates, joins, leaves, invites to, removes from or renames a
+	// room.
+	Room(op ipc.RoomOp) (model.Conversation, error)
 }
 
 // Options are the settings and outside hooks the interface needs. Zero
@@ -68,6 +78,8 @@ type Options struct {
 	// how close keys must follow each other to count as one paste. Zero
 	// means 25 ms; a negative value turns the wait off.
 	PasteGap time.Duration
+	// NotifyOSC is the configured notify.osc value.
+	NotifyOSC string
 	// Send delivers a message to the running program from the subscription
 	// goroutine. Without it no subscription is kept.
 	Send func(tea.Msg)

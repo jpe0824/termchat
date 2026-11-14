@@ -11,4 +11,4 @@
 │                    │                                                             │
 │                    │ ─────────────────────────────────────────────────────────── │
 │                    │ >                                                           │
-└─ ↑↓ move  ⏎ open  tab pane  pgup/pgdn scroll  ? help  q quit ────────────────────┘
+└─ ↑↓ move  ⏎ open  tab pane  / search  ctrl+k jump  ctrl+n new  ? help  q quit ───┘

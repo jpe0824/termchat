@@ -19,6 +19,8 @@ type supervisor struct {
 	b     Backend
 	opts  Options
 	adopt <-chan Backend
+	// canNotify says the interface writes notifications to the terminal.
+	canNotify bool
 }
 
 func (s *supervisor) run(ctx context.Context) {
@@ -37,8 +39,7 @@ func (s *supervisor) run(ctx context.Context) {
 				}
 			}
 		}
-		// The interface does not draw notifications itself yet.
-		ch, err := s.b.SubscribeUI(ctx, false)
+		ch, err := s.b.SubscribeUI(ctx, s.canNotify)
 		if err != nil {
 			s.drop(ctx, err)
 			continue

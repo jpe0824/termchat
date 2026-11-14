@@ -267,3 +267,29 @@ func TestRoomOperations(t *testing.T) {
 		t.Fatalf("AdminInvite as non-admin = %v, want ErrForbidden", err)
 	}
 }
+
+func TestPeopleListsTheStore(t *testing.T) {
+	e := newEnv(t)
+	e.fake.AddPeople(model.Person{Handle: "dana", DisplayName: "Dana D"},
+		model.Person{Handle: "ci-bot", Agent: true, Owner: "dana"})
+	c := startWithRoom(t, e)
+	want := []model.Person{{Handle: "ci-bot", Agent: true, Owner: "dana"}, {Handle: "dana", DisplayName: "Dana D"}}
+	var got []model.Person
+	waitUntil(t, "the people list", func() bool {
+		var err error
+		got, err = c.People()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(got) >= 2
+	})
+	var others []model.Person
+	for _, p := range got {
+		if p.Handle != "me" {
+			others = append(others, p)
+		}
+	}
+	if !slices.EqualFunc(others, want, func(a, b model.Person) bool { return a == b }) {
+		t.Fatalf("People = %+v, want %+v", got, want)
+	}
+}

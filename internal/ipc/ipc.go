@@ -40,6 +40,18 @@ type (
 	Message    = store.Message
 	OutboxItem = store.OutboxItem
 	ConnState  = connector.ConnState
+	RoomOp     = connector.RoomOp
+	Person     = model.Person
+)
+
+// RoomOp.Kind values.
+const (
+	RoomCreate = connector.RoomCreate
+	RoomJoin   = connector.RoomJoin
+	RoomLeave  = connector.RoomLeave
+	RoomInvite = connector.RoomInvite
+	RoomRemove = connector.RoomRemove
+	RoomRename = connector.RoomRename
 )
 
 // Message.Status of an outbox item; a stored message has "".
@@ -172,4 +184,5 @@ const (
 	opUnsubscribe  = "unsubscribe"
 	opSetFocus     = "set_focus"
 	opStop         = "stop"
+	opPeople       = "people"
 )

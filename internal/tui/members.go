@@ -8,16 +8,16 @@ import (
 )
 
 // membersLines is the wide layout's panel for the open room: its members,
-// whether it is open, and who created it. Membership carries no agent flag,
-// so a member is tagged [agent] when one of their loaded messages is.
+// whether it is open, and who created it. A member is tagged [agent] when
+// the people list says so or one of their loaded messages is.
 func (m *Model) membersLines() []string {
 	c, ok := m.openConv()
 	if !ok {
 		return nil
 	}
 	agents := map[string]bool{}
-	if m.status.Me.Agent {
-		agents[m.me()] = true
+	for _, h := range c.Members {
+		agents[h] = m.isAgent(h)
 	}
 	if m.thread != nil {
 		for _, msg := range m.thread.stored {

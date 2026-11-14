@@ -28,6 +28,9 @@ type timing struct {
 	exitKey  tea.KeyPressMsg
 	exitOn   string
 	exitAsk  *notice
+	// exitAct and ovAsk are what an overlay key, or its question's y, does.
+	exitAct action
+	ovAsk   *ovAsk
 	// quitAsked is when the quit warning was shown, for the key quitKey.
 	quitAsked time.Time
 	quitKey   string
@@ -45,13 +48,6 @@ type timing struct {
 	// here; it stays up through the rest of that key's burst.
 	hint bool
 }
-
-// guarded are the command keys that change something. Outside the input
-// they act only as a lone press: never within the paste gap of the key
-// before, and only once the gap passes with no key after. Movement keys
-// stay immediate so held-down auto-repeat works.
-var guarded = map[string]bool{"d": true, "e": true, "x": true, "r": true, "q": true, "i": true,
-	"enter": true, "tab": true}
 
 // stamp records a key's arrival and reports whether it came within the
 // paste gap of the one before.
@@ -89,6 +85,8 @@ func (m *Model) guardKey(k tea.KeyPressMsg, g geom, recent bool) tea.Cmd {
 // thread's selected message.
 func (m *Model) target(g geom) string {
 	switch {
+	case m.ov != nil:
+		return m.ovTarget()
 	case m.listActive(g):
 		return "row " + m.cursorID()
 	case m.thread != nil:
@@ -113,12 +111,15 @@ func (m *Model) hintToType(list bool) tea.Cmd {
 	return cmd
 }
 
-// scrollKey scrolls the thread for a movement key. Text can carry j and k,
-// so a preview they scroll is opened only once the paste gap passes with
-// no key after.
-func (m *Model) scrollKey(d int) tea.Cmd {
+// scrollKey scrolls the thread for a movement key.
+func (m *Model) scrollKey(d int) tea.Cmd { return m.held(func() tea.Cmd { return m.scroll(d) }) }
+
+// held runs scroll, a scroll of the thread by a key. Text can carry the
+// keys that scroll, so a preview they scroll is opened only once the paste
+// gap passes with no key after.
+func (m *Model) held(scroll func() tea.Cmd) tea.Cmd {
 	was := m.preview
-	cmd := m.scroll(d)
+	cmd := scroll()
 	if !was || m.preview || m.opts.PasteGap < 0 {
 		return cmd
 	}
@@ -154,12 +155,16 @@ func (m *Model) onPaste(s string) tea.Cmd {
 	m.noticeKey("", true)
 	g := m.geom()
 	switch {
+	case m.ov != nil && !m.help:
+		return m.ovPaste(s)
 	case m.inputActive(g):
 		m.promote()
 		m.composeFor(m.openID).in.insert(cleanInput(s))
 		return nil
 	case m.focus == focusInput && m.threadShown(g):
 		return m.setNotice(m.openID, downNote, false)
+	case m.listActive(g):
+		return m.setBanner("paste ignored — press enter to open a chat")
 	}
 	return m.setBanner("paste ignored — press i to type")
 }

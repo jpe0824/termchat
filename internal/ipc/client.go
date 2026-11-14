@@ -369,6 +369,11 @@ func (c *Client) Room(op connector.RoomOp) (model.Conversation, error) {
 	return result[model.Conversation](c, opRoom, &args{Room: &op})
 }
 
+// People returns every known identity, ordered by handle.
+func (c *Client) People() ([]Person, error) {
+	return result[[]Person](c, opPeople, nil)
+}
+
 // DeviceInvite returns a code that adds another device to this account.
 func (c *Client) DeviceInvite() (string, error) {
 	return result[string](c, opDeviceInvite, nil)

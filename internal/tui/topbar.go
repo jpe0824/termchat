@@ -2,11 +2,13 @@ package tui
 
 import (
 	"errors"
+	"slices"
 	"strings"
 
 	"charm.land/lipgloss/v2"
 
 	"github.com/jpe0824/termchat/internal/ipc"
+	"github.com/jpe0824/termchat/internal/model"
 )
 
 // state is the connection state as a glyph, its words and its style:
@@ -77,20 +79,10 @@ func (m *Model) topBar(g geom) string {
 // footer is the bottom border with the keys that work here.
 func (m *Model) footer(g geom) string {
 	keys := m.footerKeys(g)
-	if m.procDown && !m.help && m.canStart() {
+	if m.procDown && !m.help && m.ov == nil && m.canStart() {
 		keys = append([]string{"r start"}, keys...)
 	}
-	for n := len(keys); n > 0; n-- {
-		left := "└─ " + strings.Join(keys[:n], "  ") + " "
-		switch lw := lipgloss.Width(left); {
-		case lw+1 == m.w:
-			// spread keeps a cell of fill, which an exact fit has no room for.
-			return left + "┘"
-		case lw+1 < m.w:
-			return spread(left, "┘", m.w, "─")
-		}
-	}
-	return "└" + strings.Repeat("─", max(m.w-2, 0)) + "┘"
+	return borderKeys(keys, m.w)
 }
 
 // footerKeys are the keys for where focus is, most useful first.
@@ -100,16 +92,33 @@ func (m *Model) footerKeys(g geom) []string {
 	if wide {
 		tail = append([]string{"tab pane"}, tail...)
 	}
+	keys := m.mainKeys(g, wide, tail)
+	if m.procDown {
+		// Nothing reaches the input or changes a message while it is down.
+		keys = slices.DeleteFunc(keys, func(k string) bool { return k == "i type" || k == "e edit" || k == "d delete" })
+	}
+	return keys
+}
+
+func (m *Model) mainKeys(g geom, wide bool, tail []string) []string {
 	sel, hasSel := m.selected()
+	room := ""
+	if c, ok := m.openConv(); ok && c.Kind == model.ConvRoom {
+		room = "ctrl+o room"
+	}
 	switch {
 	case m.help:
-		return []string{"? close", "q quit"}
+		return []string{"↑↓ scroll", "? close", "q quit"}
+	case m.ov != nil && m.ovModeFor(g) == boxMode:
+		return nil
+	case m.ov != nil:
+		return m.ovFooterKeys()
 	case m.listActive(g) && wide:
-		return []string{"↑↓ move", "⏎ open", "tab pane", "pgup/pgdn scroll", "? help", "q quit"}
+		return []string{"↑↓ move", "⏎ open", "tab pane", "/ search", "ctrl+k jump", "ctrl+n new", "? help", "q quit"}
 	case m.listShown() && g.mode == Tiny:
 		return []string{"⏎ open", "? help"}
 	case m.listShown():
-		return []string{"↑↓ move", "⏎ open", "? help", "q quit"}
+		return []string{"↑↓ move", "⏎ open", "/ search", "? help", "ctrl+k jump", "ctrl+n new", "q quit"}
 	case m.inputActive(g):
 		if c := m.drafts[m.openID]; c != nil && c.edit != nil {
 			return []string{"⏎ save", "esc cancel", "alt+⏎ newline"}
@@ -130,7 +139,11 @@ func (m *Model) footerKeys(g geom) []string {
 	case g.mode == Tiny:
 		return []string{"esc chats", "i type", "? help"}
 	case wide:
-		return []string{"i type", "↑↓ scroll", "tab pane", "pgup/pgdn scroll", "? help", "q quit"}
+		return nonEmpty("i type", "↑↓ scroll", "tab pane", "/ search", "ctrl+k jump", room, "? help", "q quit")
 	}
-	return []string{"esc chats", "i type", "? help", "pgup/pgdn scroll", "q quit"}
+	return nonEmpty("esc chats", "i type", "? help", "/ search", "ctrl+k jump", room, "q quit")
+}
+
+func nonEmpty(keys ...string) []string {
+	return slices.DeleteFunc(keys, func(k string) bool { return k == "" })
 }

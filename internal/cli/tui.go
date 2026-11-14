@@ -61,15 +61,16 @@ var runTUI = func(cmd *cobra.Command) error {
 	dial, start := tuiDialers()
 	var p *tea.Program
 	m := tui.New(nil, tui.Options{
-		Splash:   cfg.Splash,
-		MarkRead: cfg.MarkRead,
-		PasteGap: pasteGap(cfg.PasteGapMS),
-		Version:  Version,
-		Server:   configuredServer,
-		Env:      os.Getenv,
-		Dial:     dial,
-		Start:    start,
-		Send:     func(msg tea.Msg) { p.Send(msg) },
+		Splash:    cfg.Splash,
+		MarkRead:  cfg.MarkRead,
+		PasteGap:  pasteGap(cfg.PasteGapMS),
+		NotifyOSC: cfg.Notify.OSC,
+		Version:   Version,
+		Server:    configuredServer,
+		Env:       os.Getenv,
+		Dial:      dial,
+		Start:     start,
+		Send:      func(msg tea.Msg) { p.Send(msg) },
 	})
 	defer m.Close()
 	p = tea.NewProgram(m, tea.WithContext(cmdContext(cmd)),

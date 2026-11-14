@@ -35,8 +35,8 @@ func (m *Model) requestChats() tea.Cmd {
 	m.chatsBusy = true
 	b := m.b
 	return func() tea.Msg {
-		mine, _, err := b.Chats()
-		return chatsMsg{b: b, convs: mine, err: err}
+		mine, open, err := b.Chats()
+		return chatsMsg{b: b, convs: mine, open: open, err: err}
 	}
 }
 
@@ -55,8 +55,12 @@ func (m *Model) onChats(msg chatsMsg) tea.Cmd {
 	}
 	cur := m.cursorID()
 	m.convs = sortConvs(msg.convs)
+	m.openRooms = msg.open
 	m.haveList = true
 	m.cursor = max(m.indexOf(cur), 0)
+	if i := m.indexOf(m.pendingCursor); i >= 0 {
+		m.cursor, m.pendingCursor = i, ""
+	}
 	if m.openID == "" && len(m.convs) > 0 {
 		m.cursor = mostRecent(m.convs)
 		cmds = append(cmds, m.showPreview(m.convs[m.cursor].ID))
@@ -76,7 +80,7 @@ func (m *Model) requestThread() tea.Cmd {
 	}
 	m.threadBusy = true
 	b, conv := m.b, m.thread.conv
-	limit := min(max(len(m.thread.stored), pageSize), maxReread)
+	limit := min(max(len(m.thread.stored), pageSize, m.thread.want), maxReread)
 	return func() tea.Msg {
 		msgs, err := b.Messages(conv, 0, limit)
 		return threadMsg{b: b, conv: conv, limit: limit, msgs: msgs, err: err}
@@ -111,7 +115,8 @@ func (m *Model) onThread(msg threadMsg) tea.Cmd {
 	if m.thread.hasFailed() {
 		cmds = append(cmds, m.requestOutbox())
 	}
-	return tea.Batch(cmds...)
+	m.thread.want = 0
+	return tea.Batch(append(cmds, m.seekJump())...)
 }
 
 // requestOlder loads the page before the oldest held message.
@@ -137,7 +142,7 @@ func (m *Model) onOlder(msg olderMsg) tea.Cmd {
 		return m.failed(msg.err)
 	}
 	m.thread.prepend(msg.before, msg.msgs)
-	return nil
+	return m.seekJump()
 }
 
 // onEvent treats an event as a hint: it re-reads what the event touches.
@@ -163,6 +168,8 @@ func (m *Model) onEvent(ev ipc.Event) tea.Cmd {
 		if ev.Conv != nil {
 			conv = ev.Conv.ID
 		}
+	case ipc.KindNotify:
+		return m.onNotify(ev.Notify)
 	default:
 		return nil
 	}

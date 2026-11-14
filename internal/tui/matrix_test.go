@@ -26,7 +26,7 @@ var pastes = [][]string{
 	{"r", "un it\n"},
 }
 
-var everyWrite = []string{"send ", "edit ", "delete ", "retry ", "discard ", "markread "}
+var everyWrite = []string{"send ", "edit ", "delete ", "retry ", "discard ", "markread ", "opendm ", "room "}
 
 // start is one place the keyboard can be when a paste arrives.
 type start struct {
@@ -83,11 +83,12 @@ type state struct {
 	list, help   bool
 	sel          string
 	drafts       map[string]string
+	overlay      string
 }
 
 func snapshot(h *tester) state {
 	s := state{open: h.m.openID, cursor: h.m.cursorID(), focus: h.m.focus, list: h.m.listShown(),
-		help: h.m.help, drafts: map[string]string{}}
+		help: h.m.help, drafts: map[string]string{}, overlay: ovState(h)}
 	if h.m.thread != nil {
 		s.sel = h.m.thread.sel
 	}
@@ -98,6 +99,51 @@ func snapshot(h *tester) state {
 		}
 	}
 	return s
+}
+
+// managedFixture is the fixture with # platform created by the user, so its
+// room panel offers every key.
+func managedFixture() *fakeBackend {
+	f := peopleFixture()
+	f.convs[3].Creator = "jason"
+	return f
+}
+
+// overlayStarts put the keyboard in each overlay, and in each of their
+// steps, text fields and questions.
+var overlayStarts = []start{
+	{"jump field", pasteWidths, openedAt(peopleFixture, "esc", "ctrl+k"), false},
+	{"search field", pasteWidths, openedAt(peopleFixture, "esc", "/"), false},
+	{"new: choices", pasteWidths, openedAt(peopleFixture, "esc", "ctrl+n"), false},
+	{"new: handle field", pasteWidths, openedAt(peopleFixture, "esc", "ctrl+n", "enter"), false},
+	{"new: room field", pasteWidths, openedAt(peopleFixture, "esc", "ctrl+n", "down", "enter"), false},
+	{"new: open rooms", pasteWidths, openedAt(peopleFixture, "esc", "ctrl+n", "down", "down", "enter"), false},
+	{"room panel", pasteWidths, openedAt(managedFixture, "ctrl+o"), false},
+	{"room: invite field", pasteWidths, openedAt(managedFixture, "ctrl+o", "a"), false},
+	{"room: rename field", pasteWidths, openedAt(managedFixture, "ctrl+o", "n"), false},
+	{"room: remove question", pasteWidths, openedAt(managedFixture, "ctrl+o", "down", "x"), false},
+	{"room: leave question", pasteWidths, openedAt(managedFixture, "ctrl+o", "l"), false},
+	{"room panel, wide", []int{120}, openedAt(managedFixture, "ctrl+o"), false},
+}
+
+func TestPastedKeysChangeNothingInOverlays(t *testing.T) {
+	for _, st := range overlayStarts {
+		for _, w := range st.widths {
+			for _, parts := range pastes {
+				text := strings.Join(parts, "")
+				t.Run(fmt.Sprintf("%s/%d/%q", st.name, w, text), func(t *testing.T) {
+					_, h := st.setup(t, w, new(int))
+					if h.m.ov == nil {
+						t.Fatalf("%s: no overlay", st.name)
+					}
+					checkPaste(t, st, w, parts, 0)
+					for cut := 2; cut <= len(text)-2; cut++ {
+						checkPaste(t, st, w, []string{text}, cut)
+					}
+				})
+			}
+		}
+	}
 }
 
 func TestPastedKeysChangeNothing(t *testing.T) {
@@ -176,6 +222,9 @@ func checkPaste(t *testing.T, st start, w int, parts []string, cut int) {
 	if h.m.note != nil && h.m.note.ask != nil {
 		fail("a question is shown: %q", h.m.note.text)
 	}
+	if h.m.ov != nil && h.m.ov.ask != nil {
+		fail("a question is shown in the overlay: %q", h.m.ov.ask.text)
+	}
 	after := snapshot(h)
 	if st.name != "input" && st.name != "disabled input" && st.name != "help" {
 		// Movement keys in the text may move the cursor, the selection or
@@ -184,6 +233,7 @@ func checkPaste(t *testing.T, st start, w int, parts []string, cut int) {
 	}
 	if after.open != before.open || after.cursor != before.cursor || after.focus != before.focus ||
 		after.list != before.list || after.help != before.help || after.sel != before.sel ||
+		after.overlay != before.overlay ||
 		!maps.Equal(after.drafts, before.drafts) {
 		fail("state %+v, want %+v", after, before)
 	}

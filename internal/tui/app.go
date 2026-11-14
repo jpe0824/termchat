@@ -8,6 +8,7 @@ import (
 
 	"github.com/jpe0824/termchat/internal/ipc"
 	"github.com/jpe0824/termchat/internal/model"
+	"github.com/jpe0824/termchat/internal/notify"
 	"github.com/jpe0824/termchat/internal/sanitize"
 )
 
@@ -94,6 +95,23 @@ type Model struct {
 	// interface, not chosen: it is not marked read and does not hold the
 	// keyboard until the user acts on it.
 	preview bool
+
+	// ov is the open overlay, nil for none; ovGen numbers them.
+	ov    *overlay
+	ovGen int
+	// people is the people list of the current connection.
+	people     []model.Person
+	peopleBusy bool
+	// openRooms are the open rooms the user has not joined.
+	openRooms []model.Conversation
+	// pendingCursor is a conversation the chat list's cursor goes to once
+	// the list holds it.
+	pendingCursor string
+	helpTop       int
+	// osc is the notification escape sequence variant, "" for none.
+	osc      string
+	flashGen int
+	jumpTo   *jumpReq
 }
 
 // New returns the interface's root model. With b nil and Options.Start set,
@@ -107,7 +125,7 @@ func New(b Backend, opts Options) *Model {
 		opts: opts, st: newStyles(opts.Env("NO_COLOR") == ""),
 		ctx: ctx, cancel: cancel, b: b, procDown: b == nil, adopt: make(chan Backend, 1),
 		splashDone: !opts.Splash, drafts: map[string]*compose{}, termFocused: true,
-		readBusy: map[string]bool{},
+		readBusy: map[string]bool{}, osc: notify.ResolveOSC(opts.NotifyOSC, opts.Env),
 	}
 }
 
@@ -141,7 +159,7 @@ func (m *Model) supervise() tea.Cmd {
 		return nil
 	}
 	m.supervised = true
-	sup := &supervisor{b: m.b, opts: m.opts, adopt: m.adopt}
+	sup := &supervisor{b: m.b, opts: m.opts, adopt: m.adopt, canNotify: m.osc != ""}
 	ctx := m.ctx
 	return func() tea.Msg { go sup.run(ctx); return nil }
 }
@@ -215,6 +233,7 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 			// same connection keeps both: it still knows the focus.
 			m.focusSent, m.focusBusy = nil, false
 			m.readBusy = map[string]bool{}
+			m.people, m.peopleBusy = nil, false
 		}
 		m.b, m.procDown, m.downErr, m.startErr = msg.b, false, nil, ""
 		return m.rereadAll()
@@ -226,6 +245,16 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		m.server = msg.name
 	case eventMsg:
 		return m.onEvent(msg.ev)
+	case peopleMsg:
+		m.onPeople(msg)
+	case ovDoneMsg:
+		return m.onOvDone(msg)
+	case searchTickMsg:
+		return m.onSearchTick(msg)
+	case searchMsg:
+		m.onSearch(msg)
+	case flashMsg:
+		m.onFlash(msg)
 	case statusMsg:
 		if msg.b != m.b {
 			return nil
@@ -275,6 +304,9 @@ func (m *Model) open(conv string) tea.Cmd {
 	}
 	m.openID, m.readNew = conv, false
 	m.thread = newThread(conv)
+	if j := m.jumpTo; j != nil && j.conv == conv {
+		m.thread.jump, m.thread.want = j.seq, m.jumpWant(conv, j.seq)
+	}
 	return m.requestThread()
 }
 

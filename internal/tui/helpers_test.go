@@ -30,6 +30,8 @@ type fakeBackend struct {
 	errs      writeErrs
 	reasons   map[string][]ipc.OutboxItem
 
+	ov overlayData
+
 	subCh  chan ipc.Event
 	subErr error
 	closed bool
@@ -64,7 +66,7 @@ func (f *fakeBackend) Chats() ([]ipc.ConvView, []model.Conversation, error) {
 	f.record("chats")
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return slices.Clone(f.convs), nil, f.chatsErr
+	return slices.Clone(f.convs), slices.Clone(f.ov.openRooms), f.chatsErr
 }
 
 func (f *fakeBackend) Messages(conv string, beforeSeq int64, limit int) ([]ipc.Message, error) {
@@ -221,6 +223,8 @@ type tester struct {
 	// sent by a test count as typed unless step is set below the paste gap.
 	now  time.Time
 	step time.Duration
+	// raws is what the model wrote to the terminal outside the view.
+	raws []string
 	// settling guards the timers fired after each message: when the clock
 	// steps past the paste gap, a waiting enter or a deferred exit acts
 	// before anything else can arrive, as in real time.
@@ -283,6 +287,8 @@ func (h *tester) deliver(msg tea.Msg) {
 		}
 	case tea.QuitMsg:
 		h.quit = true
+	case tea.RawMsg:
+		h.raws = append(h.raws, fmt.Sprint(msg.Msg))
 	default:
 		h.send(msg)
 	}

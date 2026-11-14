@@ -179,7 +179,17 @@ func (m *Model) commandKey(k tea.KeyPressMsg, g geom) tea.Cmd {
 			m.toInput()
 		}
 	case "pgup", "pgdown", "home", "end":
-		return m.pageKey(s, g)
+		return m.held(func() tea.Cmd { return m.pageKey(s, g) })
+	case "ctrl+k":
+		return m.openOverlay(ovJump)
+	case "ctrl+n":
+		return m.openOverlay(ovNew)
+	case "ctrl+o":
+		return m.openOverlay(ovRoom)
+	case "/":
+		if m.focus != focusInput {
+			return m.openOverlay(ovSearch)
+		}
 	case "r":
 		if m.procDown {
 			return m.startProcess()

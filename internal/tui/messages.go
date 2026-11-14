@@ -2,6 +2,7 @@ package tui
 
 import (
 	"github.com/jpe0824/termchat/internal/ipc"
+	"github.com/jpe0824/termchat/internal/model"
 )
 
 // Messages into the update loop. Results carry the backend they came from
@@ -32,6 +33,7 @@ type (
 	chatsMsg struct {
 		b     Backend
 		convs []ipc.ConvView
+		open  []model.Conversation
 		err   error
 	}
 	threadMsg struct {
@@ -76,4 +78,26 @@ type (
 		conv string
 	}
 	focusSetMsg struct{ b Backend }
+	peopleMsg   struct {
+		b      Backend
+		people []model.Person
+		err    error
+	}
+	// ovDoneMsg is an overlay write's answer, for the overlay gen.
+	ovDoneMsg struct {
+		b              Backend
+		gen            int
+		op, done, conv string
+		err            error
+	}
+	// searchTickMsg lets query seq of overlay gen run once typing paused.
+	searchTickMsg struct{ gen, seq int }
+	searchMsg     struct {
+		b        Backend
+		gen, seq int
+		q        string
+		msgs     []ipc.Message
+		err      error
+	}
+	flashMsg struct{ gen int }
 )
