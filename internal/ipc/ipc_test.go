@@ -52,6 +52,9 @@ func (b *stubBackend) Delete(context.Context, string, string) error       { retu
 func (b *stubBackend) Retry(context.Context, string) error                { return b.err }
 func (b *stubBackend) Discard(context.Context, string) error              { return b.err }
 func (b *stubBackend) MarkRead(context.Context, string) error             { return b.err }
+func (b *stubBackend) Outbox(_ context.Context, conv string) ([]store.OutboxItem, error) {
+	return []store.OutboxItem{{MsgID: "m1", ConvID: conv, State: store.StatusFailed, Err: "refused"}}, b.err
+}
 func (b *stubBackend) Search(context.Context, string, int) ([]store.Message, error) {
 	return nil, b.err
 }
@@ -139,6 +142,10 @@ func TestRequestsRoundTrip(t *testing.T) {
 	msgs, err := c.Messages("c1", 10, 7)
 	if err != nil || len(msgs) != 1 || msgs[0].Seq != 9 || msgs[0].Text != "7" {
 		t.Fatalf("Messages = %+v, %v", msgs, err)
+	}
+	items, err := c.Outbox("c1")
+	if err != nil || len(items) != 1 || items[0].ConvID != "c1" || items[0].State != store.StatusFailed || items[0].Err != "refused" {
+		t.Fatalf("Outbox = %+v, %v", items, err)
 	}
 	conv, err := c.Room(connector.RoomOp{Kind: connector.RoomRename, Conv: "r1", Name: "new"})
 	if err != nil || conv.ID != "r1" || conv.Name != "new" {

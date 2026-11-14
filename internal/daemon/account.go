@@ -56,7 +56,9 @@ type account struct {
 	syncing   bool
 	backfill  bool
 	openRooms []model.Conversation
-	known     map[string]bool
+	// listing is the open-rooms refresh in flight, if any.
+	listing *listing
+	known   map[string]bool
 	// Outbox senders: workers holds conversations with a running sender;
 	// dirty records a kick that arrived while it ran.
 	workers  map[string]bool
@@ -278,3 +280,45 @@ func (a *account) unknown(handles ...string) bool {
 	}
 	return false
 }
+
+// listing is one refresh of the open-rooms list that concurrent requests share.
+type listing struct {
+	done chan struct{}
+	err  error
+}
+
+// refreshOpenRooms re-reads the open rooms the user has not joined from the
+// server. The server does not announce a new open room to non-members, so
+// requests that need the list ask for it. Concurrent calls share one server
+// request. On failure the cached list stays. It must not run on the goroutine
+// that drains the connector's updates.
+func (a *account) refreshOpenRooms(ctx context.Context) error {
+	a.mu.Lock()
+	if l := a.listing; l != nil {
+		a.mu.Unlock()
+		select {
+		case <-l.done:
+			return l.err
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	l := &listing{done: make(chan struct{})}
+	a.listing = l
+	a.mu.Unlock()
+
+	_, open, err := a.conn.Conversations(ctx)
+
+	a.mu.Lock()
+	if err == nil {
+		a.openRooms = open
+	}
+	a.listing = nil
+	a.mu.Unlock()
+	l.err = err
+	close(l.done)
+	return err
+}
+
+// connected reports whether the connector is connected right now.
+func (a *account) connected() bool { return a.conn.State() == connector.StateConnected }

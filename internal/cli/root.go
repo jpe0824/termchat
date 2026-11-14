@@ -21,14 +21,18 @@ func usagef(format string, args ...any) error {
 }
 
 // ExitCode is the process exit status for an error from Execute: 0 for none,
-// 2 for a usage error, 1 for anything else.
+// 2 for a usage error, the command's own code for an exitError, and 1 for
+// anything else.
 func ExitCode(err error) int {
 	var u *usageError
+	var x *exitError
 	switch {
 	case err == nil:
 		return 0
 	case errors.As(err, &u):
-		return 2
+		return exitUsage
+	case errors.As(err, &x):
+		return x.code
 	}
 	return 1
 }
@@ -75,5 +79,7 @@ func Root() *cobra.Command {
 		return &usageError{msg: err.Error()}
 	})
 	root.AddCommand(newServeCmd(), newServerCmd(), newDaemonCmd())
+	root.AddCommand(newJoinCmd(), newStatusCmd(), newChatsCmd(), newReadCmd(), newSendCmd(), newWaitCmd(),
+		newSearchCmd(), newMarkReadCmd(), newDMCmd(), newRoomCmd(), newDeviceCmd(), newAgentCmd(), newInviteCmd())
 	return root
 }

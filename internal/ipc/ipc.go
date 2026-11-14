@@ -126,6 +126,7 @@ const (
 	opStatus       = "status"
 	opChats        = "chats"
 	opMessages     = "messages"
+	opOutbox       = "outbox"
 	opSend         = "send"
 	opEdit         = "edit"
 	opDelete       = "delete"

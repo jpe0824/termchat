@@ -290,6 +290,14 @@ func (c *Client) Messages(conv string, beforeSeq int64, limit int) ([]store.Mess
 	return out, err
 }
 
+// Outbox returns the user's unsent items of conv, oldest first: those still
+// sending and those that failed, with the reason in Err.
+func (c *Client) Outbox(conv string) ([]store.OutboxItem, error) {
+	var out []store.OutboxItem
+	err := c.call(opOutbox, &args{Conv: conv}, &out)
+	return out, err
+}
+
 // Send queues text for conv and returns its message id at once; delivery
 // is reported through Subscribe. source is "tui" or "cli".
 func (c *Client) Send(conv, text, source string) (string, error) {

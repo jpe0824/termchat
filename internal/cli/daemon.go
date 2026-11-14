@@ -12,21 +12,22 @@ import (
 
 func newDaemonCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:    "daemon",
-		Short:  "Manage the background process",
-		Hidden: true,
-		Args:   noSubcommand,
-		RunE:   groupRun,
+		Use:   "daemon",
+		Short: "Manage the background process",
+		Args:  noSubcommand,
+		RunE:  groupRun,
 	}
 	cmd.AddCommand(&cobra.Command{
-		Use:   "run",
-		Short: "Run the background process in the foreground",
-		Args:  noSubcommand,
+		Use:    "run",
+		Hidden: true,
+		Short:  "Run the background process in the foreground",
+		Args:   noSubcommand,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			return daemon.Run(ctx, daemon.Options{})
 		},
 	})
+	cmd.AddCommand(newDaemonStartCmd(), newDaemonStopCmd())
 	return cmd
 }

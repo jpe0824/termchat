@@ -34,6 +34,9 @@ type Backend interface {
 	Status(ctx context.Context) (Status, error)
 	Chats(ctx context.Context) (Chats, error)
 	Messages(ctx context.Context, conv string, beforeSeq int64, limit int) ([]store.Message, error)
+	// Outbox returns the user's unsent items of conv, with the reason a
+	// failed one failed.
+	Outbox(ctx context.Context, conv string) ([]store.OutboxItem, error)
 	Send(ctx context.Context, conv, text, source string) (string, error)
 	Edit(ctx context.Context, conv, msgID, text string) error
 	Delete(ctx context.Context, conv, msgID string) error
@@ -393,6 +396,8 @@ func dispatch(ctx context.Context, b Backend, op string, a args) (any, error) {
 		return b.Chats(ctx)
 	case opMessages:
 		return b.Messages(ctx, a.Conv, a.BeforeSeq, a.Limit)
+	case opOutbox:
+		return b.Outbox(ctx, a.Conv)
 	case opSend:
 		return b.Send(ctx, a.Conv, a.Text, a.Source)
 	case opEdit:

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/jpe0824/termchat/internal/connector"
 	"github.com/jpe0824/termchat/internal/ipc"
@@ -42,10 +43,14 @@ func (d *daemon) Status(context.Context) (ipc.Status, error) {
 	return a.status(), nil
 }
 
-func (d *daemon) Chats(context.Context) (ipc.Chats, error) {
+func (d *daemon) Chats(ctx context.Context) (ipc.Chats, error) {
 	a, err := d.account()
 	if err != nil {
 		return ipc.Chats{}, err
+	}
+	if a.connected() {
+		// A failure leaves the cached list, which is still the best answer.
+		_ = a.refreshOpenRooms(ctx)
 	}
 	mine, err := a.st.Conversations()
 	if err != nil {
@@ -97,6 +102,14 @@ func (d *daemon) Messages(ctx context.Context, conv string, beforeSeq int64, lim
 		a.emitConv(conv)
 	}
 	return a.st.Messages(conv, beforeSeq, limit)
+}
+
+func (d *daemon) Outbox(_ context.Context, conv string) ([]store.OutboxItem, error) {
+	a, err := d.account()
+	if err != nil {
+		return nil, err
+	}
+	return a.st.Outbox(conv)
 }
 
 func (d *daemon) Send(_ context.Context, conv, text, source string) (string, error) {
@@ -238,12 +251,20 @@ func (d *daemon) Search(_ context.Context, q string, limit int) ([]store.Message
 	return a.st.Search(q, min(limit, maxLimit))
 }
 
-func (d *daemon) Resolve(_ context.Context, ref string) (model.Conversation, error) {
+func (d *daemon) Resolve(ctx context.Context, ref string) (model.Conversation, error) {
 	a, err := d.account()
 	if err != nil {
 		return model.Conversation{}, err
 	}
-	return a.resolve(ref)
+	c, err := a.resolve(ref)
+	// A room may have been opened since the list was read; look once more
+	// after refreshing it. A DM reference is never an open room.
+	if errors.Is(err, ipc.ErrNotFound) && !strings.HasPrefix(strings.TrimSpace(ref), "@") && a.connected() {
+		if a.refreshOpenRooms(ctx) == nil {
+			return a.resolve(ref)
+		}
+	}
+	return c, err
 }
 
 func (d *daemon) OpenDM(ctx context.Context, handle string) (model.Conversation, error) {
