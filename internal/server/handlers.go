@@ -126,12 +126,12 @@ func (s *Server) publish(ev model.Event, except *Session, extra ...string) {
 
 // lockMember takes the conversation lock for a member's write. Membership is
 // checked again under the lock so a removal that completed first wins.
-func (s *Server) lockMember(conv, handle string) (func(), error) {
-	if err := s.requireMember(conv, handle); err != nil {
+func (s *Server) lockMember(p model.Person, conv string) (func(), error) {
+	if _, err := s.memberConv(p, conv); err != nil {
 		return nil, err
 	}
 	unlock := s.hub.lock(conv)
-	if err := s.requireMember(conv, handle); err != nil {
+	if err := s.requireMember(conv, p.Handle); err != nil {
 		unlock()
 		return nil, err
 	}
@@ -178,7 +178,7 @@ func eventSize(ev model.Event) int {
 }
 
 func (s *Server) convHistory(_ context.Context, c call, req proto.ConvHistoryReq) (any, error) {
-	if err := s.requireMember(req.Conv, c.me.Handle); err != nil {
+	if _, err := s.memberConv(c.me, req.Conv); err != nil {
 		return nil, err
 	}
 	limit := req.Limit
@@ -276,7 +276,7 @@ func (s *Server) msgSend(_ context.Context, c call, req proto.MsgSendReq) (any, 
 	if err := validMentions(req.Mentions); err != nil {
 		return nil, err
 	}
-	unlock, err := s.lockMember(req.Conv, c.me.Handle)
+	unlock, err := s.lockMember(c.me, req.Conv)
 	if err != nil {
 		return nil, err
 	}
@@ -301,7 +301,7 @@ func (s *Server) msgEdit(_ context.Context, c call, req proto.MsgEditReq) (any, 
 	if err := validMentions(req.Mentions); err != nil {
 		return nil, err
 	}
-	unlock, err := s.lockMember(req.Conv, c.me.Handle)
+	unlock, err := s.lockMember(c.me, req.Conv)
 	if err != nil {
 		return nil, err
 	}
@@ -315,7 +315,7 @@ func (s *Server) msgEdit(_ context.Context, c call, req proto.MsgEditReq) (any, 
 }
 
 func (s *Server) msgDelete(_ context.Context, c call, req proto.MsgDeleteReq) (any, error) {
-	unlock, err := s.lockMember(req.Conv, c.me.Handle)
+	unlock, err := s.lockMember(c.me, req.Conv)
 	if err != nil {
 		return nil, err
 	}
@@ -329,7 +329,7 @@ func (s *Server) msgDelete(_ context.Context, c call, req proto.MsgDeleteReq) (a
 }
 
 func (s *Server) readSet(_ context.Context, c call, req proto.ReadSetReq) (any, error) {
-	if err := s.requireMember(req.Conv, c.me.Handle); err != nil {
+	if _, err := s.memberConv(c.me, req.Conv); err != nil {
 		return nil, err
 	}
 	conv, err := s.store.Conversation(req.Conv)

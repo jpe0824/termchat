@@ -8,8 +8,8 @@ import (
 )
 
 // loadRoom loads a conversation that must be a room.
-func (s *Server) loadRoom(id string) (model.Conversation, error) {
-	conv, err := s.store.Conversation(id)
+func (s *Server) loadRoom(p model.Person, id string) (model.Conversation, error) {
+	conv, err := s.visibleConv(p, id)
 	if err != nil {
 		return conv, err
 	}
@@ -59,7 +59,7 @@ func (s *Server) roomCreate(_ context.Context, c call, req proto.RoomCreateReq) 
 }
 
 func (s *Server) roomJoin(_ context.Context, c call, req proto.RoomJoinReq) (any, error) {
-	conv, err := s.loadRoom(req.Conv)
+	conv, err := s.loadRoom(c.me, req.Conv)
 	if err != nil {
 		return nil, err
 	}
@@ -97,12 +97,12 @@ func (s *Server) announceJoin(c call, ev model.Event, joined string) (proto.Room
 }
 
 func (s *Server) roomLeave(_ context.Context, c call, req proto.RoomLeaveReq) (any, error) {
-	if err := s.requireMember(req.Conv, c.me.Handle); err != nil {
-		return nil, err
-	}
-	conv, err := s.loadRoom(req.Conv)
+	conv, err := s.loadRoom(c.me, req.Conv)
 	if err != nil {
 		return nil, err
+	}
+	if !isMember(conv, c.me.Handle) {
+		return nil, fail(proto.CodeForbidden, "not a member")
 	}
 	if _, err := s.removeMember(c, conv.ID, c.me.Handle); err != nil {
 		return nil, err
@@ -124,7 +124,7 @@ func (s *Server) removeMember(c call, conv, target string) (model.Event, error) 
 }
 
 func (s *Server) roomInvite(_ context.Context, c call, req proto.RoomInviteReq) (any, error) {
-	conv, err := s.loadRoom(req.Conv)
+	conv, err := s.loadRoom(c.me, req.Conv)
 	if err != nil {
 		return nil, err
 	}
@@ -149,7 +149,7 @@ func (s *Server) roomInvite(_ context.Context, c call, req proto.RoomInviteReq) 
 }
 
 func (s *Server) roomRemove(_ context.Context, c call, req proto.RoomRemoveReq) (any, error) {
-	conv, err := s.loadRoom(req.Conv)
+	conv, err := s.loadRoom(c.me, req.Conv)
 	if err != nil {
 		return nil, err
 	}
@@ -160,8 +160,8 @@ func (s *Server) roomRemove(_ context.Context, c call, req proto.RoomRemoveReq) 
 	if target == c.me.Handle {
 		// Removing yourself is leaving, open to any member; the reply
 		// carries no member list because the caller no longer belongs.
-		if err := s.requireMember(conv.ID, target); err != nil {
-			return nil, err
+		if !isMember(conv, target) {
+			return nil, fail(proto.CodeForbidden, "not a member")
 		}
 		if _, err := s.removeMember(c, conv.ID, target); err != nil {
 			return nil, err
@@ -179,7 +179,7 @@ func (s *Server) roomRemove(_ context.Context, c call, req proto.RoomRemoveReq) 
 }
 
 func (s *Server) roomRename(_ context.Context, c call, req proto.RoomRenameReq) (any, error) {
-	conv, err := s.loadRoom(req.Conv)
+	conv, err := s.loadRoom(c.me, req.Conv)
 	if err != nil {
 		return nil, err
 	}

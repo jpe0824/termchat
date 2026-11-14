@@ -215,10 +215,10 @@ func TestMessageRequestsNeedMembership(t *testing.T) {
 	a.do(proto.TypeRoomRemove, proto.RoomRemoveReq{Conv: conv.ID, Handle: "carol"}, nil)
 	c.push(proto.TypeEvent)
 
-	c.refuse(proto.TypeMsgSend, proto.MsgSendReq{Conv: conv.ID, MsgID: newMsgID(), Body: text("x")}, proto.CodeForbidden)
-	c.refuse(proto.TypeMsgEdit, proto.MsgEditReq{Conv: conv.ID, MsgID: mine.MsgID, Body: text("x")}, proto.CodeForbidden)
-	c.refuse(proto.TypeMsgDelete, proto.MsgDeleteReq{Conv: conv.ID, MsgID: mine.MsgID}, proto.CodeForbidden)
-	c.refuse(proto.TypeReadSet, proto.ReadSetReq{Conv: conv.ID, Seq: 1}, proto.CodeForbidden)
+	c.refuse(proto.TypeMsgSend, proto.MsgSendReq{Conv: conv.ID, MsgID: newMsgID(), Body: text("x")}, proto.CodeNotFound)
+	c.refuse(proto.TypeMsgEdit, proto.MsgEditReq{Conv: conv.ID, MsgID: mine.MsgID, Body: text("x")}, proto.CodeNotFound)
+	c.refuse(proto.TypeMsgDelete, proto.MsgDeleteReq{Conv: conv.ID, MsgID: mine.MsgID}, proto.CodeNotFound)
+	c.refuse(proto.TypeReadSet, proto.ReadSetReq{Conv: conv.ID, Seq: 1}, proto.CodeNotFound)
 	for _, ev := range a.history(conv.ID) {
 		if ev.Kind == model.MessageEdited || ev.Kind == model.MessageDeleted || string(bodyData(ev)) == "x" {
 			t.Fatalf("non-member write landed: %+v", ev)
@@ -339,7 +339,7 @@ func TestRoomCreateJoinLeave(t *testing.T) {
 		t.Fatalf("creator saw %+v", ev)
 	}
 	b.refuse(proto.TypeRoomJoin, proto.RoomJoinReq{Conv: lobby.ID}, proto.CodeInvalid)
-	c.refuse(proto.TypeRoomJoin, proto.RoomJoinReq{Conv: secret.ID}, proto.CodeForbidden)
+	c.refuse(proto.TypeRoomJoin, proto.RoomJoinReq{Conv: secret.ID}, proto.CodeNotFound)
 	c.refuse(proto.TypeRoomJoin, proto.RoomJoinReq{Conv: "r_doesnotexist"}, proto.CodeNotFound)
 	c.refuse(proto.TypeRoomLeave, proto.RoomLeaveReq{Conv: lobby.ID}, proto.CodeForbidden)
 
@@ -384,7 +384,7 @@ func TestAnyMemberMayRemoveThemselves(t *testing.T) {
 	if ev := a.eventPush(); ev.Kind != model.MemberLeft || ev.Target != "bob" {
 		t.Fatalf("creator saw %+v", ev)
 	}
-	b.refuse(proto.TypeRoomRemove, proto.RoomRemoveReq{Conv: conv.ID, Handle: "bob"}, proto.CodeForbidden)
+	b.refuse(proto.TypeRoomRemove, proto.RoomRemoveReq{Conv: conv.ID, Handle: "bob"}, proto.CodeNotFound)
 }
 
 func TestMembershipPushes(t *testing.T) {
@@ -566,4 +566,79 @@ func TestAdminRemovePerson(t *testing.T) {
 		t.Fatal("removed handle can be invited again")
 	}
 	c.quiet()
+}
+
+// A removed creator has no standing: in a private room the room is hidden from
+// them, in an open room they are an ordinary non-member.
+func TestRemovedCreatorCannotManageRoom(t *testing.T) {
+	ch := newChat(t, "alice", "bob", "dave")
+	if err := ch.h.Store.SetAdmin("dave", true); err != nil {
+		t.Fatal(err)
+	}
+	a, d := ch.dial("alice"), ch.dial("dave")
+	for _, tc := range []struct {
+		name string
+		open bool
+		code string
+	}{{"hidden", false, proto.CodeNotFound}, {"lounge", true, proto.CodeForbidden}} {
+		conv := a.room(tc.name, tc.open)
+		a.invite(conv.ID, "bob")
+		d.do(proto.TypeRoomRemove, proto.RoomRemoveReq{Conv: conv.ID, Handle: "alice"}, nil)
+		a.refuse(proto.TypeRoomInvite, proto.RoomInviteReq{Conv: conv.ID, Handle: "alice"}, tc.code)
+		a.refuse(proto.TypeRoomRename, proto.RoomRenameReq{Conv: conv.ID, Name: "mine"}, tc.code)
+		a.refuse(proto.TypeRoomRemove, proto.RoomRemoveReq{Conv: conv.ID, Handle: "bob"}, tc.code)
+		if ok, _ := ch.h.Store.IsMember(conv.ID, "alice"); ok {
+			t.Fatalf("%s: alice rejoined", tc.name)
+		}
+		if ok, _ := ch.h.Store.IsMember(conv.ID, "bob"); !ok {
+			t.Fatalf("%s: bob was evicted", tc.name)
+		}
+	}
+}
+
+func TestHiddenConversationsAreIndistinguishableFromMissing(t *testing.T) {
+	ch := newChat(t, "alice", "bob", "carol", "dave")
+	if err := ch.h.Store.SetAdmin("dave", true); err != nil {
+		t.Fatal(err)
+	}
+	a, c, d := ch.dial("alice"), ch.dial("carol"), ch.dial("dave")
+	private := a.room("secret", false)
+	var dm proto.DMOpenRes
+	a.do(proto.TypeDMOpen, proto.DMOpenReq{Handle: "bob"}, &dm)
+	ids := []string{private.ID, dm.Conv.ID, "r_doesnotexist"}
+
+	reqs := func(id string) map[string]any {
+		return map[string]any{
+			proto.TypeConvHistory: proto.ConvHistoryReq{Conv: id},
+			proto.TypeMsgSend:     proto.MsgSendReq{Conv: id, MsgID: "m", Body: text("x")},
+			proto.TypeMsgEdit:     proto.MsgEditReq{Conv: id, MsgID: "m", Body: text("x")},
+			proto.TypeMsgDelete:   proto.MsgDeleteReq{Conv: id, MsgID: "m"},
+			proto.TypeReadSet:     proto.ReadSetReq{Conv: id, Seq: 1},
+			proto.TypeRoomJoin:    proto.RoomJoinReq{Conv: id},
+			proto.TypeRoomLeave:   proto.RoomLeaveReq{Conv: id},
+			proto.TypeRoomInvite:  proto.RoomInviteReq{Conv: id, Handle: "carol"},
+			proto.TypeRoomRemove:  proto.RoomRemoveReq{Conv: id, Handle: "alice"},
+			proto.TypeRoomRename:  proto.RoomRenameReq{Conv: id, Name: "x"},
+		}
+	}
+	for typ := range reqs("") {
+		var want *proto.Error
+		for i, id := range ids {
+			f := c.req(typ, reqs(id)[typ])
+			if f.Error == nil || f.Error.Code != proto.CodeNotFound {
+				t.Fatalf("%s on %s as carol = %+v", typ, id, f)
+			}
+			if i == 0 {
+				want = f.Error
+			} else if *f.Error != *want {
+				t.Fatalf("%s: %+v differs from %+v", typ, f.Error, want)
+			}
+		}
+	}
+	// An admin may see rooms but not other people's DMs.
+	f := d.req(proto.TypeRoomRename, proto.RoomRenameReq{Conv: dm.Conv.ID, Name: "x"})
+	if f.Error == nil || f.Error.Code != proto.CodeNotFound {
+		t.Fatalf("admin on a DM = %+v", f)
+	}
+	d.do(proto.TypeRoomRename, proto.RoomRenameReq{Conv: private.ID, Name: "renamed"}, nil)
 }

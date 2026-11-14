@@ -98,7 +98,7 @@ func TestNonMemberCannotReadPrivateRoom(t *testing.T) {
 	conv := a.room("secret", false)
 	a.say(conv.ID, "classified")
 
-	c.refuse(proto.TypeConvHistory, proto.ConvHistoryReq{Conv: conv.ID}, proto.CodeForbidden)
+	c.refuse(proto.TypeConvHistory, proto.ConvHistoryReq{Conv: conv.ID}, proto.CodeNotFound)
 	res := c.sync(map[string]int64{conv.ID: 0})
 	if len(res.Events) != 0 || len(res.Gone) != 1 || res.Gone[0] != conv.ID {
 		t.Fatalf("sync for non-member = %+v", res)
@@ -142,7 +142,7 @@ func TestRemovedMemberGetsNothingFurther(t *testing.T) {
 	}
 	a.say(conv.ID, "after removal")
 
-	b.refuse(proto.TypeConvHistory, proto.ConvHistoryReq{Conv: conv.ID}, proto.CodeForbidden)
+	b.refuse(proto.TypeConvHistory, proto.ConvHistoryReq{Conv: conv.ID}, proto.CodeNotFound)
 	res := b.sync(map[string]int64{conv.ID: left.Seq})
 	if len(res.Events) != 0 || len(res.Gone) != 1 || res.Gone[0] != conv.ID {
 		t.Fatalf("sync after removal = %+v", res)
@@ -161,7 +161,7 @@ func TestOnlyCreatorOrAdminManagesRoom(t *testing.T) {
 	b.refuse(proto.TypeRoomInvite, proto.RoomInviteReq{Conv: conv.ID, Handle: "carol"}, proto.CodeForbidden)
 	b.refuse(proto.TypeRoomRename, proto.RoomRenameReq{Conv: conv.ID, Name: "mine"}, proto.CodeForbidden)
 	b.refuse(proto.TypeRoomRemove, proto.RoomRemoveReq{Conv: conv.ID, Handle: "alice"}, proto.CodeForbidden)
-	c.refuse(proto.TypeRoomInvite, proto.RoomInviteReq{Conv: conv.ID, Handle: "carol"}, proto.CodeForbidden)
+	c.refuse(proto.TypeRoomInvite, proto.RoomInviteReq{Conv: conv.ID, Handle: "carol"}, proto.CodeNotFound)
 
 	var inv proto.RoomInviteRes
 	a.do(proto.TypeRoomInvite, proto.RoomInviteReq{Conv: conv.ID, Handle: "carol"}, &inv)
