@@ -1,0 +1,32 @@
+[Unit]
+Description=termchat server
+Documentation=https://github.com/jpe0824/termchat
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=termchat
+Group=termchat
+ExecStart=/usr/local/bin/termchat serve --data /var/lib/termchat
+Restart=on-failure
+RestartSec=5
+
+# The server writes only to its data directory.
+StateDirectory=termchat
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/termchat
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
