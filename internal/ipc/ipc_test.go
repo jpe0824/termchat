@@ -365,7 +365,7 @@ func TestHasSubscribers(t *testing.T) {
 	}
 }
 
-func TestSubscribeUIIsMarkedAndBroadcastUIReachesOnlyUIs(t *testing.T) {
+func TestSubscribeUIDeclaresCapabilityAndBroadcastNotifyReachesOnlyCapableUIs(t *testing.T) {
 	srv, sock := startServer(t, &stubBackend{})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -375,40 +375,49 @@ func TestSubscribeUIIsMarkedAndBroadcastUIReachesOnlyUIs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ui := dialTest(t, sock)
-	uiEvents, err := ui.SubscribeUI(ctx)
+	incapable := dialTest(t, sock)
+	incapableEvents, err := incapable.SubscribeUI(ctx, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ui.SetFocus("c1", true); err != nil {
+	capable := dialTest(t, sock)
+	capableEvents, err := capable.SubscribeUI(ctx, true)
+	if err != nil {
 		t.Fatal(err)
 	}
-	waitUntil(t, func() bool { return len(srv.Subscribers()) == 2 })
-	var uis, others int
+	if err := capable.SetFocus("c1", true); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, func() bool { return len(srv.Subscribers()) == 3 })
+	var plains, incapables, capables int
 	for _, s := range srv.Subscribers() {
-		if s.UI {
-			uis++
+		switch {
+		case !s.UI:
+			plains++
+		case !s.CanNotify:
+			incapables++
+		default:
+			capables++
 			if s.Conv != "c1" || !s.Focused {
-				t.Errorf("UI subscriber reports %+v, want c1 focused", s)
+				t.Errorf("capable UI reports %+v, want c1 focused", s)
 			}
-		} else {
-			others++
 		}
 	}
-	if uis != 1 || others != 1 {
-		t.Fatalf("subscribers: %d UI, %d other; want 1 and 1", uis, others)
+	if plains != 1 || incapables != 1 || capables != 1 {
+		t.Fatalf("subscribers: %d plain, %d incapable UI, %d capable UI; want 1 each", plains, incapables, capables)
 	}
 
 	n := &NotifyPayload{ConvID: "c1", Sender: "dana", Text: "hi", DM: true}
-	srv.BroadcastUI(Event{Kind: KindNotify, Notify: n})
+	srv.BroadcastNotify(Event{Kind: KindNotify, Notify: n})
 	srv.Broadcast(Event{Kind: KindStatus, Status: &Status{Account: "after"}})
-	ev := <-uiEvents
-	if ev.Kind != KindNotify || ev.Notify == nil || *ev.Notify != *n {
-		t.Fatalf("UI event = %+v, want the notify payload", ev)
+	if ev := <-capableEvents; ev.Kind != KindNotify || ev.Notify == nil || *ev.Notify != *n {
+		t.Fatalf("capable UI event = %+v, want the notify payload", ev)
 	}
-	// The plain subscriber's first event is the broadcast that followed, so
-	// the UI-only event never reached it.
-	if ev := <-plainEvents; ev.Kind != KindStatus {
-		t.Fatalf("plain subscriber event = %+v, want the status broadcast", ev)
+	// The others' first event is the status broadcast that followed, so the
+	// notify event never reached them.
+	for name, ch := range map[string]<-chan Event{"plain": plainEvents, "incapable UI": incapableEvents} {
+		if ev := <-ch; ev.Kind != KindStatus {
+			t.Fatalf("%s subscriber event = %+v, want the status broadcast", name, ev)
+		}
 	}
 }

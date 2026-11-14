@@ -110,6 +110,7 @@ type args struct {
 	Limit     int               `json:",omitempty"`
 	Focused   bool              `json:",omitempty"`
 	UI        bool              `json:",omitempty"`
+	CanNotify bool              `json:",omitempty"`
 	Room      *connector.RoomOp `json:",omitempty"`
 }
 

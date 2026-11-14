@@ -21,7 +21,7 @@ func darwinCommand(n Notification) Cmd {
 // available.
 func linuxCommand(lookPath func(string) (string, error), n Notification) *Cmd {
 	if _, err := lookPath("notify-send"); err == nil {
-		return &Cmd{Name: "notify-send", Args: []string{"--app-name=termchat", "--", Title(n), n.Text}}
+		return &Cmd{Name: "notify-send", Args: []string{"--app-name=termchat", "--", Title(n), markupEscape(n.Text)}}
 	}
 	if _, err := lookPath("gdbus"); err == nil {
 		return &Cmd{Name: "gdbus", Args: []string{
@@ -30,11 +30,19 @@ func linuxCommand(lookPath func(string) (string, error), n Notification) *Cmd {
 			"--object-path", "/org/freedesktop/Notifications",
 			"--method", "org.freedesktop.Notifications.Notify",
 			gvariantString("termchat"), "0", gvariantString(""),
-			gvariantString(Title(n)), gvariantString(n.Text),
+			gvariantString(Title(n)), gvariantString(markupEscape(n.Text)),
 			"[]", "{}", "5000",
 		}}
 	}
 	return nil
+}
+
+// markupEscape makes s plain text for a notification server, most of which
+// render the body as markup: tags, links and, on some, local images. The
+// title is plain text by the specification and is left alone. '&' goes first
+// so the entities written for '<' and '>' are not escaped again.
+func markupEscape(s string) string {
+	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(s)
 }
 
 // gvariantString quotes s as a GVariant text-format string, which is how

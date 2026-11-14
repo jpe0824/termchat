@@ -99,3 +99,10 @@ func (s *Store) ByMsgID(conv, msgID string) (Message, error) {
 	}
 	return outboxMessage(items[0], s.outboxAuthor()), nil
 }
+
+// HasEvent reports whether the event at seq of conv is stored. It is one
+// primary-key probe that reads no message.
+func (s *Store) HasEvent(conv string, seq int64) bool {
+	var one int
+	return s.db.QueryRow(`SELECT 1 FROM events WHERE conv = ? AND seq = ?`, conv, seq).Scan(&one) == nil
+}

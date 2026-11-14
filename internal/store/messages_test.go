@@ -142,3 +142,14 @@ func TestByMsgIDFindsOutboxItems(t *testing.T) {
 		t.Fatalf("ByMsgID = %+v", m)
 	}
 }
+
+func TestHasEvent(t *testing.T) {
+	s := openTest(t)
+	must(t, s.Apply(posted("c1", 2, "m2", "ann", "two")))
+	if !s.HasEvent("c1", 2) {
+		t.Error("HasEvent(c1, 2) = false for a stored event")
+	}
+	if s.HasEvent("c1", 1) || s.HasEvent("c2", 2) {
+		t.Error("HasEvent true for an event that is not stored")
+	}
+}

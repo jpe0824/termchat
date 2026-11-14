@@ -57,11 +57,13 @@ type Backend interface {
 }
 
 // Subscriber is one subscribed connection: whether it declared itself a UI
-// (SubscribeUI) and what it last reported with SetFocus.
+// and whether that UI can show notifications (SubscribeUI), and what it last
+// reported with SetFocus.
 type Subscriber struct {
-	Conv    string
-	Focused bool
-	UI      bool
+	Conv      string
+	Focused   bool
+	UI        bool
+	CanNotify bool
 }
 
 // Server accepts connections and dispatches their requests to a Backend.
@@ -177,10 +179,11 @@ func (s *Server) shuttingDown() bool {
 // connection whose queue is full is closed.
 func (s *Server) Broadcast(ev Event) { s.broadcast(ev, false) }
 
-// BroadcastUI is Broadcast to the connections that subscribed as a UI.
-func (s *Server) BroadcastUI(ev Event) { s.broadcast(ev, true) }
+// BroadcastNotify is Broadcast to the UIs that declared they can show
+// notifications.
+func (s *Server) BroadcastNotify(ev Event) { s.broadcast(ev, true) }
 
-func (s *Server) broadcast(ev Event, uiOnly bool) {
+func (s *Server) broadcast(ev Event, notifyOnly bool) {
 	b, err := json.Marshal(frame{Event: &ev})
 	if err != nil {
 		s.log.Error("encode event", "kind", ev.Kind, "err", err)
@@ -190,7 +193,7 @@ func (s *Server) broadcast(ev Event, uiOnly bool) {
 	s.mu.Lock()
 	var subs []*sconn
 	for c := range s.conns {
-		if c.isSubscribed() && (!uiOnly || c.isUI()) {
+		if c.isSubscribed() && (!notifyOnly || c.canShowNotify()) {
 			subs = append(subs, c)
 		}
 	}
@@ -222,7 +225,7 @@ func (s *Server) Subscribers() []Subscriber {
 		c.mu.Lock()
 		if c.subscribed {
 			sub := c.focus
-			sub.UI = c.ui
+			sub.UI, sub.CanNotify = c.ui, c.ui && c.canNotify
 			out = append(out, sub)
 		}
 		c.mu.Unlock()
@@ -241,6 +244,7 @@ type sconn struct {
 	hello      bool
 	subscribed bool
 	ui         bool
+	canNotify  bool
 	focus      Subscriber
 }
 
@@ -259,10 +263,10 @@ func (s *Server) start(c net.Conn) {
 	go sc.readLoop()
 }
 
-func (c *sconn) isUI() bool {
+func (c *sconn) canShowNotify() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.ui
+	return c.ui && c.canNotify
 }
 
 func (c *sconn) isSubscribed() bool {
@@ -378,7 +382,7 @@ func (c *sconn) handle(req request, a args) {
 		c.mu.Lock()
 		switch req.Op {
 		case opSubscribe:
-			c.subscribed, c.ui = true, a.UI
+			c.subscribed, c.ui, c.canNotify = true, a.UI, a.CanNotify
 		case opUnsubscribe:
 			c.subscribed = false
 		case opSetFocus:

@@ -12,6 +12,12 @@ import (
 
 // uiClient attaches a client that declared itself a UI.
 func uiClient(t *testing.T, conv string, focused bool) <-chan ipc.Event {
+	return uiClientCan(t, true, conv, focused)
+}
+
+// uiClientCan is uiClient with the capability to show terminal notifications
+// declared or not.
+func uiClientCan(t *testing.T, canNotify bool, conv string, focused bool) <-chan ipc.Event {
 	t.Helper()
 	c, err := ipc.Dial(context.Background())
 	if err != nil {
@@ -22,7 +28,7 @@ func uiClient(t *testing.T, conv string, focused bool) <-chan ipc.Event {
 		cancel()
 		_ = c.Close()
 	})
-	ch, err := c.SubscribeUI(ctx)
+	ch, err := c.SubscribeUI(ctx, canNotify)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,5 +195,48 @@ func TestNewNotifierIsUsedAndClosedOnShutdown(t *testing.T) {
 	}
 	if !gotCfg {
 		t.Error("factory did not receive the config and logger")
+	}
+}
+
+func TestUIThatCannotShowNotificationsFallsThroughToOS(t *testing.T) {
+	e, rec := noteEnv(t)
+	started(t, e, dm("d1", "dana"))
+	events := uiClientCan(t, false, "sd", false)
+	push(e, "d1", "dana", "m1", "ping", 0)
+	waitUntil(t, "OS notification", func() bool { return len(rec.osCalls()) == 1 })
+	if got := rec.osCalls()[0]; got.Text != "ping" {
+		t.Errorf("OS payload = %+v", got)
+	}
+	if got := drainNotifies(events, 100*time.Millisecond); len(got) != 0 {
+		t.Errorf("incapable UI received %+v", got)
+	}
+}
+
+func TestNotifyEventReachesOnlyTheCapableUI(t *testing.T) {
+	e, rec := noteEnv(t)
+	started(t, e, dm("d1", "dana"))
+	incapable := uiClientCan(t, false, "sd", false)
+	capable := uiClientCan(t, true, "sd", false)
+	push(e, "d1", "dana", "m1", "ping", 0)
+	ev := waitEvent(t, capable, "notify event", func(ev ipc.Event) bool { return ev.Kind == ipc.KindNotify })
+	if ev.Notify.Text != "ping" {
+		t.Fatalf("payload = %+v", *ev.Notify)
+	}
+	if got := drainNotifies(incapable, 100*time.Millisecond); len(got) != 0 {
+		t.Errorf("incapable UI received %+v", got)
+	}
+	if got := rec.osCalls(); len(got) != 0 {
+		t.Errorf("OS notified although a capable UI took it: %+v", got)
+	}
+}
+
+func TestFocusedIncapableUIStillSuppresses(t *testing.T) {
+	e, rec := noteEnv(t)
+	started(t, e, dm("d1", "dana"))
+	uiClientCan(t, false, "d1", true)
+	push(e, "d1", "dana", "m1", "you are looking at me", 0)
+	sentinel(t, e, rec)
+	if got := dropSentinels(rec.osCalls()); len(got) != 0 {
+		t.Errorf("notified %+v although a focused UI shows the conversation", got)
 	}
 }

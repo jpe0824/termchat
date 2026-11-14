@@ -96,7 +96,7 @@ func newAccount(d *daemon, name string, conn connector.Connector, st *store.Stor
 		bfWake: make(chan struct{}, 1), changed: make(chan struct{}),
 		workers: map[string]bool{}, dirty: map[string]bool{}, floor: map[string]int64{},
 	}
-	a.nt = newNotifications(d, st, a.log)
+	a.nt = newNotifications(d.cfg, d.notifier, d.srv, st, a.log)
 	a.rooms = &openRooms{clock: d.clock, fetch: func(ctx context.Context) ([]model.Conversation, error) {
 		_, open, err := conn.Conversations(ctx)
 		return open, err

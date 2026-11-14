@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -166,4 +167,48 @@ func (l *lockedBuf) String() string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.b.String()
+}
+
+func TestLinuxBodyMarkupIsEscaped(t *testing.T) {
+	n := Notification{Sender: "<b>dana</b> & co", Text: `a < b & <a href="x">c</a>`, DM: true}
+	wantBody := `a &lt; b &amp; &lt;a href="x"&gt;c&lt;/a&gt;`
+	has := func(names ...string) func(string) (string, error) {
+		return func(name string) (string, error) {
+			if slices.Contains(names, name) {
+				return "/usr/bin/" + name, nil
+			}
+			return "", errors.New("not found")
+		}
+	}
+	c := linuxCommand(has("notify-send"), n)
+	want := []string{"--app-name=termchat", "--", "<b>dana</b> & co", wantBody}
+	if c == nil || !reflect.DeepEqual(c.Args, want) {
+		t.Errorf("notify-send args = %q, want %q (title plain, body escaped)", c.Args, want)
+	}
+	c = linuxCommand(has("gdbus"), n)
+	if c == nil || c.Args[12] != wantGVariant(wantBody) || c.Args[11] != wantGVariant("<b>dana</b> & co") {
+		t.Errorf("gdbus summary and body = %q, %q", c.Args[11], c.Args[12])
+	}
+}
+
+func TestOSCommandIsBuiltOffTheCallingGoroutine(t *testing.T) {
+	n := New(&config.Config{}, nil)
+	release := make(chan struct{})
+	n.build = func(func(string) (string, error), Notification) *Cmd {
+		<-release // stands in for a slow PATH lookup
+		return nil
+	}
+	returned := make(chan struct{})
+	go func() {
+		n.OS(Notification{Text: "x"})
+		close(returned)
+	}()
+	select {
+	case <-returned:
+	case <-time.After(2 * time.Second):
+		close(release)
+		t.Fatal("OS blocked on building the command")
+	}
+	close(release)
+	n.Close()
 }

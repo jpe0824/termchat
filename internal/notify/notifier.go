@@ -41,6 +41,7 @@ type Notifier struct {
 
 	// Injectable for tests.
 	run      Runner
+	build    func(lookPath func(string) (string, error), n Notification) *Cmd
 	lookPath func(string) (string, error)
 	timeout  time.Duration
 
@@ -59,7 +60,7 @@ func New(cfg *config.Config, logger *slog.Logger) *Notifier {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Notifier{
 		hook: cfg.Notify.Hook, log: logger,
-		run: execRun, lookPath: exec.LookPath, timeout: commandTimeout,
+		run: execRun, build: platformCommand, lookPath: exec.LookPath, timeout: commandTimeout,
 		ctx: ctx, cancel: cancel,
 		hooks: make(chan struct{}, maxRunning), oses: make(chan struct{}, maxRunning),
 	}
@@ -78,11 +79,10 @@ func (n *Notifier) Close() {
 
 // OS posts n through the operating system's notification service.
 func (n *Notifier) OS(p Notification) {
-	c := platformCommand(n.lookPath, clean(p))
-	if c == nil {
-		return
-	}
-	n.start(n.oses, "operating-system notification", *c)
+	p = clean(p)
+	// Building the command may search PATH, which can be slow, so it happens
+	// on the worker goroutine.
+	n.start(n.oses, "operating-system notification", func() *Cmd { return n.build(n.lookPath, p) })
 }
 
 // Hook runs the configured hook for p, when there is one.
@@ -91,12 +91,13 @@ func (n *Notifier) Hook(p Notification) {
 		return
 	}
 	p = clean(p)
-	n.start(n.hooks, "hook", hookCommand(n.hook, p))
+	c := hookCommand(n.hook, p)
+	n.start(n.hooks, "hook", func() *Cmd { return &c })
 }
 
 // start runs c on a new goroutine unless sem is full, in which case the
 // notification is dropped. Logs carry no message text.
-func (n *Notifier) start(sem chan struct{}, what string, c Cmd) {
+func (n *Notifier) start(sem chan struct{}, what string, build func() *Cmd) {
 	select {
 	case sem <- struct{}{}:
 	default:
@@ -107,9 +108,13 @@ func (n *Notifier) start(sem chan struct{}, what string, c Cmd) {
 	go func() {
 		defer n.wg.Done()
 		defer func() { <-sem }()
+		c := build()
+		if c == nil {
+			return
+		}
 		ctx, cancel := context.WithTimeout(n.ctx, n.timeout)
 		defer cancel()
-		if err := n.run(ctx, c); err != nil {
+		if err := n.run(ctx, *c); err != nil {
 			if ctx.Err() == context.DeadlineExceeded {
 				n.log.Warn(what+" failed", "err", "timed out")
 				return
