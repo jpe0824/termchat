@@ -68,6 +68,8 @@ func Root() *cobra.Command {
 		Version:       Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		Args:          noSubcommand,
+		RunE:          groupRun,
 	}
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
 		return &usageError{msg: err.Error()}

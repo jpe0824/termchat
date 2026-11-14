@@ -137,6 +137,7 @@ func TestUsageErrors(t *testing.T) {
 	wantFail(t, 2, "takes 1 argument(s), got 0", "server", "--data", d, "user", "remove")
 	wantFail(t, 2, "takes 1 argument(s), got 2", "server", "--data", d, "invite", "a", "b")
 	wantFail(t, 2, `unknown command "bogus"`, "server", "--data", d, "user", "bogus")
+	wantFail(t, 2, `unknown command "bogus"`, "bogus")
 	wantFail(t, 2, "unknown flag: --nope", "server", "--nope")
 	wantFail(t, 2, "--retention must not be negative", "serve", "--data", d, "--retention", "-1h")
 	wantFail(t, 2, "invalid handle", "server", "--data", d, "init", "--handle", "Bad Handle!")

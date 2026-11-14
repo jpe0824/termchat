@@ -114,23 +114,48 @@ func (s *Store) PersonCount() (int, error) {
 	return n, err
 }
 
-// SetAdmin grants or revokes admin rights.
+// SetAdmin grants or revokes admin rights. Revoking the last admin fails with
+// ErrLastAdmin.
 func (s *Store) SetAdmin(handle string, admin bool) error {
 	h, err := cleanName(handle)
 	if err != nil {
 		return err
 	}
-	res, err := s.db.Exec(`UPDATE people SET admin = ? WHERE handle = ? AND removed_at IS NULL`, boolInt(admin), h)
+	return s.write(func(tx *sql.Tx) error {
+		if !admin {
+			if err := guardLastAdmin(tx, h); err != nil {
+				return err
+			}
+		}
+		res, err := tx.Exec(`UPDATE people SET admin = ? WHERE handle = ? AND removed_at IS NULL`, boolInt(admin), h)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return notFound("person " + h)
+		}
+		return nil
+	})
+}
+
+// guardLastAdmin returns ErrLastAdmin if handle is the only remaining admin.
+// It runs inside the same immediate transaction as the change it guards, so
+// two writers, even in different processes, cannot each see a second admin.
+func guardLastAdmin(tx *sql.Tx, handle string) error {
+	var isAdmin, admins int
+	err := tx.QueryRow(`SELECT
+		COALESCE((SELECT admin FROM people WHERE handle = ? AND removed_at IS NULL), 0),
+		(SELECT COUNT(*) FROM people WHERE admin = 1 AND removed_at IS NULL)`, handle).Scan(&isAdmin, &admins)
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return notFound("person " + h)
+	if isAdmin == 1 && admins <= 1 {
+		return ErrLastAdmin
 	}
 	return nil
 }
 
-// RemovePerson deletes a person's keys, memberships and read markers and
+// RemovePerson, which fails with ErrLastAdmin for the only admin, deletes a person's keys, memberships and read markers and
 // tombstones the handle: it can never be registered again, so nobody can
 // inherit the removed person's DM history. Events they authored stay in the log.
 func (s *Store) RemovePerson(handle string) error {
@@ -139,6 +164,9 @@ func (s *Store) RemovePerson(handle string) error {
 		return err
 	}
 	return s.write(func(tx *sql.Tx) error {
+		if err := guardLastAdmin(tx, h); err != nil {
+			return err
+		}
 		res, err := tx.Exec(`UPDATE people SET removed_at = ?, admin = 0
 			WHERE handle = ? AND removed_at IS NULL`, s.nowMS(), h)
 		if err != nil {

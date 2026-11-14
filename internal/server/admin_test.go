@@ -622,3 +622,97 @@ func TestRestoredServerKeepsHostKeyAndPeople(t *testing.T) {
 		t.Fatalf("PersonCount = %d", n)
 	}
 }
+
+// twoAdminsTwoHandles seeds a file with admins a and b and returns two
+// independent store handles on it, as two processes would hold.
+func twoAdminsTwoHandles(t *testing.T) (*server.Store, *server.Store) {
+	t.Helper()
+	s1, dir := adminStore(t)
+	mustPerson(t, s1, model.Person{Handle: "a", Admin: true})
+	mustPerson(t, s1, model.Person{Handle: "b", Admin: true})
+	s2, err := server.OpenStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s2.Close() })
+	return s1, s2
+}
+
+// raceBoth runs f1 and f2 at the same moment and returns their errors.
+func raceBoth(f1, f2 func() error) (error, error) {
+	start := make(chan struct{})
+	var e1, e2 error
+	done := make(chan struct{}, 2)
+	go func() { <-start; e1 = f1(); done <- struct{}{} }()
+	go func() { <-start; e2 = f2(); done <- struct{}{} }()
+	close(start)
+	<-done
+	<-done
+	return e1, e2
+}
+
+func requireOneWinner(t *testing.T, st *server.Store, e1, e2 error) {
+	t.Helper()
+	ok := 0
+	for _, e := range []error{e1, e2} {
+		switch {
+		case e == nil:
+			ok++
+		case !errors.Is(e, server.ErrLastAdmin):
+			t.Fatalf("loser error = %v, want ErrLastAdmin", e)
+		}
+	}
+	if ok != 1 {
+		t.Fatalf("%d of 2 concurrent operations succeeded (%v, %v), want exactly 1", ok, e1, e2)
+	}
+	if n := adminsLeft(t, st); n != 1 {
+		t.Fatalf("%d admins left, want 1", n)
+	}
+}
+
+func adminsLeft(t *testing.T, st *server.Store) int {
+	t.Helper()
+	people, err := st.People()
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, p := range people {
+		if p.Admin {
+			n++
+		}
+	}
+	return n
+}
+
+func TestConcurrentRevokeKeepsAnAdmin(t *testing.T) {
+	s1, s2 := twoAdminsTwoHandles(t)
+	e1, e2 := raceBoth(
+		func() error { return server.SetAdminRights(s1, "a", false) },
+		func() error { return server.SetAdminRights(s2, "b", false) },
+	)
+	requireOneWinner(t, s1, e1, e2)
+}
+
+func TestConcurrentRemoveKeepsAnAdmin(t *testing.T) {
+	s1, s2 := twoAdminsTwoHandles(t)
+	e1, e2 := raceBoth(
+		func() error { _, err := server.RemovePersonFully(s1, "a", "a", server.RemovalHooks{}); return err },
+		func() error { _, err := server.RemovePersonFully(s2, "b", "b", server.RemovalHooks{}); return err },
+	)
+	requireOneWinner(t, s1, e1, e2)
+}
+
+func TestStoreGuardsLastAdminDirectly(t *testing.T) {
+	st, _ := adminStore(t)
+	mustPerson(t, st, model.Person{Handle: "a", Admin: true})
+	if err := st.SetAdmin("a", false); !errors.Is(err, server.ErrLastAdmin) {
+		t.Fatalf("SetAdmin revoke last: %v", err)
+	}
+	if err := st.RemovePerson("a"); !errors.Is(err, server.ErrLastAdmin) {
+		t.Fatalf("RemovePerson last admin: %v", err)
+	}
+	if p, err := st.Person("a"); err != nil || !p.Admin {
+		t.Fatalf("a = %+v, %v", p, err)
+	}
+}

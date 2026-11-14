@@ -113,7 +113,9 @@ type Removal struct {
 }
 
 // RemovePersonFully takes target out of every room as actor, appending
-// member.left, then removes them. The last admin is refused. DM history stays.
+// member.left, then removes them. The last admin is refused, first by an early
+// check that avoids leaving rooms for nothing and finally, atomically, by
+// Store.RemovePerson. DM history stays.
 func RemovePersonFully(st *Store, actor, target string, hooks RemovalHooks) (Removal, error) {
 	p, err := st.Person(target)
 	if err != nil {
