@@ -111,7 +111,7 @@ func (m *Model) footerKeys(g geom) []string {
 			return []string{"⏎ save", "esc cancel", "alt+⏎ newline"}
 		}
 		if wide {
-			return []string{"⏎ send", "alt+⏎ newline", "↑ select", "esc leave", "tab pane", "ctrl+c quit"}
+			return []string{"⏎ send", "alt+⏎ newline", "↑ select", "esc leave", "ctrl+c quit"}
 		}
 		return []string{"⏎ send", "esc chats", "alt+⏎ newline", "ctrl+c quit"}
 	case hasSel:

@@ -208,21 +208,18 @@ func (m *Model) commandKey(k tea.KeyPressMsg, g geom) tea.Cmd {
 	return nil
 }
 
-// cycleFocus steps chat list → thread → input in standard and wide layouts.
+// cycleFocus switches between the chat list and the thread in standard and
+// wide layouts; the input is reached with i or enter, and left with esc.
 func (m *Model) cycleFocus(g geom) {
 	if g.mode < Standard {
 		return
 	}
-	switch {
-	case m.focus == focusList && m.openID != "":
+	if m.focus == focusList && m.openID != "" {
 		m.promote()
 		m.focus = focusThread
-	case m.focus == focusThread && m.inputUsable(g):
-		m.promote()
-		m.toInput()
-	default:
-		m.focus = focusList
+		return
 	}
+	m.focus = focusList
 }
 
 // escape leaves a selection for the input, and the thread for the list.

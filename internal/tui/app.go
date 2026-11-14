@@ -89,6 +89,9 @@ type Model struct {
 	// readOpen and readNew say the open conversation is owed a MarkRead
 	// for being opened, and for a message that arrived in it.
 	readOpen, readNew bool
+	// lastTyped is when a key last typed into the input, to tell a burst
+	// of pasted keys from a lone esc or ↑.
+	lastTyped time.Time
 	// preview says the open conversation was put on screen by the
 	// interface, not chosen: it is not marked read and does not hold the
 	// keyboard until the user acts on it.
@@ -230,9 +233,13 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 	case outboxMsg:
 		return m.onOutbox(msg)
 	case markedMsg:
-		delete(m.readBusy, msg.conv)
+		if msg.b == m.b {
+			delete(m.readBusy, msg.conv)
+		}
 	case focusSetMsg:
-		m.focusBusy = false
+		if msg.b == m.b {
+			m.focusBusy = false
+		}
 	case splashDoneMsg:
 		if m.launching {
 			m.splashTimed = true
@@ -250,8 +257,10 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		}
 	case subscribedMsg:
 		m.b, m.procDown, m.downErr, m.startErr = msg.b, false, nil, ""
-		// A new connection has been told nothing.
-		m.focusSent = nil
+		// A new connection has been told nothing, and calls still out on the
+		// old one will not hold up the new one.
+		m.focusSent, m.focusBusy = nil, false
+		m.readBusy = map[string]bool{}
 		return m.rereadAll()
 	case resyncMsg:
 		return m.rereadAll()

@@ -44,7 +44,7 @@ func (m *Model) syncFocus() tea.Cmd {
 	b := m.b
 	return func() tea.Msg {
 		_ = b.SetFocus(want.conv, want.focused)
-		return focusSetMsg{}
+		return focusSetMsg{b: b}
 	}
 }
 
@@ -67,7 +67,7 @@ func (m *Model) syncRead() tea.Cmd {
 	b := m.b
 	return func() tea.Msg {
 		_ = b.MarkRead(conv)
-		return markedMsg{conv: conv}
+		return markedMsg{b: b, conv: conv}
 	}
 }
 

@@ -50,10 +50,9 @@ func TestEscAndTabMoveFocus(t *testing.T) {
 		h.key("tab")
 		got = append(got, h.m.focus)
 	}
-	if want := []focusArea{focusThread, focusInput, focusList}; !slices.Equal(got, want) {
+	if want := []focusArea{focusThread, focusList, focusThread}; !slices.Equal(got, want) {
 		t.Errorf("tab cycle = %v, want %v", got, want)
 	}
-	h.key("tab")
 	h.key("i")
 	if h.m.focus != focusInput || h.draft() != "" {
 		t.Errorf("i on the thread: focus %v draft %q", h.m.focus, h.draft())

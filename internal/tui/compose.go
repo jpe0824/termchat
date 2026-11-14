@@ -12,10 +12,10 @@ import (
 )
 
 const (
-	// enterGap is how long enter waits before it sends. Input arriving
-	// sooner turns it into a line break: without bracketed paste a pasted
-	// line break is an enter key with the next line right behind it.
-	enterGap = 25 * time.Millisecond
+	// defaultPasteGap is how long enter waits before it sends. Input
+	// arriving sooner turns it into a line break: without bracketed paste a
+	// pasted line break is an enter key with the next line right behind it.
+	defaultPasteGap = 25 * time.Millisecond
 	// counterFrom is the draft size, in bytes, past which its size shows.
 	counterFrom  = 7000
 	maxInputRows = 5
@@ -89,21 +89,35 @@ func keyText(k tea.KeyPressMsg) string {
 	return k.Text
 }
 
-func (m *Model) inputKey(k tea.KeyPressMsg, g geom) tea.Cmd {
+// inputKey handles a key for the focused input. No key that pasted text
+// can carry moves focus or acts as a command here: tab types a tab, and
+// esc and ↑ inside a burst are dropped.
+func (m *Model) inputKey(k tea.KeyPressMsg, g geom, burst bool) tea.Cmd {
 	c := m.composeFor(m.openID)
 	in, w := &c.in, m.inputWidth(g)
+	typed := true
+	defer func() {
+		if typed {
+			m.lastTyped = m.opts.Now()
+		}
+	}()
 	switch s := k.String(); s {
 	case "enter":
+		if m.opts.PasteGap < 0 {
+			typed = false
+			return m.submit()
+		}
 		m.enterGen++
 		m.enterConv = m.openID
-		return m.opts.Tick(enterGap, enterMsg{gen: m.enterGen})
+		return m.opts.Tick(m.opts.PasteGap, enterMsg{gen: m.enterGen})
 	case "alt+enter", "ctrl+j":
 		in.insert("\n")
-	case "esc":
-		m.leaveInput(g, c)
 	case "tab":
-		if g.mode >= Standard {
-			m.focus = focusList
+		in.insert("\t")
+	case "esc":
+		typed = false
+		if !burst {
+			m.leaveInput(g, c)
 		}
 	case "left":
 		in.left()
@@ -122,18 +136,24 @@ func (m *Model) inputKey(k tea.KeyPressMsg, g geom) tea.Cmd {
 	case "ctrl+u":
 		in.killLine()
 	case "up":
+		typed = false
 		if in.text == "" && c.edit == nil {
-			m.selectLast()
+			if !burst {
+				m.selectLast()
+			}
 			return nil
 		}
 		in.up(w)
 	case "down":
 		in.down(w)
 	case "pgup", "pgdown":
+		typed = false
 		return m.pageKey(s, g)
 	default:
 		if t := keyText(k); t != "" {
 			in.insert(cleanInput(t))
+		} else {
+			typed = false
 		}
 	}
 	return nil
@@ -178,6 +198,7 @@ func (m *Model) onPaste(s string) tea.Cmd {
 	if !m.inputUsable(g) {
 		return nil
 	}
+	m.promote()
 	m.toInput()
 	m.composeFor(m.openID).in.insert(cleanInput(s))
 	return nil
@@ -192,7 +213,7 @@ func (m *Model) submit() tea.Cmd {
 		return m.saveEdit(conv, c)
 	}
 	if c.sending {
-		return nil
+		return m.setInfo(conv, "still sending…")
 	}
 	text := strings.TrimRight(c.in.text, "\n")
 	switch model.CheckText(text) {
@@ -202,6 +223,7 @@ func (m *Model) submit() tea.Cmd {
 		return m.tooLong(conv, text)
 	}
 	c.sending = true
+	m.promote()
 	m.scrollToBottom()
 	b := m.b
 	return func() tea.Msg {
@@ -226,16 +248,20 @@ func (m *Model) onSent(msg sentMsg) tea.Cmd {
 	if c.edit != nil {
 		in = &c.edit.saved
 	}
+	var cmd tea.Cmd
 	if rest, ok := strings.CutPrefix(in.text, msg.text); ok {
 		rest = strings.TrimLeft(rest, "\n")
 		pos := max(in.pos-(len(in.text)-len(rest)), 0)
 		in.set(rest)
 		in.pos = pos
+	} else {
+		// The draft was changed while it was sent; it stays, and says so.
+		cmd = m.setInfo(msg.conv, "sent — draft kept")
 	}
 	if msg.conv == m.openID {
-		return m.requestThread()
+		return tea.Batch(cmd, m.requestThread())
 	}
-	return nil
+	return cmd
 }
 
 // --- geometry and drawing ---

@@ -33,10 +33,13 @@ type Config struct {
 	Rooms    map[string]string `toml:"rooms"` // conversation ID -> "all" | "mentions" | "muted"
 	MarkRead bool              `toml:"mark_read"`
 	Splash   bool              `toml:"splash"`
+	// PasteGapMS is how long, in milliseconds, the interface waits after
+	// enter for more pasted input before sending; 0 sends at once.
+	PasteGapMS int `toml:"paste_gap_ms"`
 }
 
 func defaults() *Config {
-	c := &Config{MarkRead: true, Splash: true}
+	c := &Config{MarkRead: true, Splash: true, PasteGapMS: 25}
 	c.CLI.Send = "allow"
 	c.Notify.Terminal = true
 	c.Notify.OS = true

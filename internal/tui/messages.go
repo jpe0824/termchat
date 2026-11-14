@@ -68,6 +68,9 @@ type (
 		items []ipc.OutboxItem
 		err   error
 	}
-	markedMsg   struct{ conv string }
-	focusSetMsg struct{}
+	markedMsg struct {
+		b    Backend
+		conv string
+	}
+	focusSetMsg struct{ b Backend }
 )

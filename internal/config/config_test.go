@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"testing"
 
 	"github.com/jpe0824/termchat/internal/paths"
@@ -84,5 +85,26 @@ func TestLoadFailsWhenConfigDirUncreatable(t *testing.T) {
 	}
 	if c, err := Load(); err == nil {
 		t.Fatalf("Load() = %+v, want error", c)
+	}
+}
+
+func TestPasteGapSetting(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TERMCHAT_CONFIG_DIR", dir)
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.PasteGapMS != 25 {
+		t.Errorf("default paste_gap_ms = %d, want 25", c.PasteGapMS)
+	}
+	for _, v := range []int{0, 80} {
+		body := []byte("paste_gap_ms = " + strconv.Itoa(v) + "\n")
+		if err := os.WriteFile(filepath.Join(dir, "config.toml"), body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if c, err = Load(); err != nil || c.PasteGapMS != v {
+			t.Errorf("paste_gap_ms = %d in the file: loaded %d, %v", v, c.PasteGapMS, err)
+		}
 	}
 }

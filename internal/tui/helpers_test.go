@@ -217,6 +217,10 @@ type tester struct {
 	// look at the model while a backend call is still out.
 	hold bool
 	held []tea.Cmd
+	// now is the model's clock; every message moves it on by step, so keys
+	// sent by a test count as typed unless step is set below the paste gap.
+	now  time.Time
+	step time.Duration
 }
 
 func newTester(t *testing.T, b Backend, mod ...func(*Options)) *tester {
@@ -232,8 +236,9 @@ func heldTester(t *testing.T, b Backend, mod ...func(*Options)) *tester {
 
 func buildTester(t *testing.T, hold bool, b Backend, mod ...func(*Options)) *tester {
 	t.Helper()
-	h := &tester{t: t, hold: hold}
+	h := &tester{t: t, hold: hold, now: base, step: time.Second}
 	opts := Options{
+		Now:      func() time.Time { return h.now },
 		Version:  "v0.1.0",
 		Server:   func() string { return "team.example:2222" },
 		Env:      func(k string) string { return map[string]string{"NO_COLOR": "1"}[k] },
@@ -281,6 +286,7 @@ func (h *tester) deliver(msg tea.Msg) {
 
 func (h *tester) send(msg tea.Msg) {
 	h.t.Helper()
+	h.now = h.now.Add(h.step)
 	_, cmd := h.m.Update(msg)
 	h.run(cmd)
 }

@@ -109,6 +109,10 @@ func (h *tester) typeText(s string) {
 			h.send(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 		case "\n":
 			h.send(tea.KeyPressMsg{Code: tea.KeyEnter})
+		case "\t":
+			h.send(tea.KeyPressMsg{Code: tea.KeyTab})
+		case "\x1b":
+			h.send(tea.KeyPressMsg{Code: tea.KeyEscape})
 		default:
 			r := []rune(g)
 			code := r[0]

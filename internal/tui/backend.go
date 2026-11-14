@@ -62,6 +62,12 @@ type Options struct {
 	Dial func(ctx context.Context) (Backend, error)
 	// Start connects and starts the background process when none runs.
 	Start func(ctx context.Context) (Backend, error)
+	// Now is the clock that tells a burst of pasted keys from typing.
+	Now func() time.Time
+	// PasteGap is how long enter waits for more input before it acts, and
+	// how close keys must follow each other to count as one paste. Zero
+	// means 25 ms; a negative value turns the wait off.
+	PasteGap time.Duration
 	// Send delivers a message to the running program from the subscription
 	// goroutine. Without it no subscription is kept.
 	Send func(tea.Msg)
@@ -81,5 +87,11 @@ func (o *Options) fill() {
 	}
 	if o.After == nil {
 		o.After = time.After
+	}
+	if o.Now == nil {
+		o.Now = time.Now
+	}
+	if o.PasteGap == 0 {
+		o.PasteGap = defaultPasteGap
 	}
 }

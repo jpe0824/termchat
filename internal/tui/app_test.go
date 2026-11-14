@@ -241,9 +241,8 @@ func TestTabSwitchesFocusAndArrowsScrollThread(t *testing.T) {
 		t.Errorf("up with the thread focused moved the chat list to %q", h.m.cursorID())
 	}
 	h.key("tab")
-	h.key("tab")
 	if h.m.focus != focusList {
-		t.Errorf("third tab focus = %v", h.m.focus)
+		t.Errorf("second tab focus = %v", h.m.focus)
 	}
 }
 

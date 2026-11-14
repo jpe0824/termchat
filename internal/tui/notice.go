@@ -20,6 +20,7 @@ type notice struct {
 	conv string
 	text string
 	ask  func() tea.Cmd
+	info bool
 }
 
 // setNotice shows an error; a timed one also clears after noticeFor.
@@ -30,6 +31,13 @@ func (m *Model) setNotice(conv, text string, timed bool) tea.Cmd {
 		return m.opts.Tick(noticeFor, noticeExpiredMsg{gen: m.noteGen})
 	}
 	return nil
+}
+
+// setInfo shows a note that is not an error, cleared like a timed one.
+func (m *Model) setInfo(conv, text string) tea.Cmd {
+	cmd := m.setNotice(conv, text, true)
+	m.note.info = true
+	return cmd
 }
 
 // ask puts a yes/no question in the notice line; y runs yes.
@@ -70,7 +78,7 @@ func (m *Model) noticeKey(s string) (cmd tea.Cmd, done bool) {
 // noteLine is what the line above the input says, if anything.
 func (m *Model) noteLine() (string, lipgloss.Style) {
 	switch c := m.drafts[m.openID]; {
-	case m.note != nil && m.note.conv == m.openID && m.note.ask != nil:
+	case m.note != nil && m.note.conv == m.openID && (m.note.ask != nil || m.note.info):
 		return m.note.text, m.st.heading
 	case m.note != nil && m.note.conv == m.openID:
 		return m.note.text, m.st.bad

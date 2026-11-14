@@ -9,8 +9,8 @@ import (
 var helpKeys = [][2]string{
 	{"enter", "send; open the selected chat; edit: save"},
 	{"alt+enter", "new line (also ctrl+j)"},
-	{"esc", "leave the input; cancel an edit; back to the chat list"},
-	{"tab", "chat list, thread, input"},
+	{"esc", "leave the input (as do i, enter and ↑ the other way); cancel an edit"},
+	{"tab", "chat list ↔ thread; in the input it types a tab"},
 	{"↑ ↓  k j", "move in the chat list; ↑ in an empty input selects your messages"},
 	{"e  d", "edit or delete your selected message"},
 	{"r  x", "retry or discard a failed message; r starts a stopped background process"},
@@ -47,6 +47,7 @@ func (m *Model) onKey(k tea.KeyPressMsg) tea.Cmd {
 		}
 		return nil
 	}
+	burst := m.inBurst()
 	m.flushEnter()
 	if cmd, done := m.noticeKey(s); done {
 		return cmd
@@ -59,7 +60,10 @@ func (m *Model) onKey(k tea.KeyPressMsg) tea.Cmd {
 	}
 	g := m.geom()
 	if m.inputActive(g) {
-		return m.inputKey(k, g)
+		return m.inputKey(k, g, burst)
+	}
+	if m.focus == focusInput && m.threadShown(g) {
+		return m.disabledKey(k, g)
 	}
 	return m.commandKey(k, g)
 }
@@ -133,4 +137,31 @@ func (m *Model) onWheel(p tea.Mouse) tea.Cmd {
 		return m.scroll(d)
 	}
 	return nil
+}
+
+// inBurst reports whether a key arrives as part of a burst of input, as an
+// unbracketed paste does: an enter is waiting, or the last key typed into
+// the input came less than the paste gap ago.
+func (m *Model) inBurst() bool {
+	if m.enterConv != "" {
+		return true
+	}
+	gap := m.opts.PasteGap
+	return gap > 0 && !m.lastTyped.IsZero() && m.opts.Now().Sub(m.lastTyped) < gap
+}
+
+// disabledKey handles a key for the input while the background process is
+// down: nothing typed may run as a command. r starts the process, esc
+// leaves the input, and every other key leaves a note saying so.
+func (m *Model) disabledKey(k tea.KeyPressMsg, g geom) tea.Cmd {
+	switch s := k.String(); s {
+	case "r":
+		return m.startProcess()
+	case "esc":
+		m.leaveInput(g, m.composeFor(m.openID))
+		return nil
+	case "pgup", "pgdown":
+		return m.pageKey(s, g)
+	}
+	return m.setNotice(m.openID, "background process not running — r to start, esc to leave the input", false)
 }

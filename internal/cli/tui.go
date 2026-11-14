@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"os"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
@@ -62,6 +63,7 @@ var runTUI = func(cmd *cobra.Command) error {
 	m := tui.New(nil, tui.Options{
 		Splash:   cfg.Splash,
 		MarkRead: cfg.MarkRead,
+		PasteGap: pasteGap(cfg.PasteGapMS),
 		Version:  Version,
 		Server:   configuredServer,
 		Env:      os.Getenv,
@@ -84,4 +86,13 @@ func configuredServer() string {
 		return ""
 	}
 	return cfg.Accounts[0].Server
+}
+
+// pasteGap turns config paste_gap_ms into the interface's option, where a
+// negative value turns the wait off.
+func pasteGap(ms int) time.Duration {
+	if ms <= 0 {
+		return -1
+	}
+	return time.Duration(ms) * time.Millisecond
 }
