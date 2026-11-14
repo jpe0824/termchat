@@ -127,7 +127,13 @@ func (s *Server) roomInvite(_ context.Context, c call, req proto.RoomInviteReq) 
 	if err != nil {
 		return nil, err
 	}
-	mine, err := s.announceJoin(c, conv.ID, target, nil)
+	// Inviting yourself is joining: the requesting device gets the
+	// conversation in its response instead of a push.
+	var except *Session
+	if target == c.me.Handle {
+		except = c.sess
+	}
+	mine, err := s.announceJoin(c, conv.ID, target, except)
 	if err != nil {
 		return nil, err
 	}

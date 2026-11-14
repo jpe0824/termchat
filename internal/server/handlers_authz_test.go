@@ -642,3 +642,27 @@ func TestHiddenConversationsAreIndistinguishableFromMissing(t *testing.T) {
 	}
 	d.do(proto.TypeRoomRename, proto.RoomRenameReq{Conv: private.ID, Name: "renamed"}, nil)
 }
+
+// An admin who invites themselves into a room learns it from the response on
+// the requesting device; only their other devices get conv.updated.
+func TestAdminSelfInviteSkipsRequestingSession(t *testing.T) {
+	ch := newChat(t, "alice", "bob")
+	if err := ch.h.Store.SetAdmin("alice", true); err != nil {
+		t.Fatal(err)
+	}
+	a1, a2, b := ch.dial("alice"), ch.dial("alice"), ch.dial("bob")
+	r := b.room("bobs", false)
+
+	a1.invite(r.ID, "alice")
+	a1.quiet()
+	if got := a2.convPush(); got.ID != r.ID {
+		t.Fatalf("a2 conv.updated for %s, want %s", got.ID, r.ID)
+	}
+	if ev := a2.eventPush(); ev.Kind != model.MemberJoined || ev.Target != "alice" {
+		t.Fatalf("a2 event = %+v", ev)
+	}
+	if ev := b.eventPush(); ev.Kind != model.MemberJoined || ev.Target != "alice" {
+		t.Fatalf("b event = %+v", ev)
+	}
+	a2.quiet()
+}
