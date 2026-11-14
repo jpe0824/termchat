@@ -20,6 +20,9 @@ type Key struct {
 
 const personCols = `handle, display_name, agent, admin, owner`
 
+// personColsP is personCols qualified with the table alias p.
+var personColsP = "p." + strings.ReplaceAll(personCols, ", ", ", p.")
+
 func scanPerson(sc scanner) (model.Person, error) {
 	var p model.Person
 	var agent, admin int
@@ -115,49 +118,72 @@ func (s *Store) PersonCount() (int, error) {
 }
 
 // SetAdmin grants or revokes admin rights. Revoking the last admin fails with
-// ErrLastAdmin.
+// ErrLastAdmin and granting to an agent account with ErrAgent.
 func (s *Store) SetAdmin(handle string, admin bool) error {
 	h, err := cleanName(handle)
 	if err != nil {
 		return err
 	}
 	return s.write(func(tx *sql.Tx) error {
-		if !admin {
-			if err := guardLastAdmin(tx, h); err != nil {
+		if admin {
+			agent, err := exists(tx, `SELECT 1 FROM people WHERE handle = ? AND agent = 1 AND removed_at IS NULL`, h)
+			if err != nil {
 				return err
 			}
+			if agent {
+				return fmt.Errorf("%w: %s", ErrAgent, h)
+			}
+		} else if err := guardLastAdmin(tx, h); err != nil {
+			return err
 		}
 		res, err := tx.Exec(`UPDATE people SET admin = ? WHERE handle = ? AND removed_at IS NULL`, boolInt(admin), h)
 		if err != nil {
 			return err
 		}
-		if n, _ := res.RowsAffected(); n == 0 {
-			return notFound("person " + h)
-		}
-		return nil
+		return requireAffected(res, "person "+h)
 	})
+}
+
+// lastAdminQuery is true when its handle is the only remaining admin.
+const lastAdminQuery = `SELECT
+	COALESCE((SELECT admin FROM people WHERE handle = ? AND removed_at IS NULL), 0) = 1
+	AND (SELECT COUNT(*) FROM people WHERE admin = 1 AND removed_at IS NULL) <= 1`
+
+func isLastAdmin(q querier, handle string) (bool, error) {
+	var last int
+	err := q.QueryRow(lastAdminQuery, handle).Scan(&last)
+	return last != 0, err
+}
+
+// IsLastAdmin reports whether handle is the only remaining admin. The answer
+// can be stale by the time the caller acts; changes that must not remove the
+// last admin rely on the check inside their own transaction.
+func (s *Store) IsLastAdmin(handle string) (bool, error) {
+	h, err := cleanName(handle)
+	if err != nil {
+		return false, err
+	}
+	return isLastAdmin(s.db, h)
 }
 
 // guardLastAdmin returns ErrLastAdmin if handle is the only remaining admin.
 // It runs inside the same immediate transaction as the change it guards, so
 // two writers, even in different processes, cannot each see a second admin.
 func guardLastAdmin(tx *sql.Tx, handle string) error {
-	var isAdmin, admins int
-	err := tx.QueryRow(`SELECT
-		COALESCE((SELECT admin FROM people WHERE handle = ? AND removed_at IS NULL), 0),
-		(SELECT COUNT(*) FROM people WHERE admin = 1 AND removed_at IS NULL)`, handle).Scan(&isAdmin, &admins)
+	last, err := isLastAdmin(tx, handle)
 	if err != nil {
 		return err
 	}
-	if isAdmin == 1 && admins <= 1 {
+	if last {
 		return ErrLastAdmin
 	}
 	return nil
 }
 
-// RemovePerson, which fails with ErrLastAdmin for the only admin, deletes a person's keys, memberships and read markers and
+// RemovePerson deletes a person's keys, memberships and read markers and
 // tombstones the handle: it can never be registered again, so nobody can
-// inherit the removed person's DM history. Events they authored stay in the log.
+// inherit the removed person's DM history. Events they authored stay in the
+// log. Removing the only remaining admin fails with ErrLastAdmin.
 func (s *Store) RemovePerson(handle string) error {
 	h, err := cleanName(handle)
 	if err != nil {
@@ -172,8 +198,8 @@ func (s *Store) RemovePerson(handle string) error {
 		if err != nil {
 			return err
 		}
-		if n, _ := res.RowsAffected(); n == 0 {
-			return notFound("person " + h)
+		if err := requireAffected(res, "person "+h); err != nil {
+			return err
 		}
 		for _, table := range []string{"keys", "members", "reads"} {
 			if _, err := tx.Exec(`DELETE FROM `+table+` WHERE handle = ?`, h); err != nil {
@@ -200,7 +226,7 @@ func (s *Store) AddKey(handle, fingerprint string, pub []byte) error {
 
 // PersonByKey resolves a key fingerprint to its owner.
 func (s *Store) PersonByKey(fingerprint string) (model.Person, error) {
-	p, err := scanPerson(s.db.QueryRow(`SELECT p.handle, p.display_name, p.agent, p.admin, p.owner
+	p, err := scanPerson(s.db.QueryRow(`SELECT `+personColsP+`
 		FROM keys k JOIN people p ON p.handle = k.handle
 		WHERE k.fingerprint = ? AND p.removed_at IS NULL`, fingerprint))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -248,10 +274,7 @@ func (s *Store) RemoveKey(fingerprint string) error {
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return notFound("key " + fingerprint)
-	}
-	return nil
+	return requireAffected(res, "key "+fingerprint)
 }
 
 // ---- invites ----

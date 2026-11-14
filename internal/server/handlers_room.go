@@ -7,15 +7,6 @@ import (
 	"github.com/jpe0824/termchat/internal/proto"
 )
 
-// loadRoom loads a conversation that must be a room.
-func (s *Server) loadRoom(p model.Person, id string) (model.Conversation, error) {
-	conv, err := s.visibleConv(p, id)
-	if err != nil {
-		return conv, err
-	}
-	return conv, requireRoom(conv)
-}
-
 // targetHandle normalises a handle from a request.
 func targetHandle(raw string) (string, error) {
 	h := model.NormalizeName(raw)
@@ -34,12 +25,12 @@ func (s *Server) dmOpen(_ context.Context, c call, req proto.DMOpenReq) (any, er
 	if err != nil {
 		return nil, err
 	}
-	theirs, err := s.convFor(dm.ID, other)
+	theirs, err := s.withReadSeq(dm, other)
 	if err != nil {
 		return nil, err
 	}
 	s.hub.push([]string{other}, proto.TypeConvUpdated, proto.ConvUpdatedPush{Conv: theirs}, nil)
-	mine, err := s.convFor(dm.ID, c.me.Handle)
+	mine, err := s.withReadSeq(dm, c.me.Handle)
 	if err != nil {
 		return nil, err
 	}
@@ -59,111 +50,104 @@ func (s *Server) roomCreate(_ context.Context, c call, req proto.RoomCreateReq) 
 }
 
 func (s *Server) roomJoin(_ context.Context, c call, req proto.RoomJoinReq) (any, error) {
-	conv, err := s.loadRoom(c.me, req.Conv)
+	conv, unlock, err := s.lockConv(c.me, req.Conv, requireRoom, joinable(c.me))
 	if err != nil {
 		return nil, err
 	}
-	if isMember(conv, c.me.Handle) {
-		return nil, fail(proto.CodeInvalid, "already a member")
-	}
-	if !conv.Open {
-		return nil, fail(proto.CodeForbidden, "room is private")
-	}
-	unlock := s.hub.lock(conv.ID)
 	defer unlock()
-	ev, err := s.store.AddMember(conv.ID, c.me.Handle, c.me.Handle)
-	if err != nil {
-		return nil, err
-	}
-	return s.announceJoin(c, ev, c.me.Handle)
-}
-
-// announceJoin pushes a member.joined event: the new member's devices first
-// learn the conversation, then every member receives the event. It returns the
-// conversation as the caller now sees it. The caller holds the lock.
-func (s *Server) announceJoin(c call, ev model.Event, joined string) (proto.RoomJoinRes, error) {
-	theirs, err := s.convFor(ev.ConvID, joined)
-	if err != nil {
-		return proto.RoomJoinRes{}, err
-	}
-	except := c.sess
-	if joined != c.me.Handle {
-		except = nil
-	}
-	s.hub.push([]string{joined}, proto.TypeConvUpdated, proto.ConvUpdatedPush{Conv: theirs}, except)
-	s.publish(ev, c.sess)
-	mine, err := s.convFor(ev.ConvID, c.me.Handle)
+	mine, err := s.announceJoin(c, conv.ID, c.me.Handle, c.sess)
 	return proto.RoomJoinRes{Conv: mine}, err
 }
 
+// announceJoin adds target as the caller and tells everyone: target's devices
+// other than except first learn the conversation, then every member receives
+// member.joined. It returns the conversation as the caller now sees it. The
+// caller holds the lock.
+func (s *Server) announceJoin(c call, id, target string, except *Session) (model.Conversation, error) {
+	var conv model.Conversation
+	_, err := s.commit(c.sess, func() (model.Event, error) {
+		ev, err := s.store.AddMember(id, c.me.Handle, target)
+		if err != nil {
+			return ev, err
+		}
+		if conv, err = s.store.Conversation(id); err != nil {
+			return ev, err
+		}
+		theirs, err := s.withReadSeq(conv, target)
+		if err != nil {
+			return ev, err
+		}
+		s.hub.push([]string{target}, proto.TypeConvUpdated, proto.ConvUpdatedPush{Conv: theirs}, except)
+		return ev, nil
+	})
+	if err != nil {
+		return conv, err
+	}
+	return s.withReadSeq(conv, c.me.Handle)
+}
+
 func (s *Server) roomLeave(_ context.Context, c call, req proto.RoomLeaveReq) (any, error) {
-	conv, err := s.loadRoom(c.me, req.Conv)
+	conv, unlock, err := s.lockConv(c.me, req.Conv, requireRoom)
 	if err != nil {
 		return nil, err
 	}
-	if !isMember(conv, c.me.Handle) {
-		return nil, fail(proto.CodeForbidden, "not a member")
-	}
-	if _, err := s.removeMember(c, conv.ID, c.me.Handle); err != nil {
+	defer unlock()
+	if err := s.leaveRoom(c, conv); err != nil {
 		return nil, err
 	}
 	return struct{}{}, nil
 }
 
-// removeMember removes target and publishes member.left to the remaining
-// members and to target, whose last push for the room it is.
-func (s *Server) removeMember(c call, conv, target string) (model.Event, error) {
-	unlock := s.hub.lock(conv)
-	defer unlock()
-	ev, err := s.store.RemoveMember(conv, c.me.Handle, target)
-	if err != nil {
-		return ev, err
+// leaveRoom takes the caller out of the room, which any member may do. The
+// caller holds the lock.
+func (s *Server) leaveRoom(c call, conv model.Conversation) error {
+	if err := requireMember(conv, c.me.Handle); err != nil {
+		return err
 	}
-	s.publish(ev, c.sess, target)
-	return ev, nil
+	_, err := s.removeMember(c, conv.ID, c.me.Handle)
+	return err
+}
+
+// removeMember removes target and publishes member.left to the remaining
+// members and to target, whose last push for the room it is. The caller holds
+// the lock.
+func (s *Server) removeMember(c call, conv, target string) (model.Event, error) {
+	return s.commit(c.sess, func() (model.Event, error) {
+		return s.store.RemoveMember(conv, c.me.Handle, target)
+	}, target)
 }
 
 func (s *Server) roomInvite(_ context.Context, c call, req proto.RoomInviteReq) (any, error) {
-	conv, err := s.loadRoom(c.me, req.Conv)
+	conv, unlock, err := s.lockConv(c.me, req.Conv, requireRoom, manager(c.me))
 	if err != nil {
 		return nil, err
 	}
-	if err := requireManager(conv, c.me); err != nil {
-		return nil, err
-	}
+	defer unlock()
 	target, err := targetHandle(req.Handle)
 	if err != nil {
 		return nil, err
 	}
-	unlock := s.hub.lock(conv.ID)
-	defer unlock()
-	ev, err := s.store.AddMember(conv.ID, c.me.Handle, target)
+	mine, err := s.announceJoin(c, conv.ID, target, nil)
 	if err != nil {
 		return nil, err
 	}
-	res, err := s.announceJoin(c, ev, target)
-	if err != nil {
-		return nil, err
-	}
-	return proto.RoomInviteRes(res), nil
+	return proto.RoomInviteRes{Conv: mine}, nil
 }
 
 func (s *Server) roomRemove(_ context.Context, c call, req proto.RoomRemoveReq) (any, error) {
-	conv, err := s.loadRoom(c.me, req.Conv)
+	conv, unlock, err := s.lockConv(c.me, req.Conv, requireRoom)
 	if err != nil {
 		return nil, err
 	}
+	defer unlock()
 	target, err := targetHandle(req.Handle)
 	if err != nil {
 		return nil, err
 	}
 	if target == c.me.Handle {
-		// Removing yourself is leaving, open to any member; the reply
-		// carries no member list because the caller no longer belongs.
-		if !isMember(conv, target) {
-			return nil, fail(proto.CodeForbidden, "not a member")
-		}
-		if _, err := s.removeMember(c, conv.ID, target); err != nil {
+		// The reply carries no member list because the caller no longer
+		// belongs.
+		if err := s.leaveRoom(c, conv); err != nil {
 			return nil, err
 		}
 		return proto.RoomRemoveRes{Conv: model.Conversation{ID: conv.ID, Kind: conv.Kind, Name: conv.Name, Open: conv.Open}}, nil
@@ -179,20 +163,17 @@ func (s *Server) roomRemove(_ context.Context, c call, req proto.RoomRemoveReq) 
 }
 
 func (s *Server) roomRename(_ context.Context, c call, req proto.RoomRenameReq) (any, error) {
-	conv, err := s.loadRoom(c.me, req.Conv)
+	conv, unlock, err := s.lockConv(c.me, req.Conv, requireRoom, manager(c.me))
 	if err != nil {
 		return nil, err
 	}
-	if err := requireManager(conv, c.me); err != nil {
-		return nil, err
-	}
-	unlock := s.hub.lock(conv.ID)
 	defer unlock()
-	ev, err := s.store.RenameRoom(conv.ID, c.me.Handle, req.Name)
+	_, err = s.commit(c.sess, func() (model.Event, error) {
+		return s.store.RenameRoom(conv.ID, c.me.Handle, req.Name)
+	})
 	if err != nil {
 		return nil, err
 	}
-	s.publish(ev, c.sess)
 	mine, err := s.convFor(conv.ID, c.me.Handle)
 	return proto.RoomRenameRes{Conv: mine}, err
 }

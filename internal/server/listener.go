@@ -11,9 +11,11 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -163,7 +165,7 @@ func loadOrCreateHostKey(path string) (ssh.Signer, error) {
 			return nil, gerr
 		}
 		pemBytes = pem.EncodeToMemory(block)
-		f, gerr := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		f, gerr := createPrivate(path)
 		if gerr != nil {
 			return nil, fmt.Errorf("server: create host key: %w", gerr)
 		}
@@ -295,10 +297,7 @@ func (s *Server) Close() error {
 	s.closeOnce.Do(func() {
 		s.mu.Lock()
 		s.closed = true
-		conns := make([]net.Conn, 0, len(s.conns))
-		for c := range s.conns {
-			conns = append(conns, c)
-		}
+		conns := slices.Collect(maps.Keys(s.conns))
 		s.mu.Unlock()
 		s.ln.Close()
 		for _, c := range conns {

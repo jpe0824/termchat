@@ -58,20 +58,6 @@ func InviteHandle(st *Store, handle, displayName string) (code string, existing 
 	return code, existing, err
 }
 
-func adminCount(st *Store) (int, error) {
-	people, err := st.People()
-	if err != nil {
-		return 0, err
-	}
-	n := 0
-	for _, p := range people {
-		if p.Admin {
-			n++
-		}
-	}
-	return n, nil
-}
-
 // SetAdminRights grants or revokes admin rights. Agents cannot be admins and
 // the last admin cannot be revoked.
 func SetAdminRights(st *Store, handle string, admin bool) error {
@@ -82,26 +68,7 @@ func SetAdminRights(st *Store, handle string, admin bool) error {
 	if p.Agent {
 		return fmt.Errorf("%w: %s", ErrAgent, p.Handle)
 	}
-	if !admin && p.Admin {
-		n, err := adminCount(st)
-		if err != nil {
-			return err
-		}
-		if n <= 1 {
-			return ErrLastAdmin
-		}
-	}
 	return st.SetAdmin(p.Handle, admin)
-}
-
-// RemovalHooks lets a running server serialise and publish removals. Both
-// fields are optional.
-type RemovalHooks struct {
-	// Lock is taken around each room's removal and Emit call and returns the
-	// unlock function.
-	Lock func(conv string) func()
-	// Emit receives each member.left event while the room is still locked.
-	Emit func(ev model.Event)
 }
 
 // Removal is what RemovePersonFully did.
@@ -116,19 +83,22 @@ type Removal struct {
 // member.left, then removes them. The last admin is refused, first by an early
 // check that avoids leaving rooms for nothing and finally, atomically, by
 // Store.RemovePerson. DM history stays.
-func RemovePersonFully(st *Store, actor, target string, hooks RemovalHooks) (Removal, error) {
+//
+// emit, when not nil, runs each room's removal: it is given the room and op,
+// which writes the member.left event, so a running server can hold the room's
+// lock around op and publish the event before releasing it. A nil emit just
+// runs op.
+func RemovePersonFully(st *Store, actor, target string, emit func(conv string, op func() (model.Event, error)) error) (Removal, error) {
 	p, err := st.Person(target)
 	if err != nil {
 		return Removal{}, err
 	}
-	if p.Admin {
-		n, err := adminCount(st)
-		if err != nil {
-			return Removal{}, err
-		}
-		if n <= 1 {
-			return Removal{}, ErrLastAdmin
-		}
+	last, err := st.IsLastAdmin(p.Handle)
+	if err != nil {
+		return Removal{}, err
+	}
+	if last {
+		return Removal{}, ErrLastAdmin
 	}
 	keys, err := st.Keys(p.Handle)
 	if err != nil {
@@ -138,12 +108,23 @@ func RemovePersonFully(st *Store, actor, target string, hooks RemovalHooks) (Rem
 	if err != nil {
 		return Removal{}, err
 	}
+	if emit == nil {
+		emit = func(_ string, op func() (model.Event, error)) error {
+			_, err := op()
+			return err
+		}
+	}
 	var out Removal
 	for _, conv := range convs {
 		if conv.Kind != model.ConvRoom {
 			continue
 		}
-		ev, err := removeFromRoom(st, conv.ID, actor, p.Handle, hooks)
+		var ev model.Event
+		err := emit(conv.ID, func() (model.Event, error) {
+			var err error
+			ev, err = st.RemoveMember(conv.ID, actor, p.Handle)
+			return ev, err
+		})
 		if err != nil {
 			return out, err
 		}
@@ -156,20 +137,6 @@ func RemovePersonFully(st *Store, actor, target string, hooks RemovalHooks) (Rem
 		out.Keys = append(out.Keys, k.Fingerprint)
 	}
 	return out, nil
-}
-
-func removeFromRoom(st *Store, conv, actor, target string, hooks RemovalHooks) (model.Event, error) {
-	if hooks.Lock != nil {
-		defer hooks.Lock(conv)()
-	}
-	ev, err := st.RemoveMember(conv, actor, target)
-	if err != nil {
-		return ev, err
-	}
-	if hooks.Emit != nil {
-		hooks.Emit(ev)
-	}
-	return ev, nil
 }
 
 // Room is one row of a room listing.

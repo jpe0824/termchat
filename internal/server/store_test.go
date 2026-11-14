@@ -3,7 +3,9 @@ package server
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"regexp"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -891,5 +893,113 @@ func TestDMHistorySurvivesRemoval(t *testing.T) {
 	cs, _ := s.ConversationsFor("ann")
 	if len(cs) != 1 || cs[0].ID != dm.ID || len(cs[0].Members) != 1 {
 		t.Fatalf("ConversationsFor(ann): %+v", cs)
+	}
+}
+
+func TestSetAdminRefusesAgentGrant(t *testing.T) {
+	s := newStore(t)
+	people(t, s, "ann")
+	if err := s.CreatePerson(model.Person{Handle: "bot", Agent: true, Owner: "ann"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAdmin("bot", true); !errors.Is(err, ErrAgent) || err.Error() != "agent accounts cannot be admins: bot" {
+		t.Fatalf("SetAdmin(agent) = %v, want ErrAgent", err)
+	}
+	if p, _ := s.Person("bot"); p.Admin {
+		t.Fatal("agent was made admin")
+	}
+}
+
+// ConversationsFor batches its member, last-seq and read-marker queries; each
+// row must still match what a single Conversation load and readSeq give.
+func TestConversationsForMatchesSingleLoads(t *testing.T) {
+	s := newStore(t)
+	people(t, s, "alice", "bob", "carol", "dave")
+	dm, err := s.OpenDM("bob", "alice") // no events, never read
+	if err != nil {
+		t.Fatal(err)
+	}
+	zeta := room(t, s, "zeta", "carol") // members join out of handle order
+	for _, h := range []string{"bob", "alice"} {
+		if _, err := s.AddMember(zeta.ID, "carol", h); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := range 3 {
+		post(t, s, zeta.ID, "carol", fmt.Sprintf("z%d", i), "hi")
+	}
+	if err := s.SetRead("alice", zeta.ID, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetRead("bob", zeta.ID, 6); err != nil {
+		t.Fatal(err)
+	}
+	alpha := room(t, s, "alpha", "alice") // never read by alice
+	if _, err := s.AddMember(alpha.ID, "alice", "carol"); err != nil {
+		t.Fatal(err)
+	}
+	post(t, s, alpha.ID, "carol", "a1", "hi")
+	if err := s.SetRead("carol", alpha.ID, 3); err != nil {
+		t.Fatal(err)
+	}
+	room(t, s, "elsewhere", "dave") // alice is not a member
+
+	got, err := s.ConversationsFor("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]struct {
+		members       string
+		last, readSeq int64
+	}{
+		dm.ID:    {"alice,bob", 0, 0},
+		zeta.ID:  {"alice,bob,carol", 6, 2},
+		alpha.ID: {"alice,carol", 3, 0},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d conversations, want %d: %+v", len(got), len(want), got)
+	}
+	for i, c := range got {
+		if i > 0 && got[i-1].ID >= c.ID {
+			t.Fatalf("not ordered by id: %s before %s", got[i-1].ID, c.ID)
+		}
+		w, ok := want[c.ID]
+		if !ok {
+			t.Fatalf("unexpected conversation %s", c.ID)
+		}
+		if m := strings.Join(c.Members, ","); m != w.members || c.LastSeq != w.last || c.ReadSeq != w.readSeq {
+			t.Fatalf("%s: members=%s last=%d read=%d, want %s %d %d", c.ID, m, c.LastSeq, c.ReadSeq, w.members, w.last, w.readSeq)
+		}
+		one, err := s.Conversation(c.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if one.ReadSeq, err = s.readSeq("alice", c.ID); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(one, c) {
+			t.Fatalf("batched %+v, single load %+v", c, one)
+		}
+	}
+}
+
+func TestBlankMessageUsesMsgIndex(t *testing.T) {
+	s := newStore(t)
+	rows, err := s.db.Query(`EXPLAIN QUERY PLAN `+blankMessageSQL, "c", "m", "a", "b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var plan []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+	}
+	if p := strings.Join(plan, "; "); !strings.Contains(p, "USING INDEX events_msg") {
+		t.Fatalf("plan = %s, want events_msg", p)
 	}
 }

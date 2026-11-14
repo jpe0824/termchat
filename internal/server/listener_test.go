@@ -343,7 +343,7 @@ func TestPushAndSessions(t *testing.T) {
 	if n := len(h.Server.Sessions("nobody")); n != 0 {
 		t.Fatalf("Sessions(nobody) = %d", n)
 	}
-	if err := ss[0].Push(proto.TypeConvUpdated, proto.ConvUpdatedPush{Conv: model.Conversation{ID: "c1"}}); err != nil {
+	if err := server.Push(ss[0], proto.TypeConvUpdated, proto.ConvUpdatedPush{Conv: model.Conversation{ID: "c1"}}); err != nil {
 		t.Fatal(err)
 	}
 	f := testutil.Read(t, c)

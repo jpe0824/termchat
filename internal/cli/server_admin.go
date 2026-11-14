@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -79,11 +78,21 @@ func openStore(cmd *cobra.Command, create bool) (*server.Store, error) {
 		return nil, err
 	}
 	if !create {
-		if _, err := os.Stat(filepath.Join(dir, "server.db")); err != nil {
+		if _, err := os.Stat(server.DBPath(dir)); err != nil {
 			return nil, fmt.Errorf("no server database in %s (run \"termchat server init\" first)", dir)
 		}
 	}
 	return server.OpenStore(dir)
+}
+
+// useStore runs fn with the server database open.
+func useStore(cmd *cobra.Command, create bool, fn func(*server.Store) error) error {
+	st, err := openStore(cmd, create)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	return fn(st)
 }
 
 // friendly turns store errors into messages that name what to do.
@@ -111,47 +120,44 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	if handle == "" {
 		return usagef("--handle is required")
 	}
-	st, err := openStore(cmd, true)
-	if err != nil {
-		return err
-	}
-	defer st.Close()
-	code, err := server.InitFirstAdmin(st, handle, name)
-	if err != nil {
-		return friendly(err, handle)
-	}
-	out := cmd.OutOrStdout()
-	fmt.Fprintf(out, "created admin %s\n", sanitize.Text(model.NormalizeName(handle)))
-	printJoinHint(out, code)
-	return nil
+	return useStore(cmd, true, func(st *server.Store) error {
+		code, err := server.InitFirstAdmin(st, handle, name)
+		if err != nil {
+			return friendly(err, handle)
+		}
+		out := cmd.OutOrStdout()
+		fmt.Fprintf(out, "created admin %s\n", shown(handle))
+		printJoinHint(out, code)
+		return nil
+	})
 }
 
 func runInvite(cmd *cobra.Command, args []string) error {
 	name, _ := cmd.Flags().GetString("name")
-	st, err := openStore(cmd, false)
-	if err != nil {
-		return err
-	}
-	defer st.Close()
-	code, existing, err := server.InviteHandle(st, args[0], name)
-	if errors.Is(err, server.ErrExists) {
-		return fmt.Errorf("handle %s was removed and cannot be invited again", sanitize.Text(args[0]))
-	}
-	if err != nil {
-		return friendly(err, args[0])
-	}
-	out := cmd.OutOrStdout()
-	h := sanitize.Text(model.NormalizeName(args[0]))
-	if existing {
-		fmt.Fprintf(out, "invite adds another device to %s\n", h)
-	} else {
-		fmt.Fprintf(out, "invite creates the new person %s\n", h)
-	}
-	printJoinHint(out, code)
-	return nil
+	return useStore(cmd, false, func(st *server.Store) error {
+		code, existing, err := server.InviteHandle(st, args[0], name)
+		if errors.Is(err, server.ErrExists) {
+			return fmt.Errorf("handle %s was removed and cannot be invited again", sanitize.Text(args[0]))
+		}
+		if err != nil {
+			return friendly(err, args[0])
+		}
+		out := cmd.OutOrStdout()
+		h := shown(args[0])
+		if existing {
+			fmt.Fprintf(out, "invite adds another device to %s\n", h)
+		} else {
+			fmt.Fprintf(out, "invite creates the new person %s\n", h)
+		}
+		printJoinHint(out, code)
+		return nil
+	})
 }
 
 func table(out io.Writer) *tabwriter.Writer { return tabwriter.NewWriter(out, 0, 0, 2, ' ', 0) }
+
+// shown is a handle as the server stores it, safe to print.
+func shown(handle string) string { return sanitize.Text(model.NormalizeName(handle)) }
 
 func cell(s string) string {
 	s = sanitize.Text(s)
@@ -163,114 +169,96 @@ func cell(s string) string {
 }
 
 func runUserList(cmd *cobra.Command, _ []string) error {
-	st, err := openStore(cmd, false)
-	if err != nil {
-		return err
-	}
-	defer st.Close()
-	people, err := st.People()
-	if err != nil {
-		return err
-	}
-	tw := table(cmd.OutOrStdout())
-	for _, p := range people {
-		var flags []string
-		if p.Admin {
-			flags = append(flags, "admin")
+	return useStore(cmd, false, func(st *server.Store) error {
+		people, err := st.People()
+		if err != nil {
+			return err
 		}
-		if p.Agent {
-			flags = append(flags, "agent (owner "+cell(p.Owner)+")")
+		tw := table(cmd.OutOrStdout())
+		for _, p := range people {
+			var flags []string
+			if p.Admin {
+				flags = append(flags, "admin")
+			}
+			if p.Agent {
+				flags = append(flags, "agent (owner "+cell(p.Owner)+")")
+			}
+			fmt.Fprintf(tw, "%s\t%s\t%s\n", cell(p.Handle), cell(p.DisplayName), cell(strings.Join(flags, ", ")))
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\n", cell(p.Handle), cell(p.DisplayName), cell(strings.Join(flags, ", ")))
-	}
-	return tw.Flush()
+		return tw.Flush()
+	})
 }
 
 func runUserRemove(cmd *cobra.Command, args []string) error {
-	st, err := openStore(cmd, false)
-	if err != nil {
-		return err
-	}
-	defer st.Close()
-	res, err := server.RemovePersonFully(st, model.NormalizeName(args[0]), args[0], server.RemovalHooks{})
-	if err != nil {
-		return friendly(err, args[0])
-	}
-	fmt.Fprintf(cmd.OutOrStdout(), "removed %s: left %d room(s), revoked %d key(s)\n",
-		sanitize.Text(model.NormalizeName(args[0])), len(res.Events), len(res.Keys))
-	return nil
+	return useStore(cmd, false, func(st *server.Store) error {
+		res, err := server.RemovePersonFully(st, model.NormalizeName(args[0]), args[0], nil)
+		if err != nil {
+			return friendly(err, args[0])
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "removed %s: left %d room(s), revoked %d key(s)\n",
+			shown(args[0]), len(res.Events), len(res.Keys))
+		return nil
+	})
 }
 
 func runUserAdmin(cmd *cobra.Command, args []string) error {
 	revoke, _ := cmd.Flags().GetBool("revoke")
-	st, err := openStore(cmd, false)
-	if err != nil {
-		return err
-	}
-	defer st.Close()
-	if err := server.SetAdminRights(st, args[0], !revoke); err != nil {
-		if errors.Is(err, server.ErrAgent) {
-			return fmt.Errorf("%s is an agent account; agents cannot be admins", sanitize.Text(args[0]))
+	return useStore(cmd, false, func(st *server.Store) error {
+		if err := server.SetAdminRights(st, args[0], !revoke); err != nil {
+			if errors.Is(err, server.ErrAgent) {
+				return fmt.Errorf("%s is an agent account; agents cannot be admins", sanitize.Text(args[0]))
+			}
+			return friendly(err, args[0])
 		}
-		return friendly(err, args[0])
-	}
-	verb := "granted admin to"
-	if revoke {
-		verb = "revoked admin from"
-	}
-	fmt.Fprintf(cmd.OutOrStdout(), "%s %s\n", verb, sanitize.Text(model.NormalizeName(args[0])))
-	return nil
+		verb := "granted admin to"
+		if revoke {
+			verb = "revoked admin from"
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "%s %s\n", verb, shown(args[0]))
+		return nil
+	})
 }
 
 func runKeyList(cmd *cobra.Command, args []string) error {
-	st, err := openStore(cmd, false)
-	if err != nil {
-		return err
-	}
-	defer st.Close()
-	keys, err := st.Keys(args[0])
-	if err != nil {
-		return friendly(err, args[0])
-	}
-	tw := table(cmd.OutOrStdout())
-	for _, k := range keys {
-		fmt.Fprintf(tw, "%s\t%s\n", cell(k.Fingerprint), k.AddedAt.UTC().Format(time.RFC3339))
-	}
-	return tw.Flush()
+	return useStore(cmd, false, func(st *server.Store) error {
+		keys, err := st.Keys(args[0])
+		if err != nil {
+			return friendly(err, args[0])
+		}
+		tw := table(cmd.OutOrStdout())
+		for _, k := range keys {
+			fmt.Fprintf(tw, "%s\t%s\n", cell(k.Fingerprint), k.AddedAt.UTC().Format(time.RFC3339))
+		}
+		return tw.Flush()
+	})
 }
 
 func runKeyRemove(cmd *cobra.Command, args []string) error {
-	st, err := openStore(cmd, false)
-	if err != nil {
-		return err
-	}
-	defer st.Close()
-	if err := st.RemoveKey(args[0]); err != nil {
-		return err
-	}
-	fmt.Fprintf(cmd.OutOrStdout(), "removed key %s\n", sanitize.Text(args[0]))
-	return nil
+	return useStore(cmd, false, func(st *server.Store) error {
+		if err := st.RemoveKey(args[0]); err != nil {
+			return err
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "removed key %s\n", sanitize.Text(args[0]))
+		return nil
+	})
 }
 
 func runRoomList(cmd *cobra.Command, _ []string) error {
-	st, err := openStore(cmd, false)
-	if err != nil {
-		return err
-	}
-	defer st.Close()
-	rooms, err := server.ListRooms(st)
-	if err != nil {
-		return err
-	}
-	tw := table(cmd.OutOrStdout())
-	for _, r := range rooms {
-		kind := "private"
-		if r.Open {
-			kind = "open"
+	return useStore(cmd, false, func(st *server.Store) error {
+		rooms, err := server.ListRooms(st)
+		if err != nil {
+			return err
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%d\n", cell(r.Name), kind, r.Members)
-	}
-	return tw.Flush()
+		tw := table(cmd.OutOrStdout())
+		for _, r := range rooms {
+			kind := "private"
+			if r.Open {
+				kind = "open"
+			}
+			fmt.Fprintf(tw, "%s\t%s\t%d\n", cell(r.Name), kind, r.Members)
+		}
+		return tw.Flush()
+	})
 }
 
 // passphrase reads the backup passphrase from the environment or, on a

@@ -1,6 +1,9 @@
 package server
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // SetClock replaces the clock used for the failed-authentication window.
 func SetClock(s *Server, now func() time.Time) {
@@ -28,3 +31,20 @@ func SetHandshakeTimeout(s *Server, d time.Duration) {
 // SetStoreClock replaces the clock the store uses for timestamps and invite
 // expiry.
 func SetStoreClock(st *Store, now func() time.Time) { st.now = now }
+
+// Push queues an unsolicited frame on the session's ordered outbox.
+func Push(sess *Session, typ string, payload any) error {
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	sess.enqueue(typ, b)
+	return nil
+}
+
+// LockCount is the number of conversation locks the hub has created.
+func LockCount(s *Server) int {
+	n := 0
+	s.hub.locks.Range(func(_, _ any) bool { n++; return true })
+	return n
+}

@@ -99,17 +99,6 @@ func (s *Session) Close() {
 	})
 }
 
-// Push writes an unsolicited frame with ID 0 directly, blocking until it is
-// written. It is safe from any goroutine but is not ordered against frames
-// the server queues itself; fan-out uses enqueue.
-func (s *Session) Push(typ string, payload any) error {
-	b, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	return s.write(proto.Frame{Type: typ, Payload: b})
-}
-
 // outboxSize is how many queued pushes a session may fall behind by before the
 // server drops it; the client reconnects and catches up with conv.sync.
 const outboxSize = 256
@@ -240,20 +229,20 @@ func (s *Session) keyPresent() bool {
 // handleFrame answers one request and reports whether to keep reading.
 func (s *Session) handleFrame(f proto.Frame) bool {
 	if !s.limiter.Allow() {
-		return s.reply(f, nil, &proto.Error{Code: proto.CodeRateLimited, Message: "too many requests"})
+		return s.reply(f, nil, protoErr(proto.CodeRateLimited, "too many requests"))
 	}
 	if s.Known && !s.keyPresent() {
 		return false
 	}
 	if !s.helloed && f.Type != proto.TypeHello {
-		return s.reply(f, nil, &proto.Error{Code: proto.CodeInvalid, Message: "first frame must be hello"})
+		return s.reply(f, nil, protoErr(proto.CodeInvalid, "first frame must be hello"))
 	}
 	if !s.Known && f.Type != proto.TypeHello && f.Type != proto.TypeInviteRedeem {
-		return s.reply(f, nil, &proto.Error{Code: proto.CodeNotAuthorised, Message: "unknown key"})
+		return s.reply(f, nil, protoErr(proto.CodeNotAuthorised, "unknown key"))
 	}
 	h := s.srv.handler(f.Type)
 	if h == nil {
-		return s.reply(f, nil, &proto.Error{Code: proto.CodeInvalid, Message: "unknown request type"})
+		return s.reply(f, nil, protoErr(proto.CodeInvalid, "unknown request type"))
 	}
 	if f.Type == proto.TypeMsgSend || f.Type == proto.TypeMsgEdit {
 		if perr := s.checkBodySize(f); perr != nil {
@@ -269,16 +258,17 @@ func (s *Session) handleFrame(f proto.Frame) bool {
 
 // checkBodySize decodes only Body.Data, to measure it.
 func (s *Session) checkBodySize(f proto.Frame) *proto.Error {
-	var p struct {
+	type bodyOnly struct {
 		Body struct {
 			Data []byte `json:"data"`
 		} `json:"body"`
 	}
-	if err := json.Unmarshal(f.Payload, &p); err != nil {
-		return &proto.Error{Code: proto.CodeInvalid, Message: "malformed payload"}
+	p, perr := decode[bodyOnly](f.Payload, false)
+	if perr != nil {
+		return perr
 	}
 	if len(p.Body.Data) > s.srv.limits.MaxBody {
-		return &proto.Error{Code: proto.CodeTooLarge, Message: fmt.Sprintf("body exceeds %d bytes", s.srv.limits.MaxBody)}
+		return protoErr(proto.CodeTooLarge, fmt.Sprintf("body exceeds %d bytes", s.srv.limits.MaxBody))
 	}
 	return nil
 }
@@ -312,7 +302,7 @@ func (s *Session) reply(f proto.Frame, res any, perr *proto.Error) bool {
 	}
 	err := s.queue(out)
 	if errors.Is(err, proto.ErrFrameTooLarge) {
-		out = proto.Frame{ID: f.ID, Type: f.Type, Error: &proto.Error{Code: proto.CodeTooLarge, Message: "response too large"}}
+		out = proto.Frame{ID: f.ID, Type: f.Type, Error: protoErr(proto.CodeTooLarge, "response too large")}
 		err = s.queue(out)
 	}
 	return err == nil
@@ -336,12 +326,12 @@ func (s *Session) queue(f proto.Frame) error {
 }
 
 func (s *Server) handleHello(_ context.Context, sess *Session, f proto.Frame) (any, *proto.Error) {
-	var req proto.HelloReq
-	if err := json.Unmarshal(f.Payload, &req); err != nil {
-		return nil, &proto.Error{Code: proto.CodeInvalid, Message: "malformed payload"}
+	req, perr := decode[proto.HelloReq](f.Payload, false)
+	if perr != nil {
+		return nil, perr
 	}
 	if req.Version != proto.Version {
-		return nil, &proto.Error{Code: proto.CodeVersionMismatch, Message: fmt.Sprintf("server speaks version %d", proto.Version)}
+		return nil, protoErr(proto.CodeVersionMismatch, fmt.Sprintf("server speaks version %d", proto.Version))
 	}
 	sess.helloed = true
 	res := proto.HelloRes{Version: proto.Version}
@@ -353,9 +343,9 @@ func (s *Server) handleHello(_ context.Context, sess *Session, f proto.Frame) (a
 }
 
 func (s *Server) handleRedeem(_ context.Context, sess *Session, f proto.Frame) (any, *proto.Error) {
-	var req proto.InviteRedeemReq
-	if err := json.Unmarshal(f.Payload, &req); err != nil {
-		return nil, &proto.Error{Code: proto.CodeInvalid, Message: "malformed payload"}
+	req, perr := decode[proto.InviteRedeemReq](f.Payload, false)
+	if perr != nil {
+		return nil, perr
 	}
 	p, err := s.store.RedeemInvite(req.Code, sess.Fingerprint, sess.pub)
 	switch {
@@ -366,7 +356,7 @@ func (s *Server) handleRedeem(_ context.Context, sess *Session, f proto.Frame) (
 		if s.recordAuthFailure(sess.ip) {
 			sess.closing = true
 		}
-		return nil, &proto.Error{Code: proto.CodeNotAuthorised, Message: "invite not valid"}
+		return nil, protoErr(proto.CodeNotAuthorised, "invite not valid")
 	default:
 		s.log.Error("redeem failed", "err", err)
 		return nil, internalError()

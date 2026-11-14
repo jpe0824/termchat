@@ -118,7 +118,7 @@ func TestInviteForRemovedHandleRefused(t *testing.T) {
 	st, _ := adminStore(t)
 	mustPerson(t, st, model.Person{Handle: "ann", Admin: true})
 	mustPerson(t, st, model.Person{Handle: "bob"})
-	if _, err := server.RemovePersonFully(st, "ann", "bob", server.RemovalHooks{}); err != nil {
+	if _, err := server.RemovePersonFully(st, "ann", "bob", nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := server.InviteHandle(st, "bob", ""); !errors.Is(err, server.ErrExists) {
@@ -153,9 +153,13 @@ func TestRemovePersonFully(t *testing.T) {
 
 	var emitted []model.Event
 	locks := 0
-	res, err := server.RemovePersonFully(st, "ann", "bob", server.RemovalHooks{
-		Lock: func(string) func() { locks++; return func() {} },
-		Emit: func(ev model.Event) { emitted = append(emitted, ev) },
+	res, err := server.RemovePersonFully(st, "ann", "bob", func(_ string, op func() (model.Event, error)) error {
+		locks++
+		ev, err := op()
+		if err == nil {
+			emitted = append(emitted, ev)
+		}
+		return err
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -191,7 +195,7 @@ func TestRemoveLastAdminRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := server.RemovePersonFully(st, "ann", "ann", server.RemovalHooks{}); !errors.Is(err, server.ErrLastAdmin) {
+	if _, err := server.RemovePersonFully(st, "ann", "ann", nil); !errors.Is(err, server.ErrLastAdmin) {
 		t.Fatalf("error = %v, want ErrLastAdmin", err)
 	}
 	if p, err := st.Person("ann"); err != nil || !p.Admin {
@@ -201,7 +205,7 @@ func TestRemoveLastAdminRefused(t *testing.T) {
 		t.Fatal("ann left the room despite the refusal")
 	}
 	mustPerson(t, st, model.Person{Handle: "cat", Admin: true})
-	if _, err := server.RemovePersonFully(st, "cat", "ann", server.RemovalHooks{}); err != nil {
+	if _, err := server.RemovePersonFully(st, "cat", "ann", nil); err != nil {
 		t.Fatalf("removing one of two admins: %v", err)
 	}
 }
@@ -697,8 +701,8 @@ func TestConcurrentRevokeKeepsAnAdmin(t *testing.T) {
 func TestConcurrentRemoveKeepsAnAdmin(t *testing.T) {
 	s1, s2 := twoAdminsTwoHandles(t)
 	e1, e2 := raceBoth(
-		func() error { _, err := server.RemovePersonFully(s1, "a", "a", server.RemovalHooks{}); return err },
-		func() error { _, err := server.RemovePersonFully(s2, "b", "b", server.RemovalHooks{}); return err },
+		func() error { _, err := server.RemovePersonFully(s1, "a", "a", nil); return err },
+		func() error { _, err := server.RemovePersonFully(s2, "b", "b", nil); return err },
 	)
 	requireOneWinner(t, s1, e1, e2)
 }

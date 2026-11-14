@@ -4,7 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"sort"
+	"maps"
+	"slices"
 
 	"github.com/jpe0824/termchat/internal/model"
 	"github.com/jpe0824/termchat/internal/proto"
@@ -14,7 +15,6 @@ const (
 	maxHistoryLimit = 200
 	maxMsgIDLen     = 64
 	maxMentions     = 50
-	inviteTTL       = InviteTTL
 
 	// responseBudget bounds the events in one history or sync response so a
 	// frame of maximum-size bodies stays under proto.MaxFrame.
@@ -29,8 +29,22 @@ type call struct {
 	me   model.Person
 }
 
-func internalError() *proto.Error {
-	return &proto.Error{Code: proto.CodeInternal, Message: "internal error"}
+// protoErr builds a response error.
+func protoErr(code, msg string) *proto.Error { return &proto.Error{Code: code, Message: msg} }
+
+func internalError() *proto.Error { return protoErr(proto.CodeInternal, "internal error") }
+
+// decode unmarshals a request payload. An empty payload decodes to the zero
+// value only when allowEmpty is set; otherwise it is malformed.
+func decode[T any](payload []byte, allowEmpty bool) (T, *proto.Error) {
+	var v T
+	if len(payload) == 0 && allowEmpty {
+		return v, nil
+	}
+	if err := json.Unmarshal(payload, &v); err != nil {
+		return v, protoErr(proto.CodeInvalid, "malformed payload")
+	}
+	return v, nil
 }
 
 // protoError maps a handler error to a response error. Anything unexpected is
@@ -41,17 +55,17 @@ func (s *Server) protoError(typ string, err error) *proto.Error {
 	case errors.As(err, &pe):
 		return pe
 	case errors.Is(err, ErrNotFound):
-		return &proto.Error{Code: proto.CodeNotFound, Message: "not found"}
+		return protoErr(proto.CodeNotFound, "not found")
 	case errors.Is(err, ErrForbidden):
-		return &proto.Error{Code: proto.CodeForbidden, Message: "not allowed"}
+		return protoErr(proto.CodeForbidden, "not allowed")
 	case errors.Is(err, ErrExists):
-		return &proto.Error{Code: proto.CodeInvalid, Message: "already exists"}
+		return protoErr(proto.CodeInvalid, "already exists")
 	case errors.Is(err, ErrLastAdmin):
-		return &proto.Error{Code: proto.CodeInvalid, Message: "that is the last admin"}
+		return protoErr(proto.CodeInvalid, "that is the last admin")
 	case errors.Is(err, ErrInvalidName):
-		return &proto.Error{Code: proto.CodeInvalid, Message: "invalid name"}
+		return protoErr(proto.CodeInvalid, "invalid name")
 	case errors.Is(err, ErrInviteInvalid):
-		return &proto.Error{Code: proto.CodeNotAuthorised, Message: "invite not valid"}
+		return protoErr(proto.CodeNotAuthorised, "invite not valid")
 	}
 	s.log.Error("request failed", "type", typ, "err", err)
 	return internalError()
@@ -61,11 +75,9 @@ func (s *Server) protoError(typ string, err error) *proto.Error {
 // caller from the store, and maps the returned error to a response error.
 func register[Req any](s *Server, typ string, fn func(ctx context.Context, c call, req Req) (any, error)) {
 	s.Handle(typ, func(ctx context.Context, sess *Session, f proto.Frame) (any, *proto.Error) {
-		var req Req
-		if len(f.Payload) > 0 {
-			if err := json.Unmarshal(f.Payload, &req); err != nil {
-				return nil, &proto.Error{Code: proto.CodeInvalid, Message: "malformed payload"}
-			}
+		req, perr := decode[Req](f.Payload, true)
+		if perr != nil {
+			return nil, perr
 		}
 		me, err := s.caller(sess)
 		if err != nil {
@@ -108,7 +120,13 @@ func (s *Server) convFor(id, handle string) (model.Conversation, error) {
 	if err != nil {
 		return c, err
 	}
-	c.ReadSeq, err = s.store.readSeq(handle, id)
+	return s.withReadSeq(c, handle)
+}
+
+// withReadSeq returns a copy of c carrying handle's read marker.
+func (s *Server) withReadSeq(c model.Conversation, handle string) (model.Conversation, error) {
+	var err error
+	c.ReadSeq, err = s.store.readSeq(handle, c.ID)
 	return c, err
 }
 
@@ -117,26 +135,24 @@ func (s *Server) convFor(id, handle string) (model.Conversation, error) {
 // has committed ev. If the member list cannot be read the event stays in the
 // log and clients receive it on their next conv.sync.
 func (s *Server) publish(ev model.Event, except *Session, extra ...string) {
-	c, err := s.store.Conversation(ev.ConvID)
+	members, err := s.store.Members(ev.ConvID)
 	if err != nil {
 		s.log.Error("publish: load members", "conv", ev.ConvID, "seq", ev.Seq, "err", err)
 		return
 	}
-	s.hub.Publish(ev, append(c.Members, extra...), except)
+	s.hub.Publish(ev, append(members, extra...), except)
 }
 
-// lockMember takes the conversation lock for a member's write. Membership is
-// checked again under the lock so a removal that completed first wins.
-func (s *Server) lockMember(p model.Person, conv string) (func(), error) {
-	if _, err := s.memberConv(p, conv); err != nil {
-		return nil, err
+// commit runs op, which writes one event, and publishes the event. The caller
+// holds the conversation lock from lockConv, so the write and the publish
+// cannot interleave with another writer's and every session sees Seq order.
+func (s *Server) commit(except *Session, op func() (model.Event, error), extra ...string) (model.Event, error) {
+	ev, err := op()
+	if err != nil {
+		return ev, err
 	}
-	unlock := s.hub.lock(conv)
-	if err := s.requireMember(conv, p.Handle); err != nil {
-		unlock()
-		return nil, err
-	}
-	return unlock, nil
+	s.publish(ev, except, extra...)
+	return ev, nil
 }
 
 // ---- reading ----
@@ -157,18 +173,16 @@ func (s *Server) convList(_ context.Context, c call, _ proto.ConvListReq) (any, 
 	if err != nil {
 		return nil, err
 	}
-	open, err := s.store.OpenRooms()
+	open, err := s.store.openRoomsWithout(c.me.Handle)
 	if err != nil {
 		return nil, err
 	}
-	res := proto.ConvListRes{Mine: mine, OpenRooms: []model.Conversation{}}
+	res := proto.ConvListRes{Mine: mine, OpenRooms: open}
 	if res.Mine == nil {
 		res.Mine = []model.Conversation{}
 	}
-	for _, r := range open {
-		if !isMember(r, c.me.Handle) {
-			res.OpenRooms = append(res.OpenRooms, r)
-		}
+	if res.OpenRooms == nil {
+		res.OpenRooms = []model.Conversation{}
 	}
 	return res, nil
 }
@@ -182,14 +196,7 @@ func (s *Server) convHistory(_ context.Context, c call, req proto.ConvHistoryReq
 	if _, err := s.memberConv(c.me, req.Conv); err != nil {
 		return nil, err
 	}
-	limit := req.Limit
-	if limit <= 0 {
-		limit = defaultHistoryLimit
-	}
-	if limit > maxHistoryLimit {
-		limit = maxHistoryLimit
-	}
-	evs, err := s.store.History(req.Conv, req.BeforeSeq, limit)
+	evs, err := s.store.History(req.Conv, req.BeforeSeq, min(req.Limit, maxHistoryLimit))
 	if err != nil {
 		return nil, err
 	}
@@ -211,20 +218,16 @@ func (s *Server) convHistory(_ context.Context, c call, req proto.ConvHistoryReq
 }
 
 func (s *Server) convSync(_ context.Context, c call, req proto.ConvSyncReq) (any, error) {
-	convs := make([]string, 0, len(req.Cursors))
-	for id := range req.Cursors {
-		convs = append(convs, id)
+	mine, err := s.store.convIDsFor(c.me.Handle)
+	if err != nil {
+		return nil, err
 	}
-	sort.Strings(convs)
-
 	res := proto.ConvSyncRes{Events: []model.Event{}}
 	used, full := 0, false
-	for _, id := range convs {
-		ok, err := s.store.IsMember(id, c.me.Handle)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
+	for _, id := range slices.Sorted(maps.Keys(req.Cursors)) {
+		// Not visibleConv: a cursor for a conversation the caller has left
+		// is listed in Gone rather than failing the whole sync.
+		if !mine[id] {
 			res.Gone = append(res.Gone, id)
 			continue
 		}
@@ -277,7 +280,7 @@ func (s *Server) msgSend(_ context.Context, c call, req proto.MsgSendReq) (any, 
 	if err := validMentions(req.Mentions); err != nil {
 		return nil, err
 	}
-	unlock, err := s.lockMember(c.me, req.Conv)
+	_, unlock, err := s.lockConv(c.me, req.Conv, member(c.me))
 	if err != nil {
 		return nil, err
 	}
@@ -302,42 +305,45 @@ func (s *Server) msgEdit(_ context.Context, c call, req proto.MsgEditReq) (any, 
 	if err := validMentions(req.Mentions); err != nil {
 		return nil, err
 	}
-	unlock, err := s.lockMember(c.me, req.Conv)
+	_, unlock, err := s.lockConv(c.me, req.Conv, member(c.me))
 	if err != nil {
 		return nil, err
 	}
 	defer unlock()
-	ev, err := s.store.EditMessage(req.Conv, c.me.Handle, req.MsgID, req.Body, req.Mentions)
+	ev, err := s.commit(c.sess, func() (model.Event, error) {
+		return s.store.EditMessage(req.Conv, c.me.Handle, req.MsgID, req.Body, req.Mentions)
+	})
 	if err != nil {
 		return nil, err
 	}
-	s.publish(ev, c.sess)
 	return proto.MsgEditRes{Event: ev}, nil
 }
 
 func (s *Server) msgDelete(_ context.Context, c call, req proto.MsgDeleteReq) (any, error) {
-	unlock, err := s.lockMember(c.me, req.Conv)
+	_, unlock, err := s.lockConv(c.me, req.Conv, member(c.me))
 	if err != nil {
 		return nil, err
 	}
 	defer unlock()
-	ev, err := s.store.DeleteMessage(req.Conv, c.me.Handle, req.MsgID)
+	ev, err := s.commit(c.sess, func() (model.Event, error) {
+		return s.store.DeleteMessage(req.Conv, c.me.Handle, req.MsgID)
+	})
 	if err != nil {
 		return nil, err
 	}
-	s.publish(ev, c.sess)
 	return proto.MsgDeleteRes{Event: ev}, nil
 }
 
 func (s *Server) readSet(_ context.Context, c call, req proto.ReadSetReq) (any, error) {
-	if _, err := s.memberConv(c.me, req.Conv); err != nil {
-		return nil, err
-	}
-	conv, err := s.store.Conversation(req.Conv)
+	conv, err := s.memberConv(c.me, req.Conv)
 	if err != nil {
 		return nil, err
 	}
-	seq := min(max(req.Seq, 0), conv.LastSeq)
+	last, err := s.store.lastSeq(conv.ID)
+	if err != nil {
+		return nil, err
+	}
+	seq := min(max(req.Seq, 0), last)
 	if err := s.store.SetRead(c.me.Handle, req.Conv, seq); err != nil {
 		return nil, err
 	}

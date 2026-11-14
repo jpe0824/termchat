@@ -31,6 +31,11 @@ type Store struct {
 	now func() time.Time
 }
 
+const dbFile = "server.db"
+
+// DBPath is the database file in a server data directory.
+func DBPath(dir string) string { return filepath.Join(dir, dbFile) }
+
 // OpenStore opens or creates dir/server.db, applying pending migrations.
 //
 // Every transaction begins IMMEDIATE so that the read of a conversation's
@@ -41,7 +46,7 @@ func OpenStore(dir string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	dsn := filepath.Join(dir, "server.db") +
+	dsn := DBPath(dir) +
 		"?_txlock=immediate" +
 		"&_pragma=busy_timeout(5000)" +
 		"&_pragma=journal_mode(WAL)" +
@@ -96,6 +101,18 @@ func boolInt(b bool) int {
 	return 0
 }
 func notFound(what string) error { return fmt.Errorf("%w: %s", ErrNotFound, what) }
+
+// requireAffected returns notFound(what) when res changed no rows.
+func requireAffected(res sql.Result, what string) error {
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return notFound(what)
+	}
+	return nil
+}
 func exists(q querier, query string, args ...any) (bool, error) {
 	var one int
 	err := q.QueryRow(query, args...).Scan(&one)

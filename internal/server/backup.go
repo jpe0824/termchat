@@ -2,6 +2,7 @@ package server
 
 import (
 	"archive/tar"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -12,8 +13,6 @@ import (
 )
 
 const (
-	dbFile = "server.db"
-
 	maxDBEntry      = 64 << 30
 	maxHostKeyEntry = 64 << 10
 )
@@ -61,7 +60,7 @@ func Backup(dataDir, out, passphrase string) (err error) {
 		return fmt.Errorf("read host key: %w", err)
 	}
 
-	f, err := os.OpenFile(out, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	f, err := createPrivate(out)
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
 			return fmt.Errorf("%s already exists; refusing to overwrite", out)
@@ -99,11 +98,20 @@ func Backup(dataDir, out, passphrase string) (err error) {
 	if err != nil {
 		return err
 	}
-	tw := tar.NewWriter(enc)
-	if err := tarFile(tw, dbFile, snap); err != nil {
+	db, err := os.Open(snap)
+	if err != nil {
 		return err
 	}
-	if err := tarBytes(tw, hostKeyFile, hostKey); err != nil {
+	defer db.Close()
+	fi, err := db.Stat()
+	if err != nil {
+		return err
+	}
+	tw := tar.NewWriter(enc)
+	if err := tarEntry(tw, dbFile, fi.Size(), db); err != nil {
+		return err
+	}
+	if err := tarEntry(tw, hostKeyFile, int64(len(hostKey)), bytes.NewReader(hostKey)); err != nil {
 		return err
 	}
 	if err := tw.Close(); err != nil {
@@ -112,28 +120,16 @@ func Backup(dataDir, out, passphrase string) (err error) {
 	return enc.Close()
 }
 
-func tarFile(tw *tar.Writer, name, path string) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	fi, err := f.Stat()
-	if err != nil {
-		return err
-	}
-	if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o600, Size: fi.Size(), Typeflag: tar.TypeReg}); err != nil {
-		return err
-	}
-	_, err = io.Copy(tw, f)
-	return err
+// createPrivate creates path with mode 0600, failing if it already exists.
+func createPrivate(path string) (*os.File, error) {
+	return os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 }
 
-func tarBytes(tw *tar.Writer, name string, b []byte) error {
-	if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o600, Size: int64(len(b)), Typeflag: tar.TypeReg}); err != nil {
+func tarEntry(tw *tar.Writer, name string, size int64, r io.Reader) error {
+	if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o600, Size: size, Typeflag: tar.TypeReg}); err != nil {
 		return err
 	}
-	_, err := tw.Write(b)
+	_, err := io.Copy(tw, r)
 	return err
 }
 
@@ -216,7 +212,7 @@ func Restore(file, dataDir, passphrase string) (err error) {
 }
 
 func extract(path string, r io.Reader) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	f, err := createPrivate(path)
 	if err != nil {
 		return err
 	}

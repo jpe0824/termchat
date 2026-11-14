@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -22,29 +23,23 @@ func scanConv(sc scanner) (model.Conversation, error) {
 	return c, err
 }
 
-// fillConv sets Members and LastSeq.
-func fillConv(q querier, c *model.Conversation) error {
-	rows, err := q.Query(`SELECT handle FROM members WHERE conv = ? ORDER BY handle`, c.ID)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	c.Members = nil
-	for rows.Next() {
-		var h string
-		if err := rows.Scan(&h); err != nil {
-			return err
-		}
-		c.Members = append(c.Members, h)
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	return q.QueryRow(`SELECT COALESCE(MAX(seq), 0) FROM events WHERE conv = ?`, c.ID).Scan(&c.LastSeq)
-}
-
 // Conversation returns one conversation with Members and LastSeq filled.
 func (s *Store) Conversation(id string) (model.Conversation, error) {
+	c, err := s.conversation(id)
+	if err != nil {
+		return c, err
+	}
+	c.LastSeq, err = s.lastSeq(id)
+	return c, err
+}
+
+// convExists reports whether a conversation with the id exists.
+func (s *Store) convExists(id string) (bool, error) {
+	return exists(s.db, `SELECT 1 FROM conversations WHERE id = ?`, id)
+}
+
+// conversation is Conversation without LastSeq.
+func (s *Store) conversation(id string) (model.Conversation, error) {
 	c, err := scanConv(s.db.QueryRow(`SELECT `+convCols+` FROM conversations WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return c, notFound("conversation " + id)
@@ -52,9 +47,31 @@ func (s *Store) Conversation(id string) (model.Conversation, error) {
 	if err != nil {
 		return c, err
 	}
-	return c, fillConv(s.db, &c)
+	c.Members, err = s.Members(id)
+	return c, err
 }
 
+// Members lists a conversation's members, ordered by handle.
+func (s *Store) Members(conv string) ([]string, error) {
+	var out []string
+	err := eachRow(s.db, func(r *sql.Rows) error {
+		var h string
+		err := r.Scan(&h)
+		out = append(out, h)
+		return err
+	}, `SELECT handle FROM members WHERE conv = ? ORDER BY handle`, conv)
+	return out, err
+}
+
+// lastSeq is the conversation's highest Seq, zero when it has no events.
+func (s *Store) lastSeq(conv string) (int64, error) {
+	var seq int64
+	err := s.db.QueryRow(`SELECT COALESCE(MAX(seq), 0) FROM events WHERE conv = ?`, conv).Scan(&seq)
+	return seq, err
+}
+
+// listConvs runs a query selecting convCols and fills Members and LastSeq on
+// every row with one query each, whatever the number of rows.
 func (s *Store) listConvs(query string, args ...any) ([]model.Conversation, error) {
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
@@ -74,17 +91,83 @@ func (s *Store) listConvs(query string, args ...any) ([]model.Conversation, erro
 		return nil, err
 	}
 	_ = rows.Close()
-	for i := range out {
-		if err := fillConv(s.db, &out[i]); err != nil {
-			return nil, err
+	if len(out) == 0 {
+		return out, nil
+	}
+
+	ids := make([]string, len(out))
+	for i, c := range out {
+		ids[i] = c.ID
+	}
+	// One bound JSON array instead of a placeholder per id, so the number of
+	// conversations is not limited by SQLite's variable count.
+	idList, err := json.Marshal(ids)
+	if err != nil {
+		return nil, err
+	}
+	members := map[string][]string{}
+	err = eachRow(s.db, func(r *sql.Rows) error {
+		var conv, h string
+		if err := r.Scan(&conv, &h); err != nil {
+			return err
 		}
+		members[conv] = append(members[conv], h)
+		return nil
+	}, `SELECT conv, handle FROM members WHERE conv IN (SELECT value FROM json_each(?))
+		ORDER BY conv, handle`, string(idList))
+	if err != nil {
+		return nil, err
+	}
+	last, err := seqByConv(s.db, `SELECT conv, MAX(seq) FROM events
+		WHERE conv IN (SELECT value FROM json_each(?)) GROUP BY conv`, string(idList))
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].Members, out[i].LastSeq = members[out[i].ID], last[out[i].ID]
 	}
 	return out, nil
+}
+
+// eachRow runs query and calls fn for every row.
+func eachRow(q querier, fn func(*sql.Rows) error, query string, args ...any) error {
+	rows, err := q.Query(query, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		if err := fn(rows); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
+// seqByConv runs a query selecting (conv, seq) pairs into a map.
+func seqByConv(q querier, query string, args ...any) (map[string]int64, error) {
+	out := map[string]int64{}
+	err := eachRow(q, func(r *sql.Rows) error {
+		var conv string
+		var seq int64
+		if err := r.Scan(&conv, &seq); err != nil {
+			return err
+		}
+		out[conv] = seq
+		return nil
+	}, query, args...)
+	return out, err
 }
 
 // OpenRooms lists rooms anyone may join.
 func (s *Store) OpenRooms() ([]model.Conversation, error) {
 	return s.listConvs(`SELECT ` + convCols + ` FROM conversations WHERE kind = 'room' AND open = 1 ORDER BY name`)
+}
+
+// openRoomsWithout lists the open rooms handle does not belong to.
+func (s *Store) openRoomsWithout(handle string) ([]model.Conversation, error) {
+	return s.listConvs(`SELECT `+convCols+` FROM conversations WHERE kind = 'room' AND open = 1
+		AND id NOT IN (SELECT conv FROM members WHERE handle = ?) ORDER BY name`, handle)
 }
 
 // Rooms lists every room, open or private.
@@ -101,15 +184,15 @@ func (s *Store) ConversationsFor(handle string) ([]model.Conversation, error) {
 	}
 	out, err := s.listConvs(`SELECT `+convCols+` FROM conversations
 		WHERE id IN (SELECT conv FROM members WHERE handle = ?) ORDER BY id`, h)
+	if err != nil || len(out) == 0 {
+		return out, err
+	}
+	reads, err := seqByConv(s.db, `SELECT conv, seq FROM reads WHERE handle = ?`, h)
 	if err != nil {
 		return nil, err
 	}
 	for i := range out {
-		err := s.db.QueryRow(`SELECT COALESCE(
-			(SELECT seq FROM reads WHERE handle = ? AND conv = ?), 0)`, h, out[i].ID).Scan(&out[i].ReadSeq)
-		if err != nil {
-			return nil, err
-		}
+		out[i].ReadSeq = reads[out[i].ID]
 	}
 	return out, nil
 }
@@ -119,6 +202,20 @@ func (s *Store) readSeq(handle, conv string) (int64, error) {
 	var seq int64
 	err := s.db.QueryRow(`SELECT COALESCE((SELECT seq FROM reads WHERE handle = ? AND conv = ?), 0)`, handle, conv).Scan(&seq)
 	return seq, err
+}
+
+// convIDsFor is the set of conversation ids handle belongs to.
+func (s *Store) convIDsFor(handle string) (map[string]bool, error) {
+	out := map[string]bool{}
+	err := eachRow(s.db, func(r *sql.Rows) error {
+		var id string
+		if err := r.Scan(&id); err != nil {
+			return err
+		}
+		out[id] = true
+		return nil
+	}, `SELECT conv FROM members WHERE handle = ?`, handle)
+	return out, err
 }
 
 // IsMember reports whether handle belongs to the conversation.
@@ -263,8 +360,8 @@ func (s *Store) RemoveMember(conv, actor, handle string) (model.Event, error) {
 		if err != nil {
 			return err
 		}
-		if n, _ := res.RowsAffected(); n == 0 {
-			return notFound(h + " is not a member of " + conv)
+		if err := requireAffected(res, h+" is not a member of "+conv); err != nil {
+			return err
 		}
 		ev, err = s.appendTx(tx, model.Event{ConvID: conv, Kind: model.MemberLeft, Actor: a, Target: h})
 		return err

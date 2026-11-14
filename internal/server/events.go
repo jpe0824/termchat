@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/jpe0824/termchat/internal/model"
@@ -179,11 +180,15 @@ func authorOf(tx *sql.Tx, conv, actor, msgID string) error {
 	return nil
 }
 
+// blankMessageSQL repeats the events_msg index's condition on msg_id as a literal:
+// the planner cannot infer it from a bound msg_id, and without it the update
+// scans the conversation's whole log.
+const blankMessageSQL = `UPDATE events SET body_format = NULL, body_data = NULL
+	WHERE conv = ? AND msg_id = ? AND msg_id <> '' AND kind IN (?, ?)`
+
 // blankMessage erases the body of the original post and every earlier edit.
 func blankMessage(tx *sql.Tx, conv, msgID string) error {
-	_, err := tx.Exec(`UPDATE events SET body_format = NULL, body_data = NULL
-		WHERE conv = ? AND msg_id = ? AND kind IN (?, ?)`,
-		conv, msgID, string(model.MessagePosted), string(model.MessageEdited))
+	_, err := tx.Exec(blankMessageSQL, conv, msgID, string(model.MessagePosted), string(model.MessageEdited))
 	return err
 }
 
@@ -249,9 +254,7 @@ func (s *Store) History(conv string, beforeSeq int64, limit int) ([]model.Event,
 	if err != nil {
 		return nil, err
 	}
-	for i, j := 0, len(evs)-1; i < j; i, j = i+1, j-1 {
-		evs[i], evs[j] = evs[j], evs[i]
-	}
+	slices.Reverse(evs)
 	return evs, nil
 }
 

@@ -12,7 +12,7 @@ func (s *Server) deviceInvite(_ context.Context, c call, _ proto.DeviceInviteReq
 	if err := requireHuman(c.me); err != nil {
 		return nil, err
 	}
-	code, err := s.store.CreateInvite(c.me.Handle, c.me.DisplayName, inviteTTL)
+	code, err := s.store.CreateInvite(c.me.Handle, c.me.DisplayName, InviteTTL)
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +42,7 @@ func (s *Server) agentCreate(_ context.Context, c call, req proto.AgentCreateReq
 	if err != nil {
 		return nil, err
 	}
-	code, err := s.store.CreateAgentInvite(h, req.DisplayName, c.me.Handle, inviteTTL)
+	code, err := s.store.CreateAgentInvite(h, req.DisplayName, c.me.Handle, InviteTTL)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +57,7 @@ func (s *Server) adminInvite(_ context.Context, c call, req proto.AdminInviteReq
 	if err != nil {
 		return nil, err
 	}
-	code, err := s.store.CreateInvite(h, req.DisplayName, inviteTTL)
+	code, err := s.store.CreateInvite(h, req.DisplayName, InviteTTL)
 	if err != nil {
 		return nil, err
 	}
@@ -77,9 +77,11 @@ func (s *Server) adminRemovePerson(_ context.Context, c call, req proto.AdminRem
 	if target == c.me.Handle {
 		return nil, fail(proto.CodeInvalid, "admins cannot remove themselves")
 	}
-	res, err := RemovePersonFully(s.store, c.me.Handle, target, RemovalHooks{
-		Lock: s.hub.lock,
-		Emit: func(ev model.Event) { s.publish(ev, c.sess, target) },
+	res, err := RemovePersonFully(s.store, c.me.Handle, target, func(conv string, op func() (model.Event, error)) error {
+		unlock := s.hub.lock(conv)
+		defer unlock()
+		_, err := s.commit(c.sess, op, target)
+		return err
 	})
 	if err != nil {
 		return nil, err
