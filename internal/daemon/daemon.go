@@ -38,25 +38,24 @@ type realClock struct{}
 func (realClock) Now() time.Time                         { return time.Now() }
 func (realClock) After(d time.Duration) <-chan time.Time { return time.After(d) }
 
-// Notifier raises a notification outside the subscribed clients.
-type Notifier interface{ Notify(ipc.NotifyPayload) }
-
-type nopNotifier struct{}
-
-func (nopNotifier) Notify(ipc.NotifyPayload) {}
-
 // Options configures Run. Zero fields take the real implementations: the
 // config file, the account's store under paths.Data(), the termchat
 // connector, the system clock, a log file under paths.Data() and
 // paths.Runtime(). A Store passed in is not closed by Run.
 type Options struct {
-	Connector  connector.Connector
-	Store      *store.Store
-	Config     *config.Config
-	Notifier   Notifier
-	Clock      Clock
-	Logger     *slog.Logger
-	RuntimeDir string
+	Connector connector.Connector
+	Store     *store.Store
+	Config    *config.Config
+	// Notifier raises the OS and hook routes; the default does nothing.
+	// Notification settings are read once, when the process starts.
+	Notifier Notifier
+	// NewNotifier builds the Notifier from the loaded config and the logger
+	// when Notifier is nil. Run closes what it built, when it has a Close
+	// method, after the account has stopped.
+	NewNotifier func(*config.Config, *slog.Logger) Notifier
+	Clock       Clock
+	Logger      *slog.Logger
+	RuntimeDir  string
 	// Join registers with a server; the default is termchat.Join.
 	Join func(ctx context.Context, server, code string) (config.Account, error)
 }
@@ -123,6 +122,13 @@ func Run(ctx context.Context, opts Options) error {
 	if d.cfg == nil {
 		if d.cfg, err = config.Load(); err != nil {
 			return err
+		}
+	}
+
+	if opts.Notifier == nil && opts.NewNotifier != nil {
+		d.notifier = opts.NewNotifier(d.cfg, d.log)
+		if c, ok := d.notifier.(interface{ Close() }); ok {
+			defer c.Close()
 		}
 	}
 

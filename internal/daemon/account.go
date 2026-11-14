@@ -62,6 +62,8 @@ type ledger struct {
 	st   *store.Store
 	log  *slog.Logger
 	srv  *ipc.Server
+	// nt decides which stored messages notify the user.
+	nt *notifications
 
 	// wmu serialises store writes in this process, so a writer waits its
 	// turn in order instead of in SQLite's busy handler, whose growing sleeps
@@ -94,6 +96,7 @@ func newAccount(d *daemon, name string, conn connector.Connector, st *store.Stor
 		bfWake: make(chan struct{}, 1), changed: make(chan struct{}),
 		workers: map[string]bool{}, dirty: map[string]bool{}, floor: map[string]int64{},
 	}
+	a.nt = newNotifications(d, st, a.log)
 	a.rooms = &openRooms{clock: d.clock, fetch: func(ctx context.Context) ([]model.Conversation, error) {
 		_, open, err := conn.Conversations(ctx)
 		return open, err

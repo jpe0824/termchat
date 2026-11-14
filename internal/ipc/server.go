@@ -56,10 +56,12 @@ type Backend interface {
 	Stop()
 }
 
-// Subscriber is what one subscribed connection last reported with SetFocus.
+// Subscriber is one subscribed connection: whether it declared itself a UI
+// (SubscribeUI) and what it last reported with SetFocus.
 type Subscriber struct {
 	Conv    string
 	Focused bool
+	UI      bool
 }
 
 // Server accepts connections and dispatches their requests to a Backend.
@@ -173,7 +175,12 @@ func (s *Server) shuttingDown() bool {
 
 // Broadcast queues ev for every subscribed connection without waiting. A
 // connection whose queue is full is closed.
-func (s *Server) Broadcast(ev Event) {
+func (s *Server) Broadcast(ev Event) { s.broadcast(ev, false) }
+
+// BroadcastUI is Broadcast to the connections that subscribed as a UI.
+func (s *Server) BroadcastUI(ev Event) { s.broadcast(ev, true) }
+
+func (s *Server) broadcast(ev Event, uiOnly bool) {
 	b, err := json.Marshal(frame{Event: &ev})
 	if err != nil {
 		s.log.Error("encode event", "kind", ev.Kind, "err", err)
@@ -183,7 +190,7 @@ func (s *Server) Broadcast(ev Event) {
 	s.mu.Lock()
 	var subs []*sconn
 	for c := range s.conns {
-		if c.isSubscribed() {
+		if c.isSubscribed() && (!uiOnly || c.isUI()) {
 			subs = append(subs, c)
 		}
 	}
@@ -214,7 +221,9 @@ func (s *Server) Subscribers() []Subscriber {
 	for c := range s.conns {
 		c.mu.Lock()
 		if c.subscribed {
-			out = append(out, c.focus)
+			sub := c.focus
+			sub.UI = c.ui
+			out = append(out, sub)
 		}
 		c.mu.Unlock()
 	}
@@ -231,6 +240,7 @@ type sconn struct {
 	mu         sync.Mutex
 	hello      bool
 	subscribed bool
+	ui         bool
 	focus      Subscriber
 }
 
@@ -247,6 +257,12 @@ func (s *Server) start(c net.Conn) {
 	s.mu.Unlock()
 	go sc.writeLoop()
 	go sc.readLoop()
+}
+
+func (c *sconn) isUI() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.ui
 }
 
 func (c *sconn) isSubscribed() bool {
@@ -362,7 +378,7 @@ func (c *sconn) handle(req request, a args) {
 		c.mu.Lock()
 		switch req.Op {
 		case opSubscribe:
-			c.subscribed = true
+			c.subscribed, c.ui = true, a.UI
 		case opUnsubscribe:
 			c.subscribed = false
 		case opSetFocus:

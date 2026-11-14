@@ -409,6 +409,17 @@ func (c *Client) Stop() error {
 // stalling the Client, and should Subscribe again and re-read state. One
 // subscription per Client at a time.
 func (c *Client) Subscribe(ctx context.Context) (<-chan Event, error) {
+	return c.subscribe(ctx, false)
+}
+
+// SubscribeUI is Subscribe for a client that shows conversations to the user.
+// The background process sends notify events only to such subscribers, and
+// counts the conversation reported with SetFocus as being looked at.
+func (c *Client) SubscribeUI(ctx context.Context) (<-chan Event, error) {
+	return c.subscribe(ctx, true)
+}
+
+func (c *Client) subscribe(ctx context.Context, ui bool) (<-chan Event, error) {
 	c.submu.Lock()
 	defer c.submu.Unlock()
 	sub := &subscription{ch: make(chan Event, eventsBuffer), done: make(chan struct{})}
@@ -419,7 +430,7 @@ func (c *Client) Subscribe(ctx context.Context) (<-chan Event, error) {
 	}
 	c.sub, c.subErr = sub, nil
 	c.mu.Unlock()
-	if err := c.call(opSubscribe, nil, nil); err != nil {
+	if err := c.call(opSubscribe, &args{UI: ui}, nil); err != nil {
 		c.mu.Lock()
 		if c.sub == sub {
 			c.sub = nil

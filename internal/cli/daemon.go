@@ -1,13 +1,16 @@
 package cli
 
 import (
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/spf13/cobra"
 
+	"github.com/jpe0824/termchat/internal/config"
 	"github.com/jpe0824/termchat/internal/daemon"
+	"github.com/jpe0824/termchat/internal/notify"
 )
 
 func newDaemonCmd() *cobra.Command {
@@ -25,7 +28,9 @@ func newDaemonCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx, stop := signal.NotifyContext(cmdContext(cmd), os.Interrupt, syscall.SIGTERM)
 			defer stop()
-			return daemon.Run(ctx, daemon.Options{})
+			return daemon.Run(ctx, daemon.Options{
+				NewNotifier: func(cfg *config.Config, log *slog.Logger) daemon.Notifier { return notify.New(cfg, log) },
+			})
 		},
 	})
 	cmd.AddCommand(newDaemonStartCmd(), newDaemonStopCmd())

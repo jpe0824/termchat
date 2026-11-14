@@ -43,7 +43,7 @@ func (l *ledger) handleUpdate(u connector.Update) {
 	switch {
 	case u.Event != nil:
 		ev := *u.Event
-		l.ingest([]model.Event{ev})
+		l.ingestNotifying([]model.Event{ev}, nil)
 		if l.unknown(ev.Actor, ev.Target) {
 			signal(l.peopleCh)
 		}
@@ -165,8 +165,10 @@ func (a *account) catchUp() error {
 		return err
 	}
 	localRead := map[string]int64{}
+	var heldBefore []string
 	for _, v := range local {
 		localRead[v.ID] = v.ReadSeq
+		heldBefore = append(heldBefore, v.ID)
 	}
 	listed := map[string]bool{}
 	for _, c := range mine {
@@ -183,7 +185,13 @@ func (a *account) catchUp() error {
 	}
 
 	// A conversation with nothing held starts from its newest page; the
-	// backfill fetches the rest.
+	// backfill fetches the rest. When the account has synced before, that
+	// first fill of a conversation new to this device may notify, once, like
+	// any other catch-up; the first catch-up on a device never does, so the
+	// whole backlog is not announced.
+	batch := newCatchUpBatch()
+	defer batch.flush(a.nt)
+	announceNew := len(local) > 0
 	for _, c := range mine {
 		if c.LastSeq == 0 || a.st.OldestSeq(c.ID) != 0 {
 			continue
@@ -192,7 +200,16 @@ func (a *account) catchUp() error {
 		if err != nil {
 			return err
 		}
+		var fresh []model.Event
+		if announceNew && !slices.Contains(heldBefore, c.ID) {
+			fresh = a.nt.unseen(evs)
+		}
 		a.storeHistory(c.ID, evs)
+		fresh = slices.DeleteFunc(fresh, func(ev model.Event) bool {
+			_, err := a.st.ByMsgID(ev.ConvID, ev.MsgID)
+			return err != nil
+		})
+		a.nt.consider(fresh, batch)
 	}
 
 	cursors := map[string]int64{}
@@ -205,7 +222,7 @@ func (a *account) catchUp() error {
 		}
 		cursors[c.ID] = cur
 	}
-	if err := a.syncCursors(ctx, cursors); err != nil {
+	if err := a.syncCursorsInto(ctx, cursors, batch); err != nil {
 		return err
 	}
 
@@ -228,12 +245,20 @@ func (a *account) catchUp() error {
 // past every event returned, stored or not, so a rejected event cannot make
 // the loop ask for the same page forever.
 func (a *account) syncCursors(ctx context.Context, cursors map[string]int64) error {
+	batch := newCatchUpBatch()
+	defer batch.flush(a.nt)
+	return a.syncCursorsInto(ctx, cursors, batch)
+}
+
+// syncCursorsInto is syncCursors collecting notifications into batch, which
+// the caller flushes.
+func (a *account) syncCursorsInto(ctx context.Context, cursors map[string]int64, batch *catchUpBatch) error {
 	for len(cursors) > 0 {
 		evs, more, gone, err := a.conn.Sync(ctx, cursors)
 		if err != nil {
 			return err
 		}
-		a.ingest(evs)
+		a.ingestNotifying(evs, batch)
 		for _, ev := range evs {
 			if _, ok := cursors[ev.ConvID]; ok && ev.Seq > cursors[ev.ConvID] {
 				cursors[ev.ConvID] = ev.Seq
@@ -297,6 +322,21 @@ func (l *ledger) applyIn(evs []model.Event, size int) []model.Event {
 // event per message.
 func (l *ledger) ingest(evs []model.Event) {
 	l.announce(l.apply(evs), len(evs) <= maxMessageEvents)
+}
+
+// ingestNotifying is ingest for pushes and sync pages, where a newly stored
+// message from someone else may notify the user: at once when batch is nil,
+// else as the batch's newest for its conversation. History fetched on request
+// or in the backfill, edits, deletes and membership events go through ingest
+// or apply and never notify.
+func (l *ledger) ingestNotifying(evs []model.Event, batch *catchUpBatch) {
+	fresh := l.nt.unseen(evs)
+	stored := l.apply(evs)
+	l.announce(stored, len(evs) <= maxMessageEvents)
+	fresh = slices.DeleteFunc(fresh, func(ev model.Event) bool {
+		return !slices.ContainsFunc(stored, func(s model.Event) bool { return s.ConvID == ev.ConvID && s.Seq == ev.Seq })
+	})
+	l.nt.consider(fresh, batch)
 }
 
 // announce tells subscribers about stored events: each message when

@@ -364,3 +364,51 @@ func TestHasSubscribers(t *testing.T) {
 		t.Fatalf("Subscribers = %v after the subscription ended", srv.Subscribers())
 	}
 }
+
+func TestSubscribeUIIsMarkedAndBroadcastUIReachesOnlyUIs(t *testing.T) {
+	srv, sock := startServer(t, &stubBackend{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	plain := dialTest(t, sock)
+	plainEvents, err := plain.Subscribe(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ui := dialTest(t, sock)
+	uiEvents, err := ui.SubscribeUI(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ui.SetFocus("c1", true); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, func() bool { return len(srv.Subscribers()) == 2 })
+	var uis, others int
+	for _, s := range srv.Subscribers() {
+		if s.UI {
+			uis++
+			if s.Conv != "c1" || !s.Focused {
+				t.Errorf("UI subscriber reports %+v, want c1 focused", s)
+			}
+		} else {
+			others++
+		}
+	}
+	if uis != 1 || others != 1 {
+		t.Fatalf("subscribers: %d UI, %d other; want 1 and 1", uis, others)
+	}
+
+	n := &NotifyPayload{ConvID: "c1", Sender: "dana", Text: "hi", DM: true}
+	srv.BroadcastUI(Event{Kind: KindNotify, Notify: n})
+	srv.Broadcast(Event{Kind: KindStatus, Status: &Status{Account: "after"}})
+	ev := <-uiEvents
+	if ev.Kind != KindNotify || ev.Notify == nil || *ev.Notify != *n {
+		t.Fatalf("UI event = %+v, want the notify payload", ev)
+	}
+	// The plain subscriber's first event is the broadcast that followed, so
+	// the UI-only event never reached it.
+	if ev := <-plainEvents; ev.Kind != KindStatus {
+		t.Fatalf("plain subscriber event = %+v, want the status broadcast", ev)
+	}
+}

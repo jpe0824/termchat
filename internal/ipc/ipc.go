@@ -109,6 +109,7 @@ type args struct {
 	BeforeSeq int64             `json:",omitempty"`
 	Limit     int               `json:",omitempty"`
 	Focused   bool              `json:",omitempty"`
+	UI        bool              `json:",omitempty"`
 	Room      *connector.RoomOp `json:",omitempty"`
 }
 
