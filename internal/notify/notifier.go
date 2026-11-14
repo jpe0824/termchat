@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"os/exec"
+	"runtime"
 	"sync"
 	"time"
 
@@ -20,17 +21,17 @@ const (
 	maxRunning = 4
 )
 
-// Cmd is a command to run. Env entries are added to the inherited
+// command is a command to run. Env entries are added to the inherited
 // environment. Message text appears only as an argument or an Env value.
-type Cmd struct {
+type command struct {
 	Name string
 	Args []string
 	Env  []string
 }
 
-// Runner runs c to completion, stopping it, and anything it started, when ctx
+// runner runs c to completion, stopping it, and anything it started, when ctx
 // ends.
-type Runner func(ctx context.Context, c Cmd) error
+type runner func(ctx context.Context, c command) error
 
 // Notifier raises notifications through the operating system and the
 // configured hook. It never blocks its caller: each command runs on its own
@@ -40,8 +41,8 @@ type Notifier struct {
 	log  *slog.Logger
 
 	// Injectable for tests.
-	run      Runner
-	build    func(lookPath func(string) (string, error), n Notification) *Cmd
+	run      runner
+	goos     string
 	lookPath func(string) (string, error)
 	timeout  time.Duration
 
@@ -60,15 +61,11 @@ func New(cfg *config.Config, logger *slog.Logger) *Notifier {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Notifier{
 		hook: cfg.Notify.Hook, log: logger,
-		run: execRun, build: platformCommand, lookPath: exec.LookPath, timeout: commandTimeout,
+		run: execRun, goos: runtime.GOOS, lookPath: exec.LookPath, timeout: commandTimeout,
 		ctx: ctx, cancel: cancel,
 		hooks: make(chan struct{}, maxRunning), oses: make(chan struct{}, maxRunning),
 	}
 }
-
-// Wait returns when the running commands have ended, which is within their
-// timeout.
-func (n *Notifier) Wait() { n.wg.Wait() }
 
 // Close kills the running commands and their process groups and returns once
 // they are gone. The Notifier must not be used after.
@@ -82,7 +79,7 @@ func (n *Notifier) OS(p Notification) {
 	p = clean(p)
 	// Building the command may search PATH, which can be slow, so it happens
 	// on the worker goroutine.
-	n.start(n.oses, "operating-system notification", func() *Cmd { return n.build(n.lookPath, p) })
+	n.start(n.oses, "operating-system notification", func() *command { return platformCommand(n.goos, n.lookPath, p) })
 }
 
 // Hook runs the configured hook for p, when there is one.
@@ -92,12 +89,12 @@ func (n *Notifier) Hook(p Notification) {
 	}
 	p = clean(p)
 	c := hookCommand(n.hook, p)
-	n.start(n.hooks, "hook", func() *Cmd { return &c })
+	n.start(n.hooks, "hook", func() *command { return &c })
 }
 
 // start runs c on a new goroutine unless sem is full, in which case the
 // notification is dropped. Logs carry no message text.
-func (n *Notifier) start(sem chan struct{}, what string, build func() *Cmd) {
+func (n *Notifier) start(sem chan struct{}, what string, build func() *command) {
 	select {
 	case sem <- struct{}{}:
 	default:

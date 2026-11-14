@@ -20,7 +20,7 @@ func seqs(ms []Message) []int64 {
 func fill(t *testing.T, s *Store, conv string, n int) {
 	t.Helper()
 	for i := 1; i <= n; i++ {
-		must(t, s.Apply(posted(conv, int64(i), fmt.Sprintf("m%d", i), "ann", fmt.Sprintf("text %d", i))))
+		must(t, noErr(s.Apply(posted(conv, int64(i), fmt.Sprintf("m%d", i), "ann", fmt.Sprintf("text %d", i)))))
 	}
 }
 
@@ -63,7 +63,7 @@ func TestMessagesDefaultLimitIsFifty(t *testing.T) {
 
 func TestMessagesAreScopedToTheConversation(t *testing.T) {
 	s := openTest(t)
-	must(t, s.Apply(posted("c1", 1, "m1", "ann", "one"), posted("c2", 1, "m1", "ann", "two")))
+	must(t, noErr(s.Apply(posted("c1", 1, "m1", "ann", "one"), posted("c2", 1, "m1", "ann", "two"))))
 	if got := texts(msgs(t, s, "c1")); !reflect.DeepEqual(got, []string{"one"}) {
 		t.Fatalf("c1 = %v", got)
 	}
@@ -74,12 +74,12 @@ func TestMessagesAreScopedToTheConversation(t *testing.T) {
 
 func TestOneEntryPerMessageDespiteEdits(t *testing.T) {
 	s := openTest(t)
-	must(t, s.Apply(
+	must(t, noErr(s.Apply(
 		posted("c1", 1, "m1", "ann", "a"),
 		edited("c1", 2, "m1", "ann", "b"),
 		edited("c1", 3, "m1", "ann", "c"),
 		posted("c1", 4, "m2", "ann", "other"),
-	))
+	)))
 	got := msgs(t, s, "c1")
 	if len(got) != 2 || got[0].Text != "c" || got[0].Seq != 1 || got[1].Seq != 4 {
 		t.Fatalf("Messages = %+v", got)
@@ -93,12 +93,12 @@ func TestMessageAgentAndNameComeFromPeople(t *testing.T) {
 		{Handle: "robo", DisplayName: "Robo", Agent: true, Owner: "ann"},
 		{Handle: "plain"},
 	}))
-	must(t, s.Apply(
+	must(t, noErr(s.Apply(
 		posted("c1", 1, "m1", "ann", "a"),
 		posted("c1", 2, "m2", "robo", "b"),
 		posted("c1", 3, "m3", "ghost", "c"),
 		posted("c1", 4, "m4", "plain", "d"),
-	))
+	)))
 	got := msgs(t, s, "c1")
 	type who struct {
 		author, name string
@@ -119,7 +119,7 @@ func TestMessageAgentAndNameComeFromPeople(t *testing.T) {
 
 func TestByMsgID(t *testing.T) {
 	s := openTest(t)
-	must(t, s.Apply(posted("c1", 1, "m1", "ann", "a"), edited("c1", 2, "m1", "ann", "b")))
+	must(t, noErr(s.Apply(posted("c1", 1, "m1", "ann", "a"), edited("c1", 2, "m1", "ann", "b"))))
 	m, err := s.ByMsgID("c1", "m1")
 	must(t, err)
 	if m.Text != "b" || !m.Edited || m.Seq != 1 || m.ConvID != "c1" {
@@ -140,16 +140,5 @@ func TestByMsgIDFindsOutboxItems(t *testing.T) {
 	must(t, err)
 	if m.Text != "queued" || m.Status != StatusSending || m.Author != "me" || m.Seq != 0 {
 		t.Fatalf("ByMsgID = %+v", m)
-	}
-}
-
-func TestHasEvent(t *testing.T) {
-	s := openTest(t)
-	must(t, s.Apply(posted("c1", 2, "m2", "ann", "two")))
-	if !s.HasEvent("c1", 2) {
-		t.Error("HasEvent(c1, 2) = false for a stored event")
-	}
-	if s.HasEvent("c1", 1) || s.HasEvent("c2", 2) {
-		t.Error("HasEvent true for an event that is not stored")
 	}
 }

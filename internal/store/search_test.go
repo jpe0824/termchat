@@ -8,11 +8,11 @@ import (
 
 func TestSearchFindsAcrossConversations(t *testing.T) {
 	s := openTest(t)
-	must(t, s.Apply(
+	must(t, noErr(s.Apply(
 		posted("c1", 1, "m1", "ann", "deploy the quokka service"),
 		posted("c2", 1, "m2", "bob", "quokka dashboard is down"),
 		posted("c2", 2, "m3", "bob", "unrelated chatter"),
-	))
+	)))
 	got, err := s.Search("quokka", 10)
 	must(t, err)
 	if len(got) != 2 {
@@ -26,11 +26,11 @@ func TestSearchFindsAcrossConversations(t *testing.T) {
 
 func TestSearchNewestFirstAndLimit(t *testing.T) {
 	s := openTest(t)
-	must(t, s.Apply(
+	must(t, noErr(s.Apply(
 		posted("c1", 1, "m1", "ann", "tapir one"),
 		posted("c2", 5, "m2", "ann", "tapir two"),
 		posted("c1", 3, "m3", "ann", "tapir three"),
-	))
+	)))
 	got, err := s.Search("tapir", 0)
 	must(t, err)
 	if want := []string{"tapir two", "tapir three", "tapir one"}; len(got) != 3 || got[0].Text != want[0] || got[1].Text != want[1] || got[2].Text != want[2] {
@@ -45,12 +45,12 @@ func TestSearchNewestFirstAndLimit(t *testing.T) {
 
 func TestSearchTreatsQueryAsPlainWords(t *testing.T) {
 	s := openTest(t)
-	must(t, s.Apply(
+	must(t, noErr(s.Apply(
 		posted("c1", 1, "m1", "ann", "cats AND dogs"),
 		posted("c1", 2, "m2", "ann", "just cats"),
 		posted("c1", 3, "m3", "ann", "NEAR the end"),
 		posted("c1", 4, "m4", "ann", "star* wars"),
-	))
+	)))
 	cases := []struct {
 		q    string
 		want int
@@ -89,7 +89,7 @@ func TestSearchTreatsQueryAsPlainWords(t *testing.T) {
 func TestSearchCoversConversationsMarkedGone(t *testing.T) {
 	s := openTest(t)
 	must(t, s.UpsertConversation(model.Conversation{ID: "c1", Kind: model.ConvRoom, Name: "old"}))
-	must(t, s.Apply(posted("c1", 1, "m1", "ann", "capybara archive")))
+	must(t, noErr(s.Apply(posted("c1", 1, "m1", "ann", "capybara archive"))))
 	must(t, s.MarkGone("c1"))
 	got, err := s.Search("capybara", 10)
 	must(t, err)
@@ -100,7 +100,7 @@ func TestSearchCoversConversationsMarkedGone(t *testing.T) {
 
 func TestSearchIsCaseInsensitiveAndMatchesWholeWords(t *testing.T) {
 	s := openTest(t)
-	must(t, s.Apply(posted("c1", 1, "m1", "ann", "Gopher Time")))
+	must(t, noErr(s.Apply(posted("c1", 1, "m1", "ann", "Gopher Time"))))
 	for _, q := range []string{"gopher", "GOPHER", "time gopher"} {
 		if got, err := s.Search(q, 10); err != nil || len(got) != 1 {
 			t.Errorf("Search(%q) = %v, %v, want 1 result", q, texts(got), err)

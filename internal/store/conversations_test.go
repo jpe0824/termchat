@@ -53,11 +53,11 @@ func TestConversationsOrderedByLastActivity(t *testing.T) {
 	for _, c := range []model.Conversation{room("quiet-b", "b"), room("quiet-a", "a"), room("old", "z"), room("new", "y")} {
 		must(t, s.UpsertConversation(c))
 	}
-	must(t, s.Apply(
+	must(t, noErr(s.Apply(
 		posted("old", 1, "m1", "ann", "x"),
 		posted("new", 9, "m2", "ann", "y"),
 		member("quiet-a", 20, model.MemberJoined, "ann"), // membership is not activity
-	))
+	)))
 	got := convs(t, s)
 	if want := []string{"new", "old", "quiet-a", "quiet-b"}; !reflect.DeepEqual(ids(got), want) {
 		t.Fatalf("order = %v, want %v", ids(got), want)
@@ -71,7 +71,7 @@ func TestEditCountsAsActivity(t *testing.T) {
 	s := openTest(t)
 	must(t, s.UpsertConversation(room("a", "a")))
 	must(t, s.UpsertConversation(room("b", "b")))
-	must(t, s.Apply(posted("a", 1, "m1", "ann", "x"), posted("b", 2, "m2", "ann", "y"), edited("a", 3, "m1", "ann", "x2")))
+	must(t, noErr(s.Apply(posted("a", 1, "m1", "ann", "x"), posted("b", 2, "m2", "ann", "y"), edited("a", 3, "m1", "ann", "x2"))))
 	if got := ids(convs(t, s)); !reflect.DeepEqual(got, []string{"a", "b"}) {
 		t.Fatalf("order = %v", got)
 	}
@@ -80,7 +80,7 @@ func TestEditCountsAsActivity(t *testing.T) {
 func TestUnreadCountsFromReadSeq(t *testing.T) {
 	s := openTest(t)
 	must(t, s.UpsertConversation(model.Conversation{ID: "c1", Kind: model.ConvRoom, Name: "eng", ReadSeq: 1}))
-	must(t, s.Apply(
+	must(t, noErr(s.Apply(
 		posted("c1", 1, "m1", "ann", "read already"),
 		posted("c1", 2, "m2", "me", "my own"),
 		posted("c1", 3, "m3", "ann", "unread"),
@@ -88,7 +88,7 @@ func TestUnreadCountsFromReadSeq(t *testing.T) {
 		deleted("c1", 5, "m4", "bob"),
 		member("c1", 6, model.MemberJoined, "cat"),
 		posted("c1", 7, "m5", "bob", "last"),
-	))
+	)))
 	if got := convs(t, s)[0].Unread; got != 2 {
 		t.Fatalf("Unread = %d, want 2 (seq 3 and 7)", got)
 	}
@@ -101,15 +101,15 @@ func TestUnreadCountsFromReadSeq(t *testing.T) {
 func TestLastText(t *testing.T) {
 	s := openTest(t)
 	must(t, s.UpsertConversation(room("c1", "eng")))
-	must(t, s.Apply(posted("c1", 1, "m1", "ann", "first"), posted("c1", 2, "m2", "bob", "second")))
+	must(t, noErr(s.Apply(posted("c1", 1, "m1", "ann", "first"), posted("c1", 2, "m2", "bob", "second"))))
 	if got := convs(t, s)[0].LastText; got != "second" {
 		t.Fatalf("LastText = %q", got)
 	}
-	must(t, s.Apply(edited("c1", 3, "m2", "bob", "second v2")))
+	must(t, noErr(s.Apply(edited("c1", 3, "m2", "bob", "second v2"))))
 	if got := convs(t, s)[0].LastText; got != "second v2" {
 		t.Fatalf("LastText after edit = %q", got)
 	}
-	must(t, s.Apply(deleted("c1", 4, "m2", "bob")))
+	must(t, noErr(s.Apply(deleted("c1", 4, "m2", "bob"))))
 	if got := convs(t, s)[0].LastText; got != "" {
 		t.Fatalf("LastText after delete = %q, want empty", got)
 	}
@@ -140,7 +140,7 @@ func TestGoneConversationsAreHiddenButKept(t *testing.T) {
 	s := openTest(t)
 	must(t, s.UpsertConversation(room("c1", "eng")))
 	must(t, s.UpsertConversation(room("c2", "ops")))
-	must(t, s.Apply(posted("c1", 1, "m1", "ann", "history stays")))
+	must(t, noErr(s.Apply(posted("c1", 1, "m1", "ann", "history stays"))))
 	must(t, s.MarkGone("c1"))
 	if got := ids(convs(t, s)); !reflect.DeepEqual(got, []string{"c2"}) {
 		t.Fatalf("Conversations = %v, want only c2", got)
@@ -161,11 +161,11 @@ func TestGoneConversationsAreHiddenButKept(t *testing.T) {
 func TestOwnMemberLeftMarksGoneAndOthersDoNot(t *testing.T) {
 	s := openTest(t)
 	must(t, s.UpsertConversation(model.Conversation{ID: "c1", Kind: model.ConvRoom, Name: "eng", Members: []string{"me", "ann"}, LastSeq: 2}))
-	must(t, s.Apply(member("c1", 3, model.MemberLeft, "ann")))
+	must(t, noErr(s.Apply(member("c1", 3, model.MemberLeft, "ann"))))
 	if len(convs(t, s)) != 1 {
 		t.Fatal("another member leaving hid the conversation")
 	}
-	must(t, s.Apply(member("c1", 4, model.MemberLeft, "me")))
+	must(t, noErr(s.Apply(member("c1", 4, model.MemberLeft, "me"))))
 	if len(convs(t, s)) != 0 {
 		t.Fatal("own member.left did not hide the conversation")
 	}
@@ -179,7 +179,7 @@ func TestOwnMemberLeftOlderThanSnapshotIsIgnored(t *testing.T) {
 	s := openTest(t)
 	must(t, s.UpsertConversation(model.Conversation{ID: "c1", Kind: model.ConvRoom, Name: "eng", Members: []string{"me"}, LastSeq: 10}))
 	// A history page brings an old leave-and-rejoin the snapshot already reflects.
-	must(t, s.Apply(member("c1", 4, model.MemberLeft, "me")))
+	must(t, noErr(s.Apply(member("c1", 4, model.MemberLeft, "me"))))
 	if len(convs(t, s)) != 1 {
 		t.Fatal("a leave older than the snapshot hid the conversation")
 	}
@@ -192,7 +192,7 @@ func TestOwnLeaveThenRejoinEventsAreOrderIndependent(t *testing.T) {
 			must(t, s.UpsertConversation(model.Conversation{ID: "c1", Kind: model.ConvRoom, Name: "eng", LastSeq: 2}))
 			evs := []model.Event{member("c1", 3, model.MemberLeft, "me"), member("c1", 4, model.MemberJoined, "me")}
 			for _, i := range order {
-				must(t, s.Apply(evs[i]))
+				must(t, noErr(s.Apply(evs[i])))
 			}
 			if len(convs(t, s)) != 1 {
 				t.Fatal("conversation hidden although the newest event is a join")
@@ -226,7 +226,7 @@ func TestMembersAndNameFollowHighestSeqRegardlessOfOrder(t *testing.T) {
 				must(t, s.UpsertConversation(snapshot))
 			}
 			for _, i := range order {
-				must(t, s.Apply(evs[i]))
+				must(t, noErr(s.Apply(evs[i])))
 			}
 			if !snapFirst {
 				must(t, s.UpsertConversation(snapshot))
@@ -254,23 +254,23 @@ func TestCursorIsTopOfContiguousRun(t *testing.T) {
 	if s.Cursor("c1") != 0 || s.OldestSeq("c1") != 0 {
 		t.Fatal("empty conversation must report 0/0")
 	}
-	must(t, s.Apply(posted("c1", 1, "m1", "ann", "a"), member("c1", 2, model.MemberJoined, "bob"), posted("c1", 3, "m2", "ann", "b")))
+	must(t, noErr(s.Apply(posted("c1", 1, "m1", "ann", "a"), member("c1", 2, model.MemberJoined, "bob"), posted("c1", 3, "m2", "ann", "b"))))
 	if got := s.Cursor("c1"); got != 3 {
 		t.Fatalf("Cursor = %d, want 3", got)
 	}
 	// A live event past a gap is held but does not advance the cursor.
-	must(t, s.Apply(posted("c1", 6, "m3", "ann", "c")))
+	must(t, noErr(s.Apply(posted("c1", 6, "m3", "ann", "c"))))
 	if got := s.Cursor("c1"); got != 3 {
 		t.Fatalf("Cursor with gap = %d, want 3", got)
 	}
 	if got := msgs(t, s, "c1"); len(got) != 3 {
 		t.Fatalf("event past the gap not stored: %d messages", len(got))
 	}
-	must(t, s.Apply(posted("c1", 4, "m4", "ann", "d")))
+	must(t, noErr(s.Apply(posted("c1", 4, "m4", "ann", "d"))))
 	if got := s.Cursor("c1"); got != 4 {
 		t.Fatalf("Cursor = %d, want 4", got)
 	}
-	must(t, s.Apply(posted("c1", 5, "m5", "ann", "e")))
+	must(t, noErr(s.Apply(posted("c1", 5, "m5", "ann", "e"))))
 	if got := s.Cursor("c1"); got != 6 {
 		t.Fatalf("Cursor after filling the hole = %d, want 6", got)
 	}
@@ -278,12 +278,12 @@ func TestCursorIsTopOfContiguousRun(t *testing.T) {
 
 func TestOldestSeqAndBackfill(t *testing.T) {
 	s := openTest(t)
-	must(t, s.Apply(posted("c1", 10, "m10", "ann", "a"), posted("c1", 11, "m11", "ann", "b")))
+	must(t, noErr(s.Apply(posted("c1", 10, "m10", "ann", "a"), posted("c1", 11, "m11", "ann", "b"))))
 	if s.OldestSeq("c1") != 10 || s.Cursor("c1") != 11 {
 		t.Fatalf("oldest %d cursor %d, want 10 / 11", s.OldestSeq("c1"), s.Cursor("c1"))
 	}
 	// A history page arrives after newer events are stored.
-	must(t, s.Apply(posted("c1", 8, "m8", "ann", "x"), posted("c1", 9, "m9", "ann", "y")))
+	must(t, noErr(s.Apply(posted("c1", 8, "m8", "ann", "x"), posted("c1", 9, "m9", "ann", "y"))))
 	if s.OldestSeq("c1") != 8 || s.Cursor("c1") != 11 {
 		t.Fatalf("after backfill oldest %d cursor %d, want 8 / 11", s.OldestSeq("c1"), s.Cursor("c1"))
 	}

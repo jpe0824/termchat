@@ -83,12 +83,7 @@ func convName(c model.Conversation, me string) string {
 	if c.Kind == model.ConvRoom {
 		return c.Name
 	}
-	for _, h := range c.Members {
-		if h != me {
-			return h
-		}
-	}
-	return me
+	return c.Peer(me)
 }
 
 // convLabel is convName with its sigil, for tables.

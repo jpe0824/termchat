@@ -180,27 +180,34 @@ func (s *Server) shuttingDown() bool {
 func (s *Server) Broadcast(ev Event) { s.broadcast(ev, false) }
 
 // BroadcastNotify is Broadcast to the UIs that declared they can show
-// notifications.
-func (s *Server) BroadcastNotify(ev Event) { s.broadcast(ev, true) }
+// notifications. It returns how many it queued ev for.
+func (s *Server) BroadcastNotify(ev Event) int { return s.broadcast(ev, true) }
 
-func (s *Server) broadcast(ev Event, notifyOnly bool) {
-	b, err := json.Marshal(frame{Event: &ev})
-	if err != nil {
-		s.log.Error("encode event", "kind", ev.Kind, "err", err)
-		return
-	}
-	b = append(b, '\n')
+func (s *Server) broadcast(ev Event, notifyOnly bool) int {
 	s.mu.Lock()
 	var subs []*sconn
 	for c := range s.conns {
-		if c.isSubscribed() && (!notifyOnly || c.canShowNotify()) {
+		if c.receives(notifyOnly) {
 			subs = append(subs, c)
 		}
 	}
 	s.mu.Unlock()
-	for _, c := range subs {
-		c.queue(b)
+	if len(subs) == 0 {
+		return 0
 	}
+	b, err := json.Marshal(frame{Event: &ev})
+	if err != nil {
+		s.log.Error("encode event", "kind", ev.Kind, "err", err)
+		return 0
+	}
+	b = append(b, '\n')
+	queued := 0
+	for _, c := range subs {
+		if c.queue(b) {
+			queued++
+		}
+	}
+	return queued
 }
 
 // HasSubscribers reports whether any connection is subscribed, so a caller
@@ -209,7 +216,7 @@ func (s *Server) HasSubscribers() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for c := range s.conns {
-		if c.isSubscribed() {
+		if c.receives(false) {
 			return true
 		}
 	}
@@ -225,7 +232,7 @@ func (s *Server) Subscribers() []Subscriber {
 		c.mu.Lock()
 		if c.subscribed {
 			sub := c.focus
-			sub.UI, sub.CanNotify = c.ui, c.ui && c.canNotify
+			sub.UI, sub.CanNotify = c.ui, c.canNotify
 			out = append(out, sub)
 		}
 		c.mu.Unlock()
@@ -244,7 +251,7 @@ type sconn struct {
 	hello      bool
 	subscribed bool
 	ui         bool
-	canNotify  bool
+	canNotify  bool // a UI that can show notifications
 	focus      Subscriber
 }
 
@@ -263,16 +270,12 @@ func (s *Server) start(c net.Conn) {
 	go sc.readLoop()
 }
 
-func (c *sconn) canShowNotify() bool {
+// receives reports whether c is subscribed and, when notifyOnly, also a UI
+// that can show notifications.
+func (c *sconn) receives(notifyOnly bool) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.ui && c.canNotify
-}
-
-func (c *sconn) isSubscribed() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.subscribed
+	return c.subscribed && (!notifyOnly || c.canNotify)
 }
 
 // close ends the connection. With flush, frames already queued are written
@@ -294,18 +297,21 @@ func (c *sconn) close(flush bool) {
 	})
 }
 
-// queue hands b to the writer, closing the connection when its queue is full.
-func (c *sconn) queue(b []byte) {
+// queue hands b to the writer, closing the connection when its queue is
+// full. It reports whether b was queued.
+func (c *sconn) queue(b []byte) bool {
 	select {
 	case <-c.done:
-		return
+		return false
 	default:
 	}
 	select {
 	case c.out <- b:
+		return true
 	default:
 		c.s.log.Warn("closing a client that fell behind")
 		c.close(false)
+		return false
 	}
 }
 
@@ -382,7 +388,7 @@ func (c *sconn) handle(req request, a args) {
 		c.mu.Lock()
 		switch req.Op {
 		case opSubscribe:
-			c.subscribed, c.ui, c.canNotify = true, a.UI, a.CanNotify
+			c.subscribed, c.ui, c.canNotify = true, a.UI, a.UI && a.CanNotify
 		case opUnsubscribe:
 			c.subscribed = false
 		case opSetFocus:

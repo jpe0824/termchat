@@ -120,22 +120,24 @@ func (a *account) setFloor(conv string, seq int64) {
 }
 
 // storeHistory applies a History page for conv and records how far back it
-// reached. An empty page means there is nothing older.
-func (a *account) storeHistory(conv string, evs []model.Event) {
+// reached. An empty page means there is nothing older. It returns the events
+// the store had not held before.
+func (a *account) storeHistory(conv string, evs []model.Event) []model.Event {
 	if len(evs) == 0 {
 		a.setFloor(conv, 1)
-		return
+		return nil
 	}
 	lowest := evs[0].Seq
 	for _, ev := range evs {
 		lowest = min(lowest, ev.Seq)
 	}
 	prior := a.floorOf(conv)
-	a.applyIn(evs, historyPage)
+	_, added := a.applyIn(evs, historyPage)
 	if prior > 0 && lowest >= prior {
 		lowest = 1 // the page reached no further back; stop rather than repeat it
 	}
 	a.setFloor(conv, max(lowest, 1))
+	return added
 }
 
 // prioritize moves conv to the front of the backfill.

@@ -22,7 +22,7 @@ func msgIDs(items []OutboxItem) []string {
 
 func TestOutboxMergedIntoMessages(t *testing.T) {
 	s := openTest(t)
-	must(t, s.Apply(posted("c1", 1, "m1", "ann", "stored one"), posted("c1", 2, "m2", "ann", "stored two")))
+	must(t, noErr(s.Apply(posted("c1", 1, "m1", "ann", "stored one"), posted("c1", 2, "m2", "ann", "stored two"))))
 	must(t, s.Enqueue(OutboxItem{MsgID: "q1", ConvID: "c1", Text: "first queued @bob", Mentions: []string{"bob"}, Source: "tui"}))
 	enqueue(t, s, "c1", "q2", "second queued")
 	enqueue(t, s, "c2", "q3", "other conversation")
@@ -54,7 +54,7 @@ func TestPostedEventClearsOutbox(t *testing.T) {
 	enqueue(t, s, "c1", "q1", "hello")
 	enqueue(t, s, "c1", "q2", "stuck")
 	must(t, s.MarkFailed("q2", "boom"))
-	must(t, s.Apply(posted("c1", 1, "q1", "me", "hello"), posted("c1", 2, "q2", "me", "stuck")))
+	must(t, noErr(s.Apply(posted("c1", 1, "q1", "me", "hello"), posted("c1", 2, "q2", "me", "stuck"))))
 	if p, err := s.Pending(); err != nil || len(p) != 0 {
 		t.Fatalf("Pending = %v, %v", p, err)
 	}
@@ -70,7 +70,7 @@ func TestPostedEventClearsOutbox(t *testing.T) {
 func TestEditOrDeleteEventsLeaveOutboxAlone(t *testing.T) {
 	s := openTest(t)
 	enqueue(t, s, "c1", "q1", "hello")
-	must(t, s.Apply(edited("c1", 2, "q1", "me", "later")))
+	must(t, noErr(s.Apply(edited("c1", 2, "q1", "me", "later"))))
 	if p, _ := s.Pending(); len(p) != 1 {
 		t.Fatalf("an edit event cleared the outbox: %v", p)
 	}
@@ -220,7 +220,7 @@ func TestRequeueOfSendingItemIsNoOp(t *testing.T) {
 func TestPostedEventInAnotherConversationLeavesOutbox(t *testing.T) {
 	s := openTest(t)
 	enqueue(t, s, "c1", "x", "unsent")
-	must(t, s.Apply(posted("c2", 1, "x", "me", "same id elsewhere")))
+	must(t, noErr(s.Apply(posted("c2", 1, "x", "me", "same id elsewhere"))))
 	p, err := s.Pending()
 	must(t, err)
 	if len(p) != 1 || p[0].ConvID != "c1" || p[0].MsgID != "x" {
@@ -231,7 +231,7 @@ func TestPostedEventInAnotherConversationLeavesOutbox(t *testing.T) {
 func TestPostedEventFromAnotherActorLeavesOutbox(t *testing.T) {
 	s := openTest(t)
 	enqueue(t, s, "c1", "x", "unsent")
-	must(t, s.Apply(posted("c1", 1, "x", "ann", "someone else's")))
+	must(t, noErr(s.Apply(posted("c1", 1, "x", "ann", "someone else's"))))
 	if p, err := s.Pending(); err != nil || len(p) != 1 {
 		t.Fatalf("Pending = %+v, %v, want the item kept", p, err)
 	}
@@ -249,7 +249,7 @@ func TestPostedEventKeepsOutboxWhenMeIsUnset(t *testing.T) {
 	must(t, err)
 	defer func() { _ = s.Close() }()
 	enqueue(t, s, "c1", "x", "unsent")
-	must(t, s.Apply(posted("c1", 1, "x", "me", "hello")))
+	must(t, noErr(s.Apply(posted("c1", 1, "x", "me", "hello"))))
 	if p, err := s.Pending(); err != nil || len(p) != 1 {
 		t.Fatalf("Pending = %+v, %v, want the item kept while Me is unset", p, err)
 	}

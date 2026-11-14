@@ -38,6 +38,9 @@ func must(t *testing.T, err error) {
 	}
 }
 
+// noErr keeps Apply's error for set-up that only needs the events stored.
+func noErr(_ []model.Event, err error) error { return err }
+
 func txt(s string) *model.Body { return &model.Body{Format: "text/plain", Data: []byte(s)} }
 
 // evAt is the timestamp used for the event with the given Seq.

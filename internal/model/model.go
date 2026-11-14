@@ -67,6 +67,17 @@ type Conversation struct {
 	ReadSeq int64    `json:"read_seq"`
 }
 
+// Peer is the other person in a DM: the first member who is not me, or me
+// when there is none.
+func (c Conversation) Peer(me string) string {
+	for _, h := range c.Members {
+		if h != me {
+			return h
+		}
+	}
+	return me
+}
+
 // Person is a chat identity. Owner is the human handle that owns an agent.
 type Person struct {
 	Handle      string `json:"handle"`

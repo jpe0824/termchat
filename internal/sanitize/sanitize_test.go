@@ -21,3 +21,9 @@ func TestSanitizeStripsEscapes(t *testing.T) {
 		}
 	}
 }
+
+func TestLine(t *testing.T) {
+	if got, want := Line("  a\n\tb \x1b[31mc\x1b[0m\r\n  d "), "a b c d"; got != want {
+		t.Errorf("Line = %q, want %q", got, want)
+	}
+}

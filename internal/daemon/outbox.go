@@ -253,7 +253,7 @@ func reason(err error) string {
 // whether or not the event could be stored: the server has the message, and
 // a later sync brings it.
 func (a *account) delivered(it store.OutboxItem, ev model.Event) {
-	if len(a.apply([]model.Event{ev})) == 0 {
+	if accepted, _ := a.apply([]model.Event{ev}); len(accepted) == 0 {
 		a.log.Warn("sent message's event was rejected by the store", "conv", it.ConvID, "msg", it.MsgID)
 	}
 	if err := a.write(func() error { return a.st.Discard(it.MsgID) }); err != nil && !errors.Is(err, store.ErrNotFound) {

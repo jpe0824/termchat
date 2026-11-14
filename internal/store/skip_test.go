@@ -7,8 +7,8 @@ import (
 
 func TestCursorPassesSkippedSeq(t *testing.T) {
 	s := openTest(t)
-	must(t, s.Apply(posted("c1", 1, "m1", "ann", "a"), posted("c1", 2, "m2", "ann", "b"),
-		posted("c1", 4, "m4", "ann", "d")))
+	must(t, noErr(s.Apply(posted("c1", 1, "m1", "ann", "a"), posted("c1", 2, "m2", "ann", "b"),
+		posted("c1", 4, "m4", "ann", "d"))))
 	if got := s.Cursor("c1"); got != 2 {
 		t.Fatalf("Cursor before skip = %d, want 2", got)
 	}
@@ -23,7 +23,7 @@ func TestCursorPassesSkippedSeq(t *testing.T) {
 
 func TestSkippedSeqCountsForOldestSeq(t *testing.T) {
 	s := openTest(t)
-	must(t, s.Apply(posted("c1", 2, "m2", "ann", "b")))
+	must(t, noErr(s.Apply(posted("c1", 2, "m2", "ann", "b"))))
 	must(t, s.Skip("c1", 1))
 	if s.OldestSeq("c1") != 1 || s.Cursor("c1") != 2 {
 		t.Fatalf("oldest %d cursor %d, want 1 / 2", s.OldestSeq("c1"), s.Cursor("c1"))
@@ -35,9 +35,9 @@ func TestSkippedSeqCountsForOldestSeq(t *testing.T) {
 
 func TestValidEventReplacesSkip(t *testing.T) {
 	s := openTest(t)
-	must(t, s.Apply(posted("c1", 1, "m1", "ann", "a")))
+	must(t, noErr(s.Apply(posted("c1", 1, "m1", "ann", "a"))))
 	must(t, s.Skip("c1", 2))
-	must(t, s.Apply(posted("c1", 2, "m2", "ann", "now valid")))
+	must(t, noErr(s.Apply(posted("c1", 2, "m2", "ann", "now valid"))))
 	if n := count(t, s, "skipped"); n != 0 {
 		t.Fatalf("skipped rows after the real event arrived = %d, want 0", n)
 	}
@@ -51,7 +51,7 @@ func TestValidEventReplacesSkip(t *testing.T) {
 
 func TestSkipOfHeldSeqIsNoOp(t *testing.T) {
 	s := openTest(t)
-	must(t, s.Apply(posted("c1", 1, "m1", "ann", "a")))
+	must(t, noErr(s.Apply(posted("c1", 1, "m1", "ann", "a"))))
 	must(t, s.Skip("c1", 1))
 	if n := count(t, s, "skipped"); n != 0 {
 		t.Fatalf("skipped rows = %d, want 0 for a held seq", n)
@@ -70,7 +70,7 @@ func TestSkipSurvivesReopen(t *testing.T) {
 	dir := t.TempDir()
 	s, err := Open(dir, "acct")
 	must(t, err)
-	must(t, s.Apply(posted("c1", 1, "m1", "ann", "a"), posted("c1", 3, "m3", "ann", "c")))
+	must(t, noErr(s.Apply(posted("c1", 1, "m1", "ann", "a"), posted("c1", 3, "m3", "ann", "c"))))
 	must(t, s.Skip("c1", 2))
 	must(t, s.Close())
 	s, err = Open(dir, "acct")

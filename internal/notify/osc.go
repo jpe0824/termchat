@@ -5,9 +5,9 @@ import (
 	"unicode"
 )
 
-// Title is the notification's headline: the sender for a direct message,
+// headline is the notification's title: the sender for a direct message,
 // "sender in #room" for a room.
-func Title(n Notification) string {
+func headline(n Notification) string {
 	if n.DM {
 		return n.Sender
 	}
@@ -20,7 +20,7 @@ func Title(n Notification) string {
 // characters and of the ';' that separates fields, so message text cannot end
 // or split the sequence.
 func OSC(variant string, n Notification) string {
-	title, sender, text := oscField(Title(n)), oscField(n.Sender), oscField(n.Text)
+	title, sender, text := oscField(headline(n)), oscField(n.Sender), oscField(n.Text)
 	switch variant {
 	case "9":
 		return "\x1b]9;" + sender + ": " + text + "\x07"

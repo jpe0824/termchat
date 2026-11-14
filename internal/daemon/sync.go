@@ -43,7 +43,7 @@ func (l *ledger) handleUpdate(u connector.Update) {
 	switch {
 	case u.Event != nil:
 		ev := *u.Event
-		l.ingestNotifying([]model.Event{ev}, nil)
+		l.nt.consider(l.ingest([]model.Event{ev}), livePush)
 		if l.unknown(ev.Actor, ev.Target) {
 			signal(l.peopleCh)
 		}
@@ -189,9 +189,9 @@ func (a *account) catchUp() error {
 	// first fill of a conversation new to this device may notify, once, like
 	// any other catch-up; the first catch-up on a device never does, so the
 	// whole backlog is not announced.
-	batch := newCatchUpBatch()
-	defer batch.flush(a.nt)
-	announceNew := len(local) > 0
+	batch := newCatchUp()
+	defer a.nt.endCatchUp(batch)
+	firstEver := len(local) == 0
 	for _, c := range mine {
 		if c.LastSeq == 0 || a.st.OldestSeq(c.ID) != 0 {
 			continue
@@ -200,16 +200,8 @@ func (a *account) catchUp() error {
 		if err != nil {
 			return err
 		}
-		var fresh []model.Event
-		if announceNew && !slices.Contains(heldBefore, c.ID) {
-			fresh = a.nt.unseen(evs)
-		}
-		a.storeHistory(c.ID, evs)
-		fresh = slices.DeleteFunc(fresh, func(ev model.Event) bool {
-			_, err := a.st.ByMsgID(ev.ConvID, ev.MsgID)
-			return err != nil
-		})
-		a.nt.consider(fresh, batch)
+		fill := mode{batch: batch, silent: firstEver || slices.Contains(heldBefore, c.ID)}
+		a.nt.consider(a.storeHistory(c.ID, evs), fill)
 	}
 
 	cursors := map[string]int64{}
@@ -222,7 +214,7 @@ func (a *account) catchUp() error {
 		}
 		cursors[c.ID] = cur
 	}
-	if err := a.syncCursorsInto(ctx, cursors, batch); err != nil {
+	if err := a.syncCursors(ctx, cursors, mode{batch: batch}); err != nil {
 		return err
 	}
 
@@ -241,24 +233,17 @@ func (a *account) catchUp() error {
 	return nil
 }
 
-// syncCursors calls Sync until the server has nothing more. Cursors advance
-// past every event returned, stored or not, so a rejected event cannot make
-// the loop ask for the same page forever.
-func (a *account) syncCursors(ctx context.Context, cursors map[string]int64) error {
-	batch := newCatchUpBatch()
-	defer batch.flush(a.nt)
-	return a.syncCursorsInto(ctx, cursors, batch)
-}
-
-// syncCursorsInto is syncCursors collecting notifications into batch, which
-// the caller flushes.
-func (a *account) syncCursorsInto(ctx context.Context, cursors map[string]int64, batch *catchUpBatch) error {
+// syncCursors calls Sync until the server has nothing more, storing what it
+// returns and notifying as m says. Cursors advance past every event returned,
+// stored or not, so a rejected event cannot make the loop ask for the same
+// page forever.
+func (a *account) syncCursors(ctx context.Context, cursors map[string]int64, m mode) error {
 	for len(cursors) > 0 {
 		evs, more, gone, err := a.conn.Sync(ctx, cursors)
 		if err != nil {
 			return err
 		}
-		a.ingestNotifying(evs, batch)
+		a.nt.consider(a.ingest(evs), m)
 		for _, ev := range evs {
 			if _, ok := cursors[ev.ConvID]; ok && ev.Seq > cursors[ev.ConvID] {
 				cursors[ev.ConvID] = ev.Seq
@@ -281,26 +266,37 @@ func (a *account) syncConv(ctx context.Context, conv string) error {
 	if cur == 0 && a.st.OldestSeq(conv) != 0 {
 		return errors.New("cursor unavailable")
 	}
-	return a.syncCursors(ctx, map[string]int64{conv: cur})
+	batch := newCatchUp()
+	defer a.nt.endCatchUp(batch)
+	return a.syncCursors(ctx, map[string]int64{conv: cur}, mode{batch: batch})
 }
 
-// apply stores events and returns those the store accepted. It writes in
-// chunks so a live update waits for one chunk at most.
-func (l *ledger) apply(evs []model.Event) []model.Event { return l.applyIn(evs, applyChunk) }
+// apply stores events and returns those the store accepted and, of those,
+// the ones it had not held before. It writes in chunks so a live update
+// waits for one chunk at most.
+func (l *ledger) apply(evs []model.Event) (accepted, added []model.Event) {
+	return l.applyIn(evs, applyChunk)
+}
 
 // applyIn is apply with chunks of size events. The store rejects a whole
 // batch for one malformed event, so a rejected chunk is retried one event at
 // a time and the bad ones recorded as skipped, which lets the cursor move
 // past them.
-func (l *ledger) applyIn(evs []model.Event, size int) []model.Event {
-	var ok []model.Event
+func (l *ledger) applyIn(evs []model.Event, size int) (accepted, added []model.Event) {
+	put := func(evs ...model.Event) error {
+		return l.write(func() error {
+			n, err := l.st.Apply(evs...)
+			added = append(added, n...)
+			return err
+		})
+	}
 	for chunk := range slices.Chunk(evs, size) {
-		if err := l.write(func() error { return l.st.Apply(chunk...) }); err == nil {
-			ok = append(ok, chunk...)
+		if err := put(chunk...); err == nil {
+			accepted = append(accepted, chunk...)
 			continue
 		}
 		for _, ev := range chunk {
-			if err := l.write(func() error { return l.st.Apply(ev) }); err != nil {
+			if err := put(ev); err != nil {
 				l.log.Warn("skipping event the store rejected", "conv", ev.ConvID, "seq", ev.Seq, "kind", ev.Kind, "err", err)
 				// Only a malformed event is recorded as skipped; a storage
 				// failure leaves the gap so the next sync fetches it again.
@@ -311,32 +307,21 @@ func (l *ledger) applyIn(evs []model.Event, size int) []model.Event {
 				}
 				continue
 			}
-			ok = append(ok, ev)
+			accepted = append(accepted, ev)
 		}
 	}
-	return ok
+	return accepted, added
 }
 
-// ingest stores events, then announces those the store accepted: each
-// message as well when the batch is short enough for subscribers to take one
-// event per message.
-func (l *ledger) ingest(evs []model.Event) {
-	l.announce(l.apply(evs), len(evs) <= maxMessageEvents)
-}
-
-// ingestNotifying is ingest for pushes and sync pages, where a newly stored
-// message from someone else may notify the user: at once when batch is nil,
-// else as the batch's newest for its conversation. History fetched on request
-// or in the backfill, edits, deletes and membership events go through ingest
-// or apply and never notify.
-func (l *ledger) ingestNotifying(evs []model.Event, batch *catchUpBatch) {
-	fresh := l.nt.unseen(evs)
-	stored := l.apply(evs)
-	l.announce(stored, len(evs) <= maxMessageEvents)
-	fresh = slices.DeleteFunc(fresh, func(ev model.Event) bool {
-		return !slices.ContainsFunc(stored, func(s model.Event) bool { return s.ConvID == ev.ConvID && s.Seq == ev.Seq })
-	})
-	l.nt.consider(fresh, batch)
+// ingest stores events and announces those the store accepted: each message
+// as well when the batch is short enough for subscribers to take one event
+// per message. It returns the events the store had not held before, which
+// the callers that may notify pass to the notifications: live pushes and
+// sync pages. History fetched on request or in the backfill never notifies.
+func (l *ledger) ingest(evs []model.Event) []model.Event {
+	accepted, added := l.apply(evs)
+	l.announce(accepted, len(evs) <= maxMessageEvents)
+	return added
 }
 
 // announce tells subscribers about stored events: each message when

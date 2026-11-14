@@ -2,7 +2,6 @@ package cli
 
 import (
 	"errors"
-	"strings"
 
 	"github.com/jpe0824/termchat/internal/ipc"
 	"github.com/jpe0824/termchat/internal/sanitize"
@@ -29,13 +28,7 @@ type exitError struct {
 func (e *exitError) Error() string { return e.msg }
 
 func exitf(code int, msg string) error {
-	return &exitError{code: code, msg: oneLine(msg)}
-}
-
-// oneLine makes text that may carry user or server data safe for a single
-// line of stderr.
-func oneLine(s string) string {
-	return strings.Join(strings.Fields(sanitize.Text(s)), " ")
+	return &exitError{code: code, msg: sanitize.Line(msg)}
 }
 
 // exitCodeFor maps the errors of package ipc to an exit code. It is the only

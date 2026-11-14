@@ -33,3 +33,18 @@ func TestValidName(t *testing.T) {
 		}
 	}
 }
+
+func TestPeer(t *testing.T) {
+	for _, tc := range []struct {
+		members []string
+		want    string
+	}{
+		{[]string{"me", "dana"}, "dana"},
+		{[]string{"dana", "me"}, "dana"},
+		{[]string{"me"}, "me"},
+	} {
+		if got := (Conversation{Kind: ConvDM, Members: tc.members}).Peer("me"); got != tc.want {
+			t.Errorf("Peer of %q = %q, want %q", tc.members, got, tc.want)
+		}
+	}
+}

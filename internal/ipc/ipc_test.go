@@ -421,3 +421,31 @@ func TestSubscribeUIDeclaresCapabilityAndBroadcastNotifyReachesOnlyCapableUIs(t 
 		}
 	}
 }
+
+func TestBroadcastNotifyCountsTheCapableUIsItReached(t *testing.T) {
+	srv, sock := startServer(t, &stubBackend{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ev := Event{Kind: KindNotify, Notify: &NotifyPayload{ConvID: "c1", Text: "hi"}}
+	if _, err := dialTest(t, sock).Subscribe(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dialTest(t, sock).SubscribeUI(ctx, false); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, func() bool { return len(srv.Subscribers()) == 2 })
+	if n := srv.BroadcastNotify(ev); n != 0 {
+		t.Fatalf("BroadcastNotify reached %d with no capable UI, want 0", n)
+	}
+	capable, err := dialTest(t, sock).SubscribeUI(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, func() bool { return len(srv.Subscribers()) == 3 })
+	if n := srv.BroadcastNotify(ev); n != 1 {
+		t.Fatalf("BroadcastNotify reached %d, want 1", n)
+	}
+	if got := <-capable; got.Kind != KindNotify {
+		t.Fatalf("capable UI got %+v", got)
+	}
+}

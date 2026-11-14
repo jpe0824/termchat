@@ -26,7 +26,7 @@ func lookupFixture(t *testing.T) *Store {
 	} {
 		must(t, s.UpsertConversation(c))
 	}
-	must(t, s.Apply(
+	must(t, noErr(s.Apply(
 		posted("r1", 1, "m1", "ann", "one"),
 		posted("r1", 2, "m2", "me", "two"),
 		posted("r1", 3, "m3", "ann", "three"),
@@ -36,7 +36,7 @@ func lookupFixture(t *testing.T) *Store {
 		posted("d1", 1, "m1", "bob", "hi"),
 		deleted("d1", 2, "m1", "bob"),
 		posted("gone", 1, "m1", "ann", "bye"),
-	))
+	)))
 	must(t, s.MarkGone("gone"))
 	return s
 }
@@ -164,7 +164,7 @@ func TestMigrationFromVersionTwo(t *testing.T) {
 	must(t, err)
 	must(t, s.SetMe("me"))
 	must(t, s.UpsertConversation(model.Conversation{ID: "r1", Kind: model.ConvRoom, Name: "eng", Members: []string{"me"}, LastSeq: 2}))
-	must(t, s.Apply(posted("r1", 1, "m1", "ann", "one"), posted("r1", 2, "m2", "ann", "two")))
+	must(t, noErr(s.Apply(posted("r1", 1, "m1", "ann", "one"), posted("r1", 2, "m2", "ann", "two"))))
 	before := convs(t, s)
 	for _, stmt := range []string{`DROP INDEX events_kind_at`, `DROP INDEX messages_unread`, `PRAGMA user_version = 2`} {
 		_, err := s.db.Exec(stmt)

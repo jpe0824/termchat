@@ -29,9 +29,9 @@ func TestPolicyTable(t *testing.T) {
 		return c
 	}
 	read := func(c *Context) { c.Unread = false }
-	focusedR := func(c *Context) { c.FocusedConv = "r1"; c.TUIAttached = true }
-	focusedD := func(c *Context) { c.FocusedConv = "d1"; c.TUIAttached = true }
-	focusedElsewhere := func(c *Context) { c.FocusedConv = "other"; c.TUIAttached = true }
+	focusedR := func(c *Context) { c.Focused = true }
+	focusedD := func(c *Context) { c.Focused = true }
+	focusedElsewhere := func(c *Context) { c.Focused = false }
 
 	tests := []struct {
 		name string

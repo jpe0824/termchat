@@ -16,11 +16,11 @@ import (
 // Notification is what a notification shows.
 type Notification = ipc.NotifyPayload
 
-// Room modes, as configured per conversation.
+// Room modes, as configured per conversation; any other value means
+// mentions only.
 const (
-	ModeAll      = "all"
-	ModeMentions = "mentions"
-	ModeMuted    = "muted"
+	modeAll   = "all"
+	modeMuted = "muted"
 )
 
 // Context is what ShouldNotify needs besides the message itself.
@@ -33,32 +33,26 @@ type Context struct {
 	// Unread is true while the message is after the conversation's read
 	// position, which another device may have moved.
 	Unread bool
-	// FocusedConv is the conversation a focused, attached UI is showing, or
-	// empty when there is none.
-	FocusedConv string
-	// TUIAttached is true when at least one UI is attached.
-	TUIAttached bool
+	// Focused is true while an attached UI shows the message's conversation
+	// in a focused window.
+	Focused bool
 }
 
 // ShouldNotify reports whether m, a message of conv, needs the user's
 // attention.
 func ShouldNotify(m store.Message, conv model.Conversation, c Context) bool {
 	switch {
-	case m.Deleted, !c.Unread:
-		return false
-	case c.Me != "" && m.Author == c.Me:
-		return false
-	case c.FocusedConv != "" && c.FocusedConv == m.ConvID:
+	case m.Deleted, !c.Unread, c.Focused, m.Author == c.Me:
 		return false
 	case conv.Kind == model.ConvDM:
 		return true
 	}
 	switch c.RoomMode {
-	case ModeMuted:
+	case modeMuted:
 		return false
-	case ModeAll:
+	case modeAll:
 		return true
 	default:
-		return c.Me != "" && slices.Contains(m.Mentions, c.Me)
+		return slices.Contains(m.Mentions, c.Me)
 	}
 }

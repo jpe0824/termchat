@@ -29,12 +29,12 @@ func TestApplyIsIdempotent(t *testing.T) {
 		edited("c1", 2, "m1", "ann", "hello again"),
 		posted("c1", 3, "m2", "bob", "second"),
 	}
-	must(t, s.Apply(evs...))
+	must(t, noErr(s.Apply(evs...)))
 	first := msgs(t, s, "c1")
 	events, messages, fts := count(t, s, "events"), count(t, s, "messages"), count(t, s, "msg_fts")
 
-	must(t, s.Apply(evs...))
-	must(t, s.Apply(evs[1]))
+	must(t, noErr(s.Apply(evs...)))
+	must(t, noErr(s.Apply(evs[1])))
 	if got := msgs(t, s, "c1"); !reflect.DeepEqual(got, first) {
 		t.Fatalf("Messages changed after re-apply:\n got %+v\nwant %+v", got, first)
 	}
@@ -85,7 +85,7 @@ func TestApplyIsIndependentOfArrivalOrder(t *testing.T) {
 			for oname, order := range orders {
 				s := openTest(t)
 				for _, i := range order {
-					must(t, s.Apply(evs[i]))
+					must(t, noErr(s.Apply(evs[i])))
 				}
 				got := msgs(t, s, "c1")
 				if first {
@@ -119,8 +119,8 @@ func TestApplyBatchOrderDoesNotMatter(t *testing.T) {
 		edited("c1", 2, "m1", "ann", "two"),
 		posted("c1", 3, "m2", "ann", "three"),
 	}
-	must(t, a.Apply(evs...))
-	must(t, b.Apply(evs[2], evs[1], evs[0]))
+	must(t, noErr(a.Apply(evs...)))
+	must(t, noErr(b.Apply(evs[2], evs[1], evs[0])))
 	if !reflect.DeepEqual(msgs(t, a, "c1"), msgs(t, b, "c1")) {
 		t.Fatalf("batch order changed the result")
 	}
@@ -128,11 +128,11 @@ func TestApplyBatchOrderDoesNotMatter(t *testing.T) {
 
 func TestEditBeforePostedShowsNothingUntilPosted(t *testing.T) {
 	s := openTest(t)
-	must(t, s.Apply(edited("c1", 2, "m1", "ann", "new text")))
+	must(t, noErr(s.Apply(edited("c1", 2, "m1", "ann", "new text"))))
 	if got := msgs(t, s, "c1"); len(got) != 0 {
 		t.Fatalf("message shown without its posted event: %+v", got)
 	}
-	must(t, s.Apply(posted("c1", 1, "m1", "ann", "old text")))
+	must(t, noErr(s.Apply(posted("c1", 1, "m1", "ann", "old text"))))
 	got := msgs(t, s, "c1")
 	if len(got) != 1 || got[0].Text != "new text" || !got[0].Edited || got[0].Seq != 1 {
 		t.Fatalf("Messages = %+v", got)
@@ -144,11 +144,11 @@ func TestEditBeforePostedShowsNothingUntilPosted(t *testing.T) {
 
 func TestEditReplacesTextAndIndex(t *testing.T) {
 	s := openTest(t)
-	must(t, s.Apply(posted("c1", 1, "m1", "ann", "pineapple pizza")))
+	must(t, noErr(s.Apply(posted("c1", 1, "m1", "ann", "pineapple pizza"))))
 	if r, err := s.Search("pineapple", 10); err != nil || len(r) != 1 {
 		t.Fatalf("Search(pineapple) = %v, %v", r, err)
 	}
-	must(t, s.Apply(edited("c1", 2, "m1", "ann", "margherita pizza")))
+	must(t, noErr(s.Apply(edited("c1", 2, "m1", "ann", "margherita pizza"))))
 
 	if r, err := s.Search("pineapple", 10); err != nil || len(r) != 0 {
 		t.Fatalf("Search(pineapple) after edit = %v, %v", r, err)
@@ -168,11 +168,11 @@ func TestEditReplacesTextAndIndex(t *testing.T) {
 
 func TestDeletePurgesTextAndIndex(t *testing.T) {
 	s := openTest(t)
-	must(t, s.Apply(
+	must(t, noErr(s.Apply(
 		posted("c1", 1, "m1", "ann", "zebrafish secret"),
 		edited("c1", 2, "m1", "ann", "zebrafish revised"),
-	))
-	must(t, s.Apply(deleted("c1", 3, "m1", "ann")))
+	)))
+	must(t, noErr(s.Apply(deleted("c1", 3, "m1", "ann"))))
 	got := msgs(t, s, "c1")
 	if len(got) != 1 || !got[0].Deleted || got[0].Text != "" {
 		t.Fatalf("Messages = %+v", got)
@@ -187,13 +187,13 @@ func TestDeletePurgesTextAndIndex(t *testing.T) {
 
 func TestLateArrivingOldBodiesDoNotResurface(t *testing.T) {
 	s := openTest(t)
-	must(t, s.Apply(edited("c1", 4, "m1", "ann", "current")))
+	must(t, noErr(s.Apply(edited("c1", 4, "m1", "ann", "current"))))
 	// A history page delivers the original with its body after the edit is held.
-	must(t, s.Apply(posted("c1", 1, "m1", "ann", "walrus original")))
-	must(t, s.Apply(posted("c1", 2, "m2", "ann", "walrus doomed")))
-	must(t, s.Apply(deleted("c1", 5, "m2", "ann")))
+	must(t, noErr(s.Apply(posted("c1", 1, "m1", "ann", "walrus original"))))
+	must(t, noErr(s.Apply(posted("c1", 2, "m2", "ann", "walrus doomed"))))
+	must(t, noErr(s.Apply(deleted("c1", 5, "m2", "ann"))))
 	// An earlier event with a body arrives once more after the deletion.
-	must(t, s.Apply(edited("c1", 3, "m2", "ann", "walrus late edit")))
+	must(t, noErr(s.Apply(edited("c1", 3, "m2", "ann", "walrus late edit"))))
 	if hits := tablesHolding(t, s, "walrus"); len(hits) != 0 {
 		t.Fatalf("stale text held in %v", hits)
 	}
@@ -201,9 +201,9 @@ func TestLateArrivingOldBodiesDoNotResurface(t *testing.T) {
 
 func TestBlankingRemovesTextEverywhere(t *testing.T) {
 	s := openTest(t)
-	must(t, s.Apply(posted("c1", 1, "m1", "ann", "narwhal plans")))
+	must(t, noErr(s.Apply(posted("c1", 1, "m1", "ann", "narwhal plans"))))
 	// Retention purge: the same event returns with its body cleared.
-	must(t, s.Apply(posted("c1", 1, "m1", "ann", "")))
+	must(t, noErr(s.Apply(posted("c1", 1, "m1", "ann", ""))))
 	if hits := tablesHolding(t, s, "narwhal"); len(hits) != 0 {
 		t.Fatalf("blanked text still held in %v", hits)
 	}
@@ -215,7 +215,7 @@ func TestBlankingRemovesTextEverywhere(t *testing.T) {
 		t.Fatalf("blanked message = %+v, want the deleted placeholder", got)
 	}
 	// A later event that carries a body supplies the text.
-	must(t, s.Apply(edited("c1", 2, "m1", "ann", "restored")))
+	must(t, noErr(s.Apply(edited("c1", 2, "m1", "ann", "restored"))))
 	got = msgs(t, s, "c1")
 	if len(got) != 1 || got[0].Deleted || got[0].Text != "restored" || !got[0].Edited {
 		t.Fatalf("after later edit = %+v", got)
@@ -224,8 +224,8 @@ func TestBlankingRemovesTextEverywhere(t *testing.T) {
 
 func TestStoredBlankedPostedStaysBlankedWhenBodyReappears(t *testing.T) {
 	s := openTest(t)
-	must(t, s.Apply(posted("c1", 1, "m1", "ann", "")))
-	must(t, s.Apply(posted("c1", 1, "m1", "ann", "owl")))
+	must(t, noErr(s.Apply(posted("c1", 1, "m1", "ann", ""))))
+	must(t, noErr(s.Apply(posted("c1", 1, "m1", "ann", "owl"))))
 	if got := msgs(t, s, "c1"); len(got) != 1 || got[0].Text != "" || !got[0].Deleted {
 		t.Fatalf("a purged event regained its body: %+v", got)
 	}
@@ -235,7 +235,7 @@ func TestUnsupportedFormatIsPlaceholderAndNotIndexed(t *testing.T) {
 	s := openTest(t)
 	ev := posted("c1", 1, "m1", "ann", "")
 	ev.Body = &model.Body{Format: "image/png", Data: []byte("flamingo")}
-	must(t, s.Apply(ev))
+	must(t, noErr(s.Apply(ev)))
 	got := msgs(t, s, "c1")
 	if len(got) != 1 || got[0].Text != UnsupportedText || got[0].Deleted {
 		t.Fatalf("Messages = %+v", got)
@@ -248,7 +248,7 @@ func TestUnsupportedFormatIsPlaceholderAndNotIndexed(t *testing.T) {
 func TestTextIsStoredAsReceived(t *testing.T) {
 	s := openTest(t)
 	raw := "  hi \x1b[31m red <b>&amp;</b>\n"
-	must(t, s.Apply(posted("c1", 1, "m1", "ann", raw)))
+	must(t, noErr(s.Apply(posted("c1", 1, "m1", "ann", raw))))
 	if got := msgs(t, s, "c1"); len(got) != 1 || got[0].Text != raw {
 		t.Fatalf("Messages = %+v", got)
 	}
@@ -260,7 +260,7 @@ func TestMentionsFollowTheCurrentBody(t *testing.T) {
 	p.Mentions = []string{"bob"}
 	e := edited("c1", 2, "m1", "ann", "hi @cat @dan")
 	e.Mentions = []string{"cat", "dan"}
-	must(t, s.Apply(e, p))
+	must(t, noErr(s.Apply(e, p)))
 	got := msgs(t, s, "c1")
 	if len(got) != 1 || !reflect.DeepEqual(got[0].Mentions, []string{"cat", "dan"}) {
 		t.Fatalf("Messages = %+v", got)
@@ -269,7 +269,7 @@ func TestMentionsFollowTheCurrentBody(t *testing.T) {
 
 func TestApplyIsAtomic(t *testing.T) {
 	s := openTest(t)
-	err := s.Apply(posted("c1", 1, "m1", "ann", "fine"), model.Event{ConvID: "c1", Seq: 0, Kind: model.MessagePosted, MsgID: "m2"})
+	_, err := s.Apply(posted("c1", 1, "m1", "ann", "fine"), model.Event{ConvID: "c1", Seq: 0, Kind: model.MessagePosted, MsgID: "m2"})
 	if err == nil {
 		t.Fatal("Apply accepted an event with Seq 0")
 	}
@@ -286,8 +286,31 @@ func TestApplyRejectsMalformedEvents(t *testing.T) {
 		{ConvID: "c", Seq: 1, Kind: model.MessagePosted},
 	}
 	for i, ev := range bad {
-		if err := s.Apply(ev); err == nil {
+		if _, err := s.Apply(ev); err == nil {
 			t.Errorf("case %d: Apply accepted %+v", i, ev)
 		}
+	}
+}
+
+func TestApplyReturnsTheEventsItNewlyStored(t *testing.T) {
+	s := openTest(t)
+	held := posted("c1", 1, "m1", "ann", "held")
+	added, err := s.Apply(held)
+	must(t, err)
+	if !reflect.DeepEqual(added, []model.Event{held}) {
+		t.Fatalf("first Apply returned %+v, want the one event", added)
+	}
+
+	m3, m2 := posted("c1", 3, "m3", "ann", "three"), posted("c1", 2, "m2", "bob", "two")
+	join := member("c1", 4, model.MemberJoined, "cat")
+	added, err = s.Apply(m3, held, m2, m3, join)
+	must(t, err)
+	if want := []model.Event{m3, m2, join}; !reflect.DeepEqual(added, want) {
+		t.Fatalf("Apply returned %+v\nwant %+v (new ones only, once each, in input order)", added, want)
+	}
+
+	added, err = s.Apply(posted("c1", 5, "m5", "ann", "fine"), model.Event{ConvID: "c1", Seq: 0, Kind: model.MessagePosted, MsgID: "bad"})
+	if err == nil || added != nil {
+		t.Fatalf("rejected batch returned %+v, %v; want nothing and an error", added, err)
 	}
 }

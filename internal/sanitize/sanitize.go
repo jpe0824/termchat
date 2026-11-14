@@ -39,6 +39,10 @@ func Text(s string) string {
 	return b.String()
 }
 
+// Line is Text on one line: every run of whitespace, line breaks included,
+// becomes a single space, and none leads or trails.
+func Line(s string) string { return strings.Join(strings.Fields(Text(s)), " ") }
+
 // skipEscape returns the index just past the escape sequence starting at
 // s[i], which must be ESC.
 func skipEscape(s string, i int) int {

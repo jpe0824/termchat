@@ -25,9 +25,14 @@ type msgKey struct{ conv, msgID string }
 // Message text lives in a single place per message. Once a later event holds a
 // body, or the message is deleted, the bodies of the superseded events are
 // cleared here, so old text never outlives its replacement in any table.
-func (s *Store) Apply(evs ...model.Event) error {
+//
+// It returns the events this call newly stored, in input order: not those
+// already held, and none when it fails.
+func (s *Store) Apply(evs ...model.Event) ([]model.Event, error) {
 	me := s.Me()
-	return s.write(func(tx *sql.Tx) error {
+	var added []model.Event
+	err := s.write(func(tx *sql.Tx) error {
+		added = nil
 		var touched []msgKey
 		seen := map[msgKey]bool{}
 		touch := func(conv, msgID string) {
@@ -51,6 +56,7 @@ func (s *Store) Apply(evs ...model.Event) error {
 				return err
 			}
 			if inserted {
+				added = append(added, ev)
 				if _, err := tx.Exec(`DELETE FROM skipped WHERE conv = ? AND seq = ?`, ev.ConvID, ev.Seq); err != nil {
 					return err
 				}
@@ -94,6 +100,10 @@ func (s *Store) Apply(evs ...model.Event) error {
 		}
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	return added, nil
 }
 
 func insertEvent(tx *sql.Tx, ev model.Event) (bool, error) {

@@ -41,14 +41,14 @@ func TestHookGetsEnvAndTimesOut(t *testing.T) {
 	t.Setenv("TERMCHAT_TEXT", "inherited value must be overridden")
 	n, _ := hookNotifier(t, `printf '%s|%s|%s|%s|%s|%s' "$TERMCHAT_CONV" "$TERMCHAT_CONV_NAME" "$TERMCHAT_SENDER" "$TERMCHAT_TEXT" "$TERMCHAT_MENTION" "$TERMCHAT_DM" > "$OUT"; if read -r x; then printf open >> "$OUT"; else printf '|stdin-closed' >> "$OUT"; fi`)
 	n.Hook(Notification{ConvID: "c9", ConvName: "ops", Sender: "Dana", Text: "hello", Mention: true})
-	n.Wait()
+	n.wait()
 	if got, want := readFile(t, out), "c9|ops|Dana|hello|1|0|stdin-closed"; got != want {
 		t.Errorf("hook saw %q, want %q", got, want)
 	}
 
 	n2, _ := hookNotifier(t, `printf '%s|%s' "$TERMCHAT_MENTION" "$TERMCHAT_DM" > "$OUT"`)
 	n2.Hook(Notification{ConvID: "c1", DM: true})
-	n2.Wait()
+	n2.wait()
 	if got, want := readFile(t, out), "0|1"; got != want {
 		t.Errorf("flags = %q, want %q", got, want)
 	}
@@ -62,7 +62,7 @@ func TestHookTimeoutKillsProcessGroup(t *testing.T) {
 	n.timeout = 300 * time.Millisecond
 	start := time.Now()
 	n.Hook(Notification{ConvID: "c", Text: "SECRET-TEXT"})
-	n.Wait()
+	n.wait()
 	if took := time.Since(start); took > 4*time.Second {
 		t.Fatalf("hook ran %v, want it killed near the 300ms timeout", took)
 	}
@@ -88,7 +88,7 @@ func TestHookTimeoutKillsProcessGroup(t *testing.T) {
 func TestHookFailureIsLoggedWithoutText(t *testing.T) {
 	n, logs := hookNotifier(t, `exit 3`)
 	n.Hook(Notification{Text: "SECRET-TEXT"})
-	n.Wait()
+	n.wait()
 	if !strings.Contains(logs.String(), "hook failed") {
 		t.Errorf("failure not logged: %q", logs.String())
 	}
@@ -109,7 +109,7 @@ func TestHookTextNotShellInterpreted(t *testing.T) {
 	} {
 		n, _ := hookNotifier(t, `printf %s "$TERMCHAT_TEXT" > "$OUT"`)
 		n.Hook(Notification{Text: text, Sender: text, ConvName: text})
-		n.Wait()
+		n.wait()
 		if got := readFile(t, out); got != text {
 			t.Errorf("hook got %q, want %q byte for byte", got, text)
 		}
@@ -146,7 +146,7 @@ func TestHookConcurrencyIsBounded(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "go"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	n.Wait()
+	n.wait()
 	if got := started(); got != 4 {
 		t.Errorf("%d hooks ran in total, want exactly 4 (the rest dropped)", got)
 	}
@@ -155,7 +155,7 @@ func TestHookConcurrencyIsBounded(t *testing.T) {
 func TestHookUnsetDoesNothing(t *testing.T) {
 	n, logs := hookNotifier(t, "")
 	n.Hook(Notification{Text: "x"})
-	n.Wait()
+	n.wait()
 	if logs.String() != "" {
 		t.Errorf("unexpected log: %q", logs.String())
 	}

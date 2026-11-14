@@ -49,7 +49,7 @@ func TestLinuxCommand(t *testing.T) {
 		}
 	}
 	c := linuxCommand(has("notify-send", "gdbus"), n)
-	want := &Cmd{Name: "notify-send", Args: []string{"--app-name=termchat", "--", hostile, "it's a \\ test"}}
+	want := &command{Name: "notify-send", Args: []string{"--app-name=termchat", "--", hostile, "it's a \\ test"}}
 	if !reflect.DeepEqual(c, want) {
 		t.Errorf("notify-send command = %+v, want %+v", c, want)
 	}
@@ -88,15 +88,19 @@ func TestWindowsCommand(t *testing.T) {
 	}
 }
 
+// wait returns when the running commands have ended, which is within their
+// timeout.
+func (n *Notifier) wait() { n.wg.Wait() }
+
 // recorder is an injected runner.
 type recorder struct {
 	mu       sync.Mutex
-	cmds     []Cmd
+	cmds     []command
 	deadline []time.Duration
 	err      error
 }
 
-func (r *recorder) run(ctx context.Context, c Cmd) error {
+func (r *recorder) run(ctx context.Context, c command) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.cmds = append(r.cmds, c)
@@ -113,7 +117,7 @@ func TestOSRouteRunsHostCommandOnce(t *testing.T) {
 	n.run = rec.run
 	n.lookPath = func(name string) (string, error) { return "/bin/" + name, nil }
 	n.OS(Notification{Sender: "dana", Text: hostile, DM: true})
-	n.Wait()
+	n.wait()
 	if len(rec.cmds) != 1 {
 		t.Fatalf("ran %d commands, want 1: %+v", len(rec.cmds), rec.cmds)
 	}
@@ -141,7 +145,7 @@ func TestOSRouteNoNotifierIsSilent(t *testing.T) {
 	n.run = rec.run
 	n.lookPath = func(string) (string, error) { return "", exec.ErrNotFound }
 	n.OS(Notification{Text: "x"})
-	n.Wait()
+	n.wait()
 	if len(rec.cmds) != 0 {
 		t.Errorf("ran %+v with no notifier installed", rec.cmds)
 	}
@@ -193,10 +197,12 @@ func TestLinuxBodyMarkupIsEscaped(t *testing.T) {
 
 func TestOSCommandIsBuiltOffTheCallingGoroutine(t *testing.T) {
 	n := New(&config.Config{}, nil)
+	n.run = (&recorder{}).run
+	n.goos = "linux" // the platform that searches PATH
 	release := make(chan struct{})
-	n.build = func(func(string) (string, error), Notification) *Cmd {
+	n.lookPath = func(string) (string, error) {
 		<-release // stands in for a slow PATH lookup
-		return nil
+		return "", exec.ErrNotFound
 	}
 	returned := make(chan struct{})
 	go func() {
@@ -211,4 +217,18 @@ func TestOSCommandIsBuiltOffTheCallingGoroutine(t *testing.T) {
 	}
 	close(release)
 	n.Close()
+}
+
+func TestPlatformCommandPicksTheOSRoute(t *testing.T) {
+	found := func(name string) (string, error) { return "/usr/bin/" + name, nil }
+	for goos, want := range map[string]string{"darwin": "osascript", "linux": "notify-send", "windows": "powershell", "plan9": ""} {
+		c := platformCommand(goos, found, Notification{Sender: "dana", Text: "hi", DM: true})
+		got := ""
+		if c != nil {
+			got = c.Name
+		}
+		if got != want {
+			t.Errorf("%s: command %q, want %q", goos, got, want)
+		}
+	}
 }
