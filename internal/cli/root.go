@@ -73,12 +73,12 @@ func Root() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Args:          noSubcommand,
-		RunE:          groupRun,
+		RunE:          rootRun,
 	}
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
 		return &usageError{msg: err.Error()}
 	})
-	root.AddCommand(newServeCmd(), newServerCmd(), newDaemonCmd())
+	root.AddCommand(newServeCmd(), newServerCmd(), newDaemonCmd(), newTUICmd())
 	root.AddCommand(newJoinCmd(), newStatusCmd(), newChatsCmd(), newReadCmd(), newSendCmd(), newWaitCmd(),
 		newSearchCmd(), newMarkReadCmd(), newDMCmd(), newRoomCmd(), newDeviceCmd(), newAgentCmd(), newInviteCmd())
 	return root

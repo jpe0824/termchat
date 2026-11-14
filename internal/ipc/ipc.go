@@ -33,6 +33,31 @@ func SocketPath() (string, error) {
 	return filepath.Join(dir, SocketName), nil
 }
 
+// The plain types and values the API hands out, named here so a client
+// that only displays them needs no import of the store or the connector.
+type (
+	ConvView   = store.ConvView
+	Message    = store.Message
+	OutboxItem = store.OutboxItem
+	ConnState  = connector.ConnState
+)
+
+// Message.Status of an outbox item; a stored message has "".
+const (
+	MsgSending = store.StatusSending
+	MsgFailed  = store.StatusFailed
+)
+
+// Status.Conn values.
+const (
+	StateConnecting      = connector.StateConnecting
+	StateConnected       = connector.StateConnected
+	StateOffline         = connector.StateOffline
+	StateNotAuthorised   = connector.StateNotAuthorised
+	StateHostKeyChanged  = connector.StateHostKeyChanged
+	StateVersionMismatch = connector.StateVersionMismatch
+)
+
 // Status describes the background process. Account is empty when no account
 // is configured.
 type Status struct {

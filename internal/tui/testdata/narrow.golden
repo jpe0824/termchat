@@ -1,0 +1,14 @@
+┌ termchat ────── team.example ● connected ┐
+│ ‹ chats ●2    # platform                 │
+│ ──────────────────────────────────────── │
+│ 10:03 you     yes, 10 min ago            │
+│ 10:41 dana    great. one row looks off   │
+│ 10:42 ci-bot  [agent] build 812 passed   │
+│ 10:44 sam     @jason can you look?       │
+│               (edited)                   │
+│ 10:45 you     on it                      │
+│ 10:45 you     pushing a fix now          │
+│               sending…                   │
+│ ──────────────────────────────────────── │
+│ > _                                      │
+└─ esc chats  pgup/pgdn scroll  ? help ────┘
