@@ -20,6 +20,21 @@ type Backend interface {
 	SubscribeUI(ctx context.Context, canNotify bool) (<-chan ipc.Event, error)
 	SubscriptionErr() error
 	Close() error
+
+	// Send queues text and returns once it is queued, even offline.
+	Send(conv, text, source string) (string, error)
+	// Edit and Delete need the server: offline they fail.
+	Edit(conv, msgID, text string) error
+	Delete(conv, msgID string) error
+	// Retry and Discard act on a failed unsent item.
+	Retry(msgID string) error
+	Discard(msgID string) error
+	// Outbox lists conv's unsent items with the reason each one failed.
+	Outbox(conv string) ([]ipc.OutboxItem, error)
+	MarkRead(conv string) error
+	// SetFocus tells the background process which conversation this
+	// connection shows ("" for none) and whether the terminal has focus.
+	SetFocus(conv string, focused bool) error
 }
 
 // Options are the settings and outside hooks the interface needs. Zero
@@ -27,6 +42,9 @@ type Backend interface {
 type Options struct {
 	// Splash shows the opening screen (config "splash").
 	Splash bool
+	// MarkRead marks the conversation being looked at read (config
+	// "mark_read"); without it the interface never marks anything read.
+	MarkRead bool
 	// Version is shown on the opening screen.
 	Version string
 	// Server returns the configured server address, "host:port"; it may read

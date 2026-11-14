@@ -27,6 +27,8 @@ type fakeBackend struct {
 	outbox    map[string][]ipc.Message
 	msgErr    error
 	calls     []string
+	errs      writeErrs
+	reasons   map[string][]ipc.OutboxItem
 
 	subCh  chan ipc.Event
 	subErr error
@@ -320,9 +322,16 @@ func (h *tester) lines() []string { return strings.Split(h.view(), "\n") }
 func keyMsg(s string) tea.KeyPressMsg {
 	codes := map[string]rune{"up": tea.KeyUp, "down": tea.KeyDown, "enter": tea.KeyEnter,
 		"esc": tea.KeyEscape, "tab": tea.KeyTab, "pgup": tea.KeyPgUp, "pgdown": tea.KeyPgDown,
-		"home": tea.KeyHome, "end": tea.KeyEnd}
+		"home": tea.KeyHome, "end": tea.KeyEnd, "left": tea.KeyLeft, "right": tea.KeyRight,
+		"backspace": tea.KeyBackspace, "delete": tea.KeyDelete}
 	if c, ok := codes[s]; ok {
 		return tea.KeyPressMsg{Code: c}
+	}
+	if rest, ok := strings.CutPrefix(s, "alt+"); ok {
+		k := keyMsg(rest)
+		k.Mod |= tea.ModAlt
+		k.Text = ""
+		return k
 	}
 	if rest, ok := strings.CutPrefix(s, "ctrl+"); ok {
 		return tea.KeyPressMsg{Code: []rune(rest)[0], Mod: tea.ModCtrl}

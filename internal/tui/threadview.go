@@ -54,16 +54,15 @@ func (m *Model) threadHeader(g geom, width int) string {
 	return m.st.heading.Render(truncate(name, width))
 }
 
-// threadView draws the thread pane: header, messages, and the input line.
+// threadView draws the thread pane: header, messages, and the input.
 func (m *Model) threadView(g geom) []string {
-	width, vh := m.threadPane(g)
-	rule := m.st.faint.Render(strings.Repeat("─", width))
-	out := []string{m.threadHeader(g, width)}
+	l := m.tlayout(g)
+	out := []string{m.threadHeader(g, l.width)}
 	if g.mode != Tiny {
-		out = append(out, rule)
+		out = append(out, m.st.faint.Render(strings.Repeat("─", l.width)))
 	}
-	out = append(out, m.messageArea(width, vh, g.mode)...)
-	return append(out, rule, m.st.faint.Render("> _"))
+	out = append(out, m.messageArea(l.width, l.vh, g.mode)...)
+	return append(out, m.inputArea(g, l)...)
 }
 
 func (m *Model) messageArea(width, vh int, mode Mode) []string {

@@ -38,6 +38,7 @@ func TestSidebarTruncatesLongNames(t *testing.T) {
 
 func TestSidebarSelectionVisibleWithoutColour(t *testing.T) {
 	h := started(t, fixture(), 90, 20)
+	h.key("esc") // from the input to the chat list
 	raw := strings.Split(h.raw(), "\n")
 	_, row := lineWith(raw, "# platform     5")
 	if !strings.Contains(row, "\x1b[7m") && !strings.Contains(row, ";7m") {
@@ -54,6 +55,7 @@ func TestOpenConversationWithEnterAndWithClick(t *testing.T) {
 	if h.m.openID != "r-platform" || h.m.cursorID() != "r-platform" {
 		t.Fatalf("first open = %q, cursor %q; want the most recently active", h.m.openID, h.m.cursorID())
 	}
+	h.key("esc") // from the input to the chat list
 	h.key("up")
 	h.key("up")
 	h.key("k")
@@ -68,6 +70,7 @@ func TestOpenConversationWithEnterAndWithClick(t *testing.T) {
 		t.Fatalf("enter opened %q", h.m.openID)
 	}
 	mustContain(t, h.view(), "got a minute?")
+	h.key("esc")
 	h.key("j")
 	h.key("down")
 	if h.m.cursorID() != "dm-ci" {
@@ -189,6 +192,7 @@ func TestReadFailureWithClosedMarksProcessDown(t *testing.T) {
 
 func TestHelpOverlayListsWorkingKeys(t *testing.T) {
 	h := started(t, fixture(), 90, 24)
+	h.key("esc")
 	h.key("?")
 	v := h.view()
 	mustContain(t, v, "tab", "pgup", "enter", "quit")
@@ -202,6 +206,7 @@ func TestHelpOverlayListsWorkingKeys(t *testing.T) {
 
 func TestFooterShowsOnlyWorkingKeys(t *testing.T) {
 	h := started(t, fixture(), 120, 20)
+	h.key("esc")
 	foot := h.lines()[19]
 	mustContain(t, foot, "↑↓ move", "⏎ open", "tab pane", "? help")
 	mustNotContain(t, foot, "ctrl+k", "ctrl+n", "search")
@@ -209,6 +214,7 @@ func TestFooterShowsOnlyWorkingKeys(t *testing.T) {
 
 func TestQuitKeys(t *testing.T) {
 	h := started(t, fixture(), 90, 20)
+	h.key("esc")
 	h.key("q")
 	if !h.quit {
 		t.Error("q did not quit")
@@ -222,11 +228,12 @@ func TestQuitKeys(t *testing.T) {
 
 func TestTabSwitchesFocusAndArrowsScrollThread(t *testing.T) {
 	h := started(t, fixture(), 90, 20)
-	if h.m.focus != paneSidebar {
-		t.Fatalf("initial focus = %v", h.m.focus)
+	h.key("esc")
+	if h.m.focus != focusList {
+		t.Fatalf("focus after esc = %v", h.m.focus)
 	}
 	h.key("tab")
-	if h.m.focus != paneThread {
+	if h.m.focus != focusThread {
 		t.Fatalf("tab focus = %v", h.m.focus)
 	}
 	h.key("up")
@@ -234,8 +241,9 @@ func TestTabSwitchesFocusAndArrowsScrollThread(t *testing.T) {
 		t.Errorf("up with the thread focused moved the chat list to %q", h.m.cursorID())
 	}
 	h.key("tab")
-	if h.m.focus != paneSidebar {
-		t.Errorf("second tab focus = %v", h.m.focus)
+	h.key("tab")
+	if h.m.focus != focusList {
+		t.Errorf("third tab focus = %v", h.m.focus)
 	}
 }
 

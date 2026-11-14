@@ -54,7 +54,7 @@ func TestThreadRendering(t *testing.T) {
 	if j != i+1 {
 		t.Errorf("the unsent item should come last, right after the newest message")
 	}
-	if !strings.HasPrefix(rows[len(rows)-1], " > ") {
+	if strings.TrimRight(rows[len(rows)-1], " ") != " >" {
 		t.Errorf("last thread row = %q, want the input line", rows[len(rows)-1])
 	}
 }

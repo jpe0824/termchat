@@ -75,7 +75,7 @@ func (m *Model) sidebarOffset(rows []sbRow, h int) int {
 
 // listActive reports whether the arrow keys move in the chat list.
 func (m *Model) listActive(g geom) bool {
-	return g.side.w > 0 && (g.mode <= Narrow || m.focus == paneSidebar)
+	return g.side.w > 0 && (g.mode <= Narrow || m.focus == focusList)
 }
 
 func (m *Model) sidebarLines(g geom) []string {

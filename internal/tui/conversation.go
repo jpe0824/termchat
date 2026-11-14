@@ -1,11 +1,9 @@
 package tui
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/jpe0824/termchat/internal/ipc"
@@ -32,6 +30,10 @@ type thread struct {
 	// exhausted is the oldest seq at which a read of older history came
 	// back empty.
 	exhausted int64
+	// sel is the selected row's key, "" for none.
+	sel string
+	// reasons holds why unsent items failed, by message id.
+	reasons map[string]string
 }
 
 func newThread(conv string) *thread { return &thread{conv: conv, atBottom: true} }
@@ -65,6 +67,48 @@ func (t *thread) merge(msgs []ipc.Message, limit int) {
 		}
 	}
 	t.stored, t.outbox, t.loaded, t.err = stored, outbox, true, ""
+	t.anchor = t.remap(t.anchor)
+	if t.sel = t.remap(t.sel); !t.has(t.sel) {
+		t.sel = ""
+	}
+}
+
+// remap follows an unsent item's key to its stored message once it has
+// been delivered and is no longer unsent.
+func (t *thread) remap(key string) string {
+	id, ok := strings.CutPrefix(key, "o:")
+	if !ok {
+		return key
+	}
+	for _, m := range t.outbox {
+		if m.MsgID == id {
+			return key
+		}
+	}
+	for _, m := range t.stored {
+		if m.MsgID == id {
+			return storedKey(m)
+		}
+	}
+	return key
+}
+
+func (t *thread) has(key string) bool {
+	for _, it := range t.items() {
+		if it.key == key {
+			return true
+		}
+	}
+	return false
+}
+
+func (t *thread) hasFailed() bool {
+	for _, m := range t.outbox {
+		if m.Status == ipc.MsgFailed {
+			return true
+		}
+	}
+	return false
 }
 
 // prepend adds a page of history read before seq before. The view stays on
@@ -99,11 +143,13 @@ func (t *thread) newestSeq() int64 {
 }
 
 // tline is one drawn line of the thread and the row it belongs to. Rows are
-// keyed by seq for stored messages and by position for unsent items, which
-// may share a message id with a stored message.
+// keyed by seq for stored messages and by message id for unsent items,
+// which may share a message id with a stored message. sep marks a day
+// separator, which belongs to the row after it.
 type tline struct {
 	key  string
 	text string
+	sep  bool
 }
 
 type item struct {
@@ -114,13 +160,15 @@ type item struct {
 func (t *thread) items() []item {
 	out := make([]item, 0, len(t.stored)+len(t.outbox))
 	for _, m := range t.stored {
-		out = append(out, item{"s" + strconv.FormatInt(m.Seq, 10), m})
+		out = append(out, item{storedKey(m), m})
 	}
-	for i, m := range t.outbox {
-		out = append(out, item{fmt.Sprintf("o%d:%s", i, m.MsgID), m})
+	for _, m := range t.outbox {
+		out = append(out, item{"o:" + m.MsgID, m})
 	}
 	return out
 }
+
+func storedKey(m ipc.Message) string { return "s" + strconv.FormatInt(m.Seq, 10) }
 
 func (m *Model) author(msg ipc.Message) string {
 	if msg.Author == m.me() && msg.Author != "" {
@@ -132,8 +180,9 @@ func (m *Model) author(msg ipc.Message) string {
 	return sanitize.Line(msg.Author)
 }
 
-// body is a message's text as shown, with its markers.
-func (m *Model) body(msg ipc.Message) string {
+// body is a message's text as shown, with its markers. A failed item names
+// its reason, and offers its keys when selected.
+func (m *Model) body(msg ipc.Message, reason string, selected bool) string {
 	if msg.Deleted {
 		return "message deleted"
 	}
@@ -148,9 +197,27 @@ func (m *Model) body(msg ipc.Message) string {
 	case ipc.MsgSending:
 		text += "  sending…"
 	case ipc.MsgFailed:
-		text += "  failed — retry?"
+		text += "  failed"
+		if r := sanitize.Line(reason); r != "" {
+			text += " (" + r + ")"
+		}
+		if selected {
+			text += " — r retry, x discard"
+		} else {
+			text += " — retry?"
+		}
 	}
 	return text
+}
+
+// itemBody is an item's text and style, marked when selected.
+func (m *Model) itemBody(it item) (string, lipgloss.Style, bool) {
+	sel := it.key == m.thread.sel
+	st := m.bodyStyle(it.m)
+	if sel {
+		st = st.Reverse(true)
+	}
+	return m.body(it.m, m.thread.reasons[it.m.MsgID], sel), st, sel
 }
 
 func (m *Model) bodyStyle(msg ipc.Message) lipgloss.Style {
@@ -194,16 +261,20 @@ func (m *Model) threadLines(width int, mode Mode) []tline {
 	var out []tline
 	for i, it := range items {
 		if i > 0 && m.day(it.m) != m.day(items[i-1].m) {
-			out = append(out, tline{it.key, m.daySep(it.m, width)})
+			out = append(out, tline{it.key, m.daySep(it.m, width), true})
 		}
-		st := m.bodyStyle(it.m)
-		for j, l := range wrap(m.body(it.m), textW) {
+		text, st, sel := m.itemBody(it)
+		g := gap
+		if sel {
+			g = "›" + gap[1:]
+		}
+		for j, l := range wrap(text, textW) {
 			lead := strings.Repeat(" ", prefix)
 			if j == 0 {
-				lead = m.st.faint.Render(it.m.At.In(m.opts.Location).Format("15:04")) + gap +
+				lead = m.st.faint.Render(it.m.At.In(m.opts.Location).Format("15:04")) + g +
 					fit(truncate(m.author(it.m), authorW), authorW) + "  "
 			}
-			out = append(out, tline{it.key, lead + st.Render(l)})
+			out = append(out, tline{it.key, lead + st.Render(l), false})
 		}
 	}
 	return out
@@ -216,116 +287,19 @@ func (m *Model) tinyLines(items []item, width int) []tline {
 	for i, it := range items {
 		newDay := i > 0 && m.day(it.m) != m.day(items[i-1].m)
 		if newDay {
-			out = append(out, tline{it.key, m.daySep(it.m, width)})
+			out = append(out, tline{it.key, m.daySep(it.m, width), true})
 		}
 		if i == 0 || newDay || items[i-1].m.Author != it.m.Author {
-			out = append(out, tline{it.key, m.st.heading.Render(truncate(m.author(it.m), width))})
+			out = append(out, tline{it.key, m.st.heading.Render(truncate(m.author(it.m), width)), false})
 		}
-		st := m.bodyStyle(it.m)
-		for _, l := range wrap(m.body(it.m), width-1) {
-			out = append(out, tline{it.key, " " + st.Render(l)})
+		text, st, sel := m.itemBody(it)
+		lead := " "
+		if sel {
+			lead = "›"
+		}
+		for _, l := range wrap(text, width-1) {
+			out = append(out, tline{it.key, lead + st.Render(l), false})
 		}
 	}
 	return out
-}
-
-// top is the index of the first visible line.
-func (t *thread) top(lines []tline, vh int) int {
-	maxTop := max(len(lines)-vh, 0)
-	if t.atBottom {
-		return maxTop
-	}
-	for i, l := range lines {
-		if l.key == t.anchor {
-			n := 0
-			for i+n < len(lines) && lines[i+n].key == t.anchor {
-				n++
-			}
-			return min(i+min(t.anchorOff, n-1), maxTop)
-		}
-	}
-	return maxTop
-}
-
-func (t *thread) setTop(lines []tline, top, vh int) {
-	maxTop := max(len(lines)-vh, 0)
-	top = min(max(top, 0), maxTop)
-	t.atBottom = top == maxTop
-	if t.atBottom {
-		t.newBelow = 0
-	}
-	if top < len(lines) {
-		t.anchor, t.anchorOff = lines[top].key, 0
-		for i := top - 1; i >= 0 && lines[i].key == t.anchor; i-- {
-			t.anchorOff++
-		}
-	}
-}
-
-// threadPane is the geometry of the thread's message area.
-func (m *Model) threadPane(g geom) (width, vh int) {
-	vh = g.bodyH - 4
-	if g.mode == Tiny {
-		vh = g.bodyH - 3
-	}
-	return g.thr.inner(), max(vh, 0)
-}
-
-// scroll moves the thread view by delta lines (negative is up). Reaching the
-// top asks for the page before.
-func (m *Model) scroll(delta int) tea.Cmd {
-	return m.scrollWith(func(top, maxTop int) int {
-		// Compared, not added, so no delta can overflow.
-		switch {
-		case delta >= maxTop-top:
-			return maxTop
-		case delta <= -top:
-			return 0
-		}
-		return top + delta
-	}, delta < 0)
-}
-
-// scrollToTop shows the oldest held message and asks for the page before.
-func (m *Model) scrollToTop() tea.Cmd {
-	return m.scrollWith(func(int, int) int { return 0 }, true)
-}
-
-// scrollToBottom follows the newest message.
-func (m *Model) scrollToBottom() tea.Cmd {
-	return m.scrollWith(func(_, maxTop int) int { return maxTop }, false)
-}
-
-// scrollWith moves the view to to(top, maxTop); up says the move was
-// towards older messages, so arriving at the top loads the page before.
-func (m *Model) scrollWith(to func(top, maxTop int) int, up bool) tea.Cmd {
-	g := m.geom()
-	if m.thread == nil || g.thr.w == 0 || m.help {
-		return nil
-	}
-	width, vh := m.threadPane(g)
-	lines := m.threadLines(width, g.mode)
-	maxTop := max(len(lines)-vh, 0)
-	top := to(m.thread.top(lines, vh), maxTop)
-	m.thread.setTop(lines, top, vh)
-	if top == 0 && up {
-		return m.requestOlder()
-	}
-	return nil
-}
-
-func (m *Model) topKey() string {
-	g := m.geom()
-	if m.thread == nil {
-		return ""
-	}
-	width, vh := m.threadPane(g)
-	if g.thr.w == 0 {
-		width, vh = m.w-4, max(g.bodyH-4, 0)
-	}
-	lines := m.threadLines(width, g.mode)
-	if top := m.thread.top(lines, vh); top < len(lines) {
-		return lines[top].key
-	}
-	return ""
 }

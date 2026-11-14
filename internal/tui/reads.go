@@ -3,6 +3,7 @@ package tui
 import (
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/jpe0824/termchat/internal/ipc"
 	"github.com/jpe0824/termchat/internal/sanitize"
 )
 
@@ -58,7 +59,7 @@ func (m *Model) onChats(msg chatsMsg) tea.Cmd {
 	m.cursor = max(m.indexOf(cur), 0)
 	if m.openID == "" && len(m.convs) > 0 {
 		m.cursor = mostRecent(m.convs)
-		cmds = append(cmds, m.open(m.convs[m.cursor].ID))
+		cmds = append(cmds, m.showPreview(m.convs[m.cursor].ID))
 	}
 	return tea.Batch(cmds...)
 }
@@ -96,7 +97,17 @@ func (m *Model) onThread(msg threadMsg) tea.Cmd {
 		m.thread.err = sanitize.Line(msg.err.Error())
 		return tea.Batch(append(cmds, m.failed(msg.err))...)
 	}
+	wasLoaded, newest := m.thread.loaded, m.thread.newestSeq()
 	m.thread.merge(msg.msgs, msg.limit)
+	if wasLoaded && m.thread.newestSeq() > newest {
+		m.readNew = true
+	}
+	if _, ok := m.selected(); !ok {
+		m.thread.sel = ""
+	}
+	if m.thread.hasFailed() {
+		cmds = append(cmds, m.requestOutbox())
+	}
 	return tea.Batch(cmds...)
 }
 
@@ -124,4 +135,37 @@ func (m *Model) onOlder(msg olderMsg) tea.Cmd {
 	}
 	m.thread.prepend(msg.before, msg.msgs)
 	return nil
+}
+
+// onEvent treats an event as a hint: it re-reads what the event touches.
+func (m *Model) onEvent(ev ipc.Event) tea.Cmd {
+	var conv string
+	switch ev.Kind {
+	case ipc.KindStatus:
+		if ev.Status != nil {
+			return m.setStatus(*ev.Status)
+		}
+		return nil
+	case ipc.KindMessage:
+		if ev.Message != nil {
+			conv = ev.Message.ConvID
+		}
+	case ipc.KindOutbox:
+		if ev.Message != nil {
+			conv = ev.Message.ConvID
+		} else if ev.Outbox != nil {
+			conv = ev.Outbox.ConvID
+		}
+	case ipc.KindConv:
+		if ev.Conv != nil {
+			conv = ev.Conv.ID
+		}
+	default:
+		return nil
+	}
+	cmds := []tea.Cmd{m.requestChats()}
+	if conv != "" && conv == m.openID {
+		cmds = append(cmds, m.requestThread())
+	}
+	return tea.Batch(cmds...)
 }

@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"errors"
-	"net"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -21,57 +20,14 @@ const (
 	retryEvery = 2 * time.Second
 )
 
-type pane int
+// focusArea is where keys go: the chat list, the thread's message
+// selection, or the text input.
+type focusArea int
 
 const (
-	paneSidebar pane = iota
-	paneThread
-)
-
-// Messages into the update loop. Results carry the backend they came from
-// so an answer from a connection that has since been replaced is dropped.
-type (
-	splashDoneMsg  struct{}
-	statusPollMsg  struct{}
-	eventMsg       struct{ ev ipc.Event }
-	subscribedMsg  struct{ b Backend }
-	backendDownMsg struct{ err error }
-	// launchMsg is the first connection attempt's result; startedMsg is
-	// the result of the user asking to start the background process.
-	launchMsg struct {
-		b   Backend
-		err error
-	}
-	startedMsg struct {
-		b   Backend
-		err error
-	}
-	resyncMsg struct{}
-	serverMsg struct{ name string }
-	statusMsg struct {
-		b   Backend
-		st  ipc.Status
-		err error
-	}
-	chatsMsg struct {
-		b     Backend
-		convs []ipc.ConvView
-		err   error
-	}
-	threadMsg struct {
-		b     Backend
-		conv  string
-		limit int
-		msgs  []ipc.Message
-		err   error
-	}
-	olderMsg struct {
-		b      Backend
-		conv   string
-		before int64
-		msgs   []ipc.Message
-		err    error
-	}
+	focusList focusArea = iota
+	focusThread
+	focusInput
 )
 
 // Model is the root of the interface. Its update loop never waits on the
@@ -108,13 +64,35 @@ type Model struct {
 	cursor   int
 	openID   string
 	thread   *thread
-	focus    pane
+	focus    focusArea
 	showList bool
 	help     bool
 
 	chatsBusy, chatsAgain   bool
 	threadBusy, threadAgain bool
 	olderBusy               bool
+	outboxBusy, outboxAgain bool
+
+	drafts  map[string]*compose
+	note    *notice
+	noteGen int
+	// enterConv is the conversation an enter waits to act in, "" for none.
+	enterConv string
+	enterGen  int
+
+	// termFocused is the terminal's focus: assumed until a blur says not.
+	termFocused bool
+	quitting    bool
+	focusSent   *focusReport
+	focusBusy   bool
+	readBusy    map[string]bool
+	// readOpen and readNew say the open conversation is owed a MarkRead
+	// for being opened, and for a message that arrived in it.
+	readOpen, readNew bool
+	// preview says the open conversation was put on screen by the
+	// interface, not chosen: it is not marked read and does not hold the
+	// keyboard until the user acts on it.
+	preview bool
 }
 
 // New returns the interface's root model. With b nil and Options.Start set,
@@ -127,7 +105,8 @@ func New(b Backend, opts Options) *Model {
 	return &Model{
 		opts: opts, st: newStyles(opts.Env("NO_COLOR") == ""),
 		ctx: ctx, cancel: cancel, b: b, procDown: b == nil, adopt: make(chan Backend, 1),
-		splashDone: !opts.Splash,
+		splashDone: !opts.Splash, drafts: map[string]*compose{}, termFocused: true,
+		readBusy: map[string]bool{},
 	}
 }
 
@@ -215,17 +194,45 @@ func (m *Model) onStarted(msg startedMsg) {
 	}
 }
 
+// Update handles msg, then reports focus and marks read if either is due.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	cmd := m.update(msg)
+	return m, tea.Batch(cmd, m.syncFocus(), m.syncRead())
+}
+
+func (m *Model) update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = max(msg.Width, 0), max(msg.Height, 0)
-		return m, nil
+		if m.preview {
+			m.previewFocus()
+		}
 	case tea.KeyPressMsg:
-		return m, m.onKey(msg)
+		return m.onKey(msg)
+	case tea.PasteMsg:
+		return m.onPaste(msg.Content)
 	case tea.MouseClickMsg:
-		return m, m.onClick(msg.Mouse())
+		return m.onClick(msg.Mouse())
 	case tea.MouseWheelMsg:
-		return m, m.onWheel(msg.Mouse())
+		return m.onWheel(msg.Mouse())
+	case tea.FocusMsg:
+		m.termFocused = true
+	case tea.BlurMsg:
+		m.termFocused = false
+	case enterMsg:
+		return m.onEnterTimer(msg)
+	case noticeExpiredMsg:
+		m.onNoticeExpired(msg)
+	case sentMsg:
+		return m.onSent(msg)
+	case actionMsg:
+		return m.onAction(msg)
+	case outboxMsg:
+		return m.onOutbox(msg)
+	case markedMsg:
+		delete(m.readBusy, msg.conv)
+	case focusSetMsg:
+		m.focusBusy = false
 	case splashDoneMsg:
 		if m.launching {
 			m.splashTimed = true
@@ -233,41 +240,43 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.splashDone = true
 		}
 	case launchMsg:
-		return m, m.onLaunch(msg)
+		return m.onLaunch(msg)
 	case startedMsg:
 		m.onStarted(msg)
 	case statusPollMsg:
 		m.polling = false
 		if m.noAccount && m.b != nil {
-			return m, m.readStatus()
+			return m.readStatus()
 		}
 	case subscribedMsg:
 		m.b, m.procDown, m.downErr, m.startErr = msg.b, false, nil, ""
-		return m, m.rereadAll()
+		// A new connection has been told nothing.
+		m.focusSent = nil
+		return m.rereadAll()
 	case resyncMsg:
-		return m, m.rereadAll()
+		return m.rereadAll()
 	case backendDownMsg:
 		m.procDown, m.downErr = true, msg.err
 	case serverMsg:
 		m.server = msg.name
 	case eventMsg:
-		return m, m.onEvent(msg.ev)
+		return m.onEvent(msg.ev)
 	case statusMsg:
 		if msg.b != m.b {
-			return m, nil
+			return nil
 		}
 		if msg.err != nil {
-			return m, m.failed(msg.err)
+			return m.failed(msg.err)
 		}
-		return m, m.setStatus(msg.st)
+		return m.setStatus(msg.st)
 	case chatsMsg:
-		return m, m.onChats(msg)
+		return m.onChats(msg)
 	case threadMsg:
-		return m, m.onThread(msg)
+		return m.onThread(msg)
 	case olderMsg:
-		return m, m.onOlder(msg)
+		return m.onOlder(msg)
 	}
-	return m, nil
+	return nil
 }
 
 func (m *Model) View() tea.View {
@@ -282,91 +291,11 @@ func (m *Model) View() tea.View {
 	v.MouseMode = tea.MouseModeCellMotion
 	v.ReportFocus = true
 	v.WindowTitle = "termchat"
+	v.Cursor = m.inputCursor()
 	return v
 }
 
 func (m *Model) splashShown() bool { return m.noAccount || !m.splashDone }
-
-// failed handles a read error: a gone or stopping background process is
-// shown in the top bar while the subscription goroutine reconnects.
-func (m *Model) failed(err error) tea.Cmd {
-	switch {
-	case errors.Is(err, ipc.ErrNoAccount):
-		return m.setNoAccount()
-	case errors.Is(err, ipc.ErrClosed), errors.Is(err, ipc.ErrShuttingDown):
-		m.procDown = true
-	}
-	return nil
-}
-
-// setNoAccount keeps the opening screen up and asks for the status every
-// pollEvery until an account appears; one poll is pending at a time.
-func (m *Model) setNoAccount() tea.Cmd {
-	m.noAccount = true
-	if m.polling {
-		return nil
-	}
-	m.polling = true
-	return m.opts.Tick(pollEvery, statusPollMsg{})
-}
-
-func (m *Model) setStatus(st ipc.Status) tea.Cmd {
-	m.status, m.haveStatus = st, true
-	if st.Account == "" {
-		return m.setNoAccount()
-	}
-	var cmds []tea.Cmd
-	if !m.serverAsk && m.opts.Server != nil {
-		m.serverAsk = true
-		get := m.opts.Server
-		cmds = append(cmds, func() tea.Msg { return serverMsg{serverName(get())} })
-	}
-	if m.noAccount {
-		m.noAccount = false
-		cmds = append(cmds, m.requestChats(), m.requestThread())
-	}
-	return tea.Batch(cmds...)
-}
-
-// serverName is the host of a "host:port" address, for display.
-func serverName(addr string) string {
-	if host, _, err := net.SplitHostPort(addr); err == nil {
-		addr = host
-	}
-	return sanitize.Line(addr)
-}
-
-func (m *Model) onEvent(ev ipc.Event) tea.Cmd {
-	var conv string
-	switch ev.Kind {
-	case ipc.KindStatus:
-		if ev.Status != nil {
-			return m.setStatus(*ev.Status)
-		}
-		return nil
-	case ipc.KindMessage:
-		if ev.Message != nil {
-			conv = ev.Message.ConvID
-		}
-	case ipc.KindOutbox:
-		if ev.Message != nil {
-			conv = ev.Message.ConvID
-		} else if ev.Outbox != nil {
-			conv = ev.Outbox.ConvID
-		}
-	case ipc.KindConv:
-		if ev.Conv != nil {
-			conv = ev.Conv.ID
-		}
-	default:
-		return nil
-	}
-	cmds := []tea.Cmd{m.requestChats()}
-	if conv != "" && conv == m.openID {
-		cmds = append(cmds, m.requestThread())
-	}
-	return tea.Batch(cmds...)
-}
 
 // open shows conv in the thread pane, scrolled to its newest message.
 func (m *Model) open(conv string) tea.Cmd {
@@ -374,10 +303,12 @@ func (m *Model) open(conv string) tea.Cmd {
 		m.cursor = i
 	}
 	m.showList = false
+	m.toInput()
+	m.readOpen, m.preview = true, false
 	if m.openID == conv && m.thread != nil {
 		return nil
 	}
-	m.openID = conv
+	m.openID, m.readNew = conv, false
 	m.thread = newThread(conv)
 	return m.requestThread()
 }

@@ -7,16 +7,19 @@ import (
 
 // helpKeys are the keys that work, for the ? overlay.
 var helpKeys = [][2]string{
-	{"↑ ↓  k j", "move in the chat list"},
-	{"enter", "open the selected chat"},
-	{"tab", "switch between chat list and thread"},
-	{"esc", "back to the chat list (narrow windows)"},
+	{"enter", "send; open the selected chat; edit: save"},
+	{"alt+enter", "new line (also ctrl+j)"},
+	{"esc", "leave the input; cancel an edit; back to the chat list"},
+	{"tab", "chat list, thread, input"},
+	{"↑ ↓  k j", "move in the chat list; ↑ in an empty input selects your messages"},
+	{"e  d", "edit or delete your selected message"},
+	{"r  x", "retry or discard a failed message; r starts a stopped background process"},
+	{"i", "type in the input"},
 	{"pgup pgdn", "scroll the thread"},
 	{"home end", "oldest / newest message"},
-	{"r", "start the background process when it is not running"},
 	{"?", "show or hide this help"},
-	{"q  ctrl+c", "quit"},
-	{"mouse", "click a chat to open it; the wheel scrolls"},
+	{"q  ctrl+c", "quit (q outside the input)"},
+	{"mouse", "click a chat, your message or the input; the wheel scrolls"},
 }
 
 func (m *Model) helpLines() []string {
@@ -27,11 +30,9 @@ func (m *Model) helpLines() []string {
 	return out
 }
 
-func (m *Model) quit() tea.Cmd {
-	m.cancel()
-	return tea.Quit
-}
-
+// onKey routes a key: to the opening screen, a question in the notice
+// line, the help overlay, the input when it has focus, and otherwise to
+// the single-key commands.
 func (m *Model) onKey(k tea.KeyPressMsg) tea.Cmd {
 	s := k.String()
 	if s == "ctrl+c" {
@@ -46,8 +47,9 @@ func (m *Model) onKey(k tea.KeyPressMsg) tea.Cmd {
 		}
 		return nil
 	}
-	if s == "q" {
-		return m.quit()
+	m.flushEnter()
+	if cmd, done := m.noticeKey(s); done {
+		return cmd
 	}
 	if m.help {
 		if s == "?" || s == "esc" {
@@ -56,50 +58,10 @@ func (m *Model) onKey(k tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 	g := m.geom()
-	_, vh := m.threadPane(g)
-	page := max(vh-1, 1)
-	switch s {
-	case "?":
-		m.help = true
-	case "tab":
-		if g.mode >= Standard {
-			m.focus = 1 - m.focus
-		}
-	case "esc":
-		if g.mode <= Narrow && !m.listShown() {
-			m.showList = true
-			m.cursor = max(m.indexOf(m.openID), 0)
-		}
-	case "up", "k":
-		if m.listActive(g) {
-			m.move(-1)
-			return nil
-		}
-		return m.scroll(-1)
-	case "down", "j":
-		if m.listActive(g) {
-			m.move(1)
-			return nil
-		}
-		return m.scroll(1)
-	case "enter":
-		if m.listActive(g) {
-			if id := m.cursorID(); id != "" {
-				return m.open(id)
-			}
-		}
-	case "pgup":
-		return m.scroll(-page)
-	case "pgdown":
-		return m.scroll(page)
-	case "home":
-		return m.scrollToTop()
-	case "end":
-		return m.scrollToBottom()
-	case "r":
-		return m.startProcess()
+	if m.inputActive(g) {
+		return m.inputKey(k, g)
 	}
-	return nil
+	return m.commandKey(k, g)
 }
 
 func (m *Model) onClick(p tea.Mouse) tea.Cmd {
@@ -111,6 +73,11 @@ func (m *Model) onClick(p tea.Mouse) tea.Cmd {
 	}
 	if p.Button != tea.MouseLeft {
 		return nil
+	}
+	// A click moves on from a question, so a later y cannot act on a
+	// message the user has left.
+	if m.note != nil && m.note.ask != nil {
+		m.note = nil
 	}
 	if m.help {
 		m.help = false
@@ -124,21 +91,18 @@ func (m *Model) onClick(p tea.Mouse) tea.Cmd {
 	switch {
 	case g.side.has(p.X):
 		if g.mode >= Standard {
-			m.focus = paneSidebar
+			m.focus = focusList
 		}
 		if i := m.sidebarHit(g, y); i >= 0 {
 			return m.open(m.convs[i].ID)
 		}
 	case g.thr.has(p.X):
-		if g.mode >= Standard {
-			m.focus = paneThread
+		marker := lipgloss.Width(m.backMarker(g.mode == Tiny))
+		if g.mode <= Narrow && y == 0 && p.X >= g.thr.x && p.X <= g.thr.x+marker {
+			m.toList(g)
 			return nil
 		}
-		marker := lipgloss.Width(m.backMarker(g.mode == Tiny))
-		if y == 0 && p.X >= g.thr.x && p.X <= g.thr.x+marker {
-			m.showList = true
-			m.cursor = max(m.indexOf(m.openID), 0)
-		}
+		return m.clickThread(g, p.X, y)
 	}
 	return nil
 }
@@ -160,6 +124,12 @@ func (m *Model) onWheel(p tea.Mouse) tea.Cmd {
 	case g.side.has(p.X):
 		m.move(d / 3)
 	case g.thr.has(p.X):
+		l, y := m.tlayout(g), p.Y-g.bodyY
+		if c := m.drafts[m.openID]; c != nil && m.threadShown(g) && y >= l.inputY && y < l.inputY+l.inputH &&
+			c.in.overflows(m.inputWidth(g), l.inputH) {
+			c.in.scroll(d, m.inputWidth(g), l.inputH)
+			return nil
+		}
 		return m.scroll(d)
 	}
 	return nil

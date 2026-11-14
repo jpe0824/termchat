@@ -148,12 +148,12 @@ func TestTinyDropsTimestampsAndGroupsAuthor(t *testing.T) {
 func TestShortWindowDropsFooterThenTopBar(t *testing.T) {
 	h := started(t, fixture(), 90, 12)
 	lines := h.lines()
-	if len(lines) != 12 || !strings.Contains(lines[0], "termchat") || !strings.Contains(lines[11], "? help") {
+	if len(lines) != 12 || !strings.Contains(lines[0], "termchat") || !strings.HasPrefix(lines[11], "└─") {
 		t.Fatalf("12 rows should have top bar and footer:\n%s", h.view())
 	}
 	h.size(90, 11)
 	lines = h.lines()
-	if len(lines) != 11 || !strings.Contains(lines[0], "termchat") || strings.Contains(h.view(), "? help") {
+	if len(lines) != 11 || !strings.Contains(lines[0], "termchat") || strings.HasPrefix(lines[10], "└─") {
 		t.Errorf("11 rows: want top bar, no footer:\n%s", h.view())
 	}
 	if !strings.Contains(lines[10], "> ") {

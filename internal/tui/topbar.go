@@ -76,21 +76,7 @@ func (m *Model) topBar(g geom) string {
 
 // footer is the bottom border with the keys that work here.
 func (m *Model) footer(g geom) string {
-	var keys []string
-	switch {
-	case m.help:
-		keys = []string{"? close", "q quit"}
-	case g.mode >= Standard:
-		keys = []string{"↑↓ move", "⏎ open", "tab pane", "pgup/pgdn scroll", "? help", "q quit"}
-	case m.listShown() && g.mode == Tiny:
-		keys = []string{"⏎ open", "? help"}
-	case m.listShown():
-		keys = []string{"↑↓ move", "⏎ open", "? help", "q quit"}
-	case g.mode == Tiny:
-		keys = []string{"esc chats", "? help"}
-	default:
-		keys = []string{"esc chats", "pgup/pgdn scroll", "? help", "q quit"}
-	}
+	keys := m.footerKeys(g)
 	if m.procDown && !m.help && m.canStart() {
 		keys = append([]string{"r start"}, keys...)
 	}
@@ -101,4 +87,46 @@ func (m *Model) footer(g geom) string {
 		}
 	}
 	return "└" + strings.Repeat("─", max(m.w-2, 0)) + "┘"
+}
+
+// footerKeys are the keys for where focus is, most useful first.
+func (m *Model) footerKeys(g geom) []string {
+	wide := g.mode >= Standard
+	tail := []string{"? help", "q quit"}
+	if wide {
+		tail = append([]string{"tab pane"}, tail...)
+	}
+	sel, hasSel := m.selected()
+	switch {
+	case m.help:
+		return []string{"? close", "q quit"}
+	case m.listActive(g) && wide:
+		return []string{"↑↓ move", "⏎ open", "tab pane", "pgup/pgdn scroll", "? help", "q quit"}
+	case m.listShown() && g.mode == Tiny:
+		return []string{"⏎ open", "? help"}
+	case m.listShown():
+		return []string{"↑↓ move", "⏎ open", "? help", "q quit"}
+	case m.inputActive(g):
+		if c := m.drafts[m.openID]; c != nil && c.edit != nil {
+			return []string{"⏎ save", "esc cancel", "alt+⏎ newline"}
+		}
+		if wide {
+			return []string{"⏎ send", "alt+⏎ newline", "↑ select", "esc leave", "tab pane", "ctrl+c quit"}
+		}
+		return []string{"⏎ send", "esc chats", "alt+⏎ newline", "ctrl+c quit"}
+	case hasSel:
+		var keys []string
+		switch {
+		case sel.m.Status == ipc.MsgFailed:
+			keys = []string{"r retry", "x discard"}
+		case m.delivered(sel.m):
+			keys = []string{"e edit", "d delete"}
+		}
+		return append(append(keys, "↑↓ select", "esc back"), tail...)
+	case g.mode == Tiny:
+		return []string{"esc chats", "? help"}
+	case wide:
+		return []string{"i type", "↑↓ scroll", "tab pane", "pgup/pgdn scroll", "? help", "q quit"}
+	}
+	return []string{"esc chats", "i type", "? help", "pgup/pgdn scroll", "q quit"}
 }
