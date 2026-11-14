@@ -108,3 +108,17 @@ func TestPasteGapSetting(t *testing.T) {
 		}
 	}
 }
+
+func TestPasteGapClamped(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TERMCHAT_CONFIG_DIR", dir)
+	for in, want := range map[int]int{5000: 200, 201: 200, -5: 0, 200: 200} {
+		body := []byte("paste_gap_ms = " + strconv.Itoa(in) + "\n")
+		if err := os.WriteFile(filepath.Join(dir, "config.toml"), body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if c, err := Load(); err != nil || c.PasteGapMS != want {
+			t.Errorf("paste_gap_ms = %d: loaded %d, %v; want %d", in, c.PasteGapMS, err, want)
+		}
+	}
+}

@@ -33,9 +33,10 @@ func TestOpeningFocusesInputAndLettersType(t *testing.T) {
 	if h.m.cursorID() != "r-platform" {
 		t.Errorf("typing j/k moved the chat list to %q", h.m.cursorID())
 	}
+	h.key("ctrl+c") // a draft is unsent: asked once more
 	h.key("ctrl+c")
 	if !h.quit {
-		t.Error("ctrl+c did not quit from the input")
+		t.Error("ctrl+c twice did not quit from the input")
 	}
 }
 
@@ -223,14 +224,18 @@ func TestMarkReadCoalesces(t *testing.T) {
 func TestSetFocusReported(t *testing.T) {
 	f := fixture()
 	h := opened(t, f, 90, 20)
-	h.click(4, 2)               // open dana
-	h.send(tea.BlurMsg{})       // terminal loses focus
-	h.send(tea.FocusMsg{})      // and gets it back
-	h.size(44, 14)              // narrow: still the thread
-	h.key("esc")                // the chat list: no conversation shown
-	h.key("enter")              // dana again
-	h.send(subscribedMsg{b: f}) // reconnected: say it again
+	h.click(4, 2)          // open dana
+	h.send(tea.BlurMsg{})  // terminal loses focus
+	h.send(tea.FocusMsg{}) // and gets it back
+	h.size(44, 14)         // narrow: still the thread
+	h.key("esc")           // the chat list: no conversation shown
+	h.key("enter")         // dana again
+	f2 := fixture()
+	h.send(subscribedMsg{b: f2}) // reconnected: say it again
 	h.key("ctrl+c")
+	if got := f2.writes("setfocus "); !slices.Equal(got, []string{"setfocus dm-dana true", "setfocus dm-dana false"}) {
+		t.Errorf("setfocus on the new connection = %q", got)
+	}
 	want := []string{
 		"setfocus r-platform true",
 		"setfocus dm-dana true",
@@ -238,8 +243,6 @@ func TestSetFocusReported(t *testing.T) {
 		"setfocus dm-dana true",
 		"setfocus  true",
 		"setfocus dm-dana true",
-		"setfocus dm-dana true",
-		"setfocus dm-dana false",
 	}
 	if got := f.writes("setfocus "); !slices.Equal(got, want) {
 		t.Errorf("setfocus calls:\n got %q\nwant %q", got, want)

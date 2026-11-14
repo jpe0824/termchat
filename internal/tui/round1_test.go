@@ -18,6 +18,7 @@ import (
 func pasteKeys(h *tester, s string) {
 	h.t.Helper()
 	step := h.step
+	h.now = h.now.Add(time.Second) // a paste starts after a pause
 	h.step = time.Millisecond
 	h.typeText(s)
 	h.step = step
@@ -61,9 +62,12 @@ func TestUnbracketedPasteCannotMoveTheList(t *testing.T) {
 				t.Errorf("open %q cursor %q list %v", h.m.openID, h.m.cursorID(), h.m.listShown())
 			}
 			h.settle()
-			if got := f.writes("send ", "edit ", "delete "); !slices.Equal(got,
+			if got := f.writes("send ", "edit ", "delete ", "retry ", "discard "); !slices.Equal(got,
 				[]string{`send r-platform "\tjj\nhello" tui`}) {
 				t.Errorf("writes = %q", got)
+			}
+			if h.draft() != "" || h.m.draftText("r-random") != "" || h.m.draftText("dm-dana") != "" {
+				t.Errorf("drafts: here %q, elsewhere %q %q", h.draft(), h.m.draftText("r-random"), h.m.draftText("dm-dana"))
 			}
 		})
 	}
@@ -93,17 +97,21 @@ func TestUnbracketedPasteInEditCannotDelete(t *testing.T) {
 func TestEscInsideABurstStaysInInput(t *testing.T) {
 	for _, w := range pasteWidths {
 		t.Run(fmt.Sprint(w), func(t *testing.T) {
-			h := opened(t, fixture(), w, 20)
+			f := fixture()
+			h := opened(t, f, w, 20)
+			f.resetCalls()
 			pasteKeys(h, "ab\x1bcd")
 			if h.m.focus != focusInput || h.m.listShown() || h.draft() != "abcd" {
 				t.Errorf("focus %v list %v draft %q", h.m.focus, h.m.listShown(), h.draft())
 			}
 			// Behind a waiting enter, too.
-			h.typeText("e")
-			h.key("enter")
-			h.key("esc")
-			if h.m.focus != focusInput || h.m.listShown() {
-				t.Errorf("esc behind enter left the input: focus %v", h.m.focus)
+			pasteKeys(h, "e\n\x1b")
+			h.settle()
+			if h.m.focus != focusInput || h.m.listShown() || h.draft() != "abcde\n" {
+				t.Errorf("esc behind enter: focus %v list %v draft %q", h.m.focus, h.m.listShown(), h.draft())
+			}
+			if got := f.writes("send ", "edit ", "delete ", "retry ", "discard ", "markread "); got != nil {
+				t.Errorf("writes = %q", got)
 			}
 			// A lone esc still leaves.
 			h.key("esc")
@@ -174,9 +182,10 @@ func TestTypingWhileDownRunsNoCommands(t *testing.T) {
 	if h.m.focus != focusList {
 		t.Fatalf("esc while down: focus %v", h.m.focus)
 	}
+	h.key("q") // a draft is unsent: asked once more
 	h.key("q")
 	if !h.quit {
-		t.Error("q on the list while down did not quit")
+		t.Error("q twice on the list while down did not quit")
 	}
 	if h.m.draftText("r-platform") != "keep" {
 		t.Errorf("draft = %q", h.m.draftText("r-platform"))
@@ -196,6 +205,7 @@ func TestPasteGapOption(t *testing.T) {
 	h = opened(t, fixture(), 90, 20, func(o *Options) { o.PasteGap = 80 * time.Millisecond })
 	h.typeText("x")
 	h.ticks = nil
+	h.step = time.Millisecond
 	h.key("enter")
 	if len(h.ticks) != 1 || h.ticks[0].d != 80*time.Millisecond {
 		t.Errorf("enter waits %v, want 80ms", h.ticks)

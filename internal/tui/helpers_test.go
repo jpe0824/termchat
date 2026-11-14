@@ -221,6 +221,10 @@ type tester struct {
 	// sent by a test count as typed unless step is set below the paste gap.
 	now  time.Time
 	step time.Duration
+	// settling guards the timers fired after each message: when the clock
+	// steps past the paste gap, a waiting enter or a deferred exit acts
+	// before anything else can arrive, as in real time.
+	settling bool
 }
 
 func newTester(t *testing.T, b Backend, mod ...func(*Options)) *tester {
@@ -289,6 +293,11 @@ func (h *tester) send(msg tea.Msg) {
 	h.now = h.now.Add(h.step)
 	_, cmd := h.m.Update(msg)
 	h.run(cmd)
+	if !h.settling && h.step > h.m.opts.PasteGap {
+		h.settling = true
+		h.settle()
+		h.settling = false
+	}
 }
 
 // fireTicks delivers every scheduled tick once.

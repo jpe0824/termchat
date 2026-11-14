@@ -128,21 +128,28 @@ func (h *tester) typeText(s string) {
 // paste delivers s as a bracketed paste.
 func (h *tester) paste(s string) { h.t.Helper(); h.send(tea.PasteMsg{Content: s}) }
 
-// settle fires the pending-enter timers, as the clock would once no more
-// input follows.
+// settle fires the timers of a waiting enter and of deferred exits, as the
+// clock would once no more input follows.
 func (h *tester) settle() {
 	h.t.Helper()
-	var keep []tick
-	ticks := h.ticks
-	h.ticks = nil
-	for _, tk := range ticks {
-		if _, ok := tk.msg.(enterMsg); ok {
+	for {
+		var keep, due []tick
+		for _, tk := range h.ticks {
+			switch tk.msg.(type) {
+			case enterMsg, exitMsg:
+				due = append(due, tk)
+			default:
+				keep = append(keep, tk)
+			}
+		}
+		if len(due) == 0 {
+			return
+		}
+		h.ticks = keep
+		for _, tk := range due {
 			h.send(tk.msg)
-		} else {
-			keep = append(keep, tk)
 		}
 	}
-	h.ticks = append(keep, h.ticks...)
 }
 
 // enter presses enter and lets it act.

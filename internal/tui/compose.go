@@ -117,7 +117,7 @@ func (m *Model) inputKey(k tea.KeyPressMsg, g geom, burst bool) tea.Cmd {
 	case "esc":
 		typed = false
 		if !burst {
-			m.leaveInput(g, c)
+			return m.deferExit(exitEsc)
 		}
 	case "left":
 		in.left()
@@ -139,7 +139,7 @@ func (m *Model) inputKey(k tea.KeyPressMsg, g geom, burst bool) tea.Cmd {
 		typed = false
 		if in.text == "" && c.edit == nil {
 			if !burst {
-				m.selectLast()
+				return m.deferExit(exitUp)
 			}
 			return nil
 		}
@@ -192,6 +192,8 @@ func (m *Model) onEnterTimer(msg enterMsg) tea.Cmd {
 }
 
 func (m *Model) onPaste(s string) tea.Cmd {
+	m.lastKey = m.opts.Now()
+	m.cancelExit()
 	m.flushEnter()
 	m.noticeKey("")
 	g := m.geom()

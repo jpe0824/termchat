@@ -38,6 +38,10 @@ type Config struct {
 	PasteGapMS int `toml:"paste_gap_ms"`
 }
 
+// maxPasteGapMS bounds paste_gap_ms: a longer wait would make every enter
+// feel slow.
+const maxPasteGapMS = 200
+
 func defaults() *Config {
 	c := &Config{MarkRead: true, Splash: true, PasteGapMS: 25}
 	c.CLI.Send = "allow"
@@ -67,6 +71,7 @@ func Load() (*Config, error) {
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, err
 	}
+	c.PasteGapMS = min(max(c.PasteGapMS, 0), maxPasteGapMS)
 	return c, nil
 }
 

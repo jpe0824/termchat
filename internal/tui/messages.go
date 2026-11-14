@@ -49,7 +49,9 @@ type (
 		err    error
 	}
 	// enterMsg lets an enter act once no input followed it.
-	enterMsg         struct{ gen int }
+	enterMsg struct{ gen int }
+	// exitMsg lets a deferred esc, ↑ or ctrl+c act once no input followed it.
+	exitMsg          struct{ gen int }
 	noticeExpiredMsg struct{ gen int }
 	// sentMsg is not tied to a connection: a message queued on one that
 	// has since gone is still queued, and its draft is still done.

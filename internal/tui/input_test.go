@@ -157,7 +157,7 @@ func TestUnbracketedPasteBurstIsOneMessage(t *testing.T) {
 	h := opened(t, f, 90, 20)
 	// Without bracketed paste a pasted line break arrives as an enter key,
 	// with the next characters right behind it.
-	h.typeText("a\nb\nc")
+	pasteKeys(h, "a\nb\nc")
 	h.settle()
 	if f.sends() != nil {
 		t.Fatalf("burst sent line by line: %q", f.sends())

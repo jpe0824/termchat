@@ -7,18 +7,19 @@ import (
 
 // helpKeys are the keys that work, for the ? overlay.
 var helpKeys = [][2]string{
-	{"enter", "send; open the selected chat; edit: save"},
-	{"alt+enter", "new line (also ctrl+j)"},
-	{"esc", "leave the input (as do i, enter and ↑ the other way); cancel an edit"},
-	{"tab", "chat list ↔ thread; in the input it types a tab"},
-	{"↑ ↓  k j", "move in the chat list; ↑ in an empty input selects your messages"},
-	{"e  d", "edit or delete your selected message"},
-	{"r  x", "retry or discard a failed message; r starts a stopped background process"},
-	{"i", "type in the input"},
+	{"enter", "input: send, or save an edit. chat list: open. thread: go to the input"},
+	{"alt+enter", "input: new line (also ctrl+j)"},
+	{"esc", "input: cancel an edit, else leave the input. thread: go to the input or the list"},
+	{"tab", "input: types a tab. chat list and thread: switch between them"},
+	{"↑ ↓  k j", "chat list: move. thread: step through your messages, or scroll"},
+	{"↑", "empty input: select your newest message"},
+	{"i", "thread: go to the input"},
+	{"e  d", "thread: edit or delete your selected message"},
+	{"r  x", "thread: retry or discard a failed message. r: start a stopped background process"},
 	{"pgup pgdn", "scroll the thread"},
 	{"home end", "oldest / newest message"},
 	{"?", "show or hide this help"},
-	{"q  ctrl+c", "quit (q outside the input)"},
+	{"q  ctrl+c", "quit (q outside the input); asked twice when drafts are unsent"},
 	{"mouse", "click a chat, your message or the input; the wheel scrolls"},
 }
 
@@ -35,19 +36,27 @@ func (m *Model) helpLines() []string {
 // the single-key commands.
 func (m *Model) onKey(k tea.KeyPressMsg) tea.Cmd {
 	s := k.String()
+	now := m.opts.Now()
+	gap := m.opts.PasteGap
+	recent := gap > 0 && !m.lastKey.IsZero() && now.Sub(m.lastKey) < gap
+	m.lastKey = now
+	pending := m.cancelExit()
 	if s == "ctrl+c" {
-		return m.quit()
+		if pending {
+			return nil
+		}
+		return m.ctrlC(recent)
 	}
 	if m.splashShown() {
 		switch {
 		case s == "q" && m.noAccount:
-			return m.quit()
+			return m.confirmQuit()
 		case !m.noAccount:
 			m.splashDone = true
 		}
 		return nil
 	}
-	burst := m.inBurst()
+	burst := m.inBurst() || recent
 	m.flushEnter()
 	if cmd, done := m.noticeKey(s); done {
 		return cmd
@@ -63,7 +72,12 @@ func (m *Model) onKey(k tea.KeyPressMsg) tea.Cmd {
 		return m.inputKey(k, g, burst)
 	}
 	if m.focus == focusInput && m.threadShown(g) {
-		return m.disabledKey(k, g)
+		return m.disabledKey(k, g, burst)
+	}
+	if m.focus == focusInput {
+		// No input to type into: the key is dropped, never run as a command.
+		m.focus = focusList
+		return nil
 	}
 	return m.commandKey(k, g)
 }
@@ -151,15 +165,17 @@ func (m *Model) inBurst() bool {
 }
 
 // disabledKey handles a key for the input while the background process is
-// down: nothing typed may run as a command. r starts the process, esc
-// leaves the input, and every other key leaves a note saying so.
-func (m *Model) disabledKey(k tea.KeyPressMsg, g geom) tea.Cmd {
+// down: nothing typed may run as a command. r starts the process, a lone
+// esc leaves the input, and every other key leaves a note saying so.
+func (m *Model) disabledKey(k tea.KeyPressMsg, g geom, burst bool) tea.Cmd {
 	switch s := k.String(); s {
 	case "r":
 		return m.startProcess()
 	case "esc":
-		m.leaveInput(g, m.composeFor(m.openID))
-		return nil
+		if burst {
+			return nil
+		}
+		return m.deferExit(exitEsc)
 	case "pgup", "pgdown":
 		return m.pageKey(s, g)
 	}

@@ -92,6 +92,14 @@ type Model struct {
 	// lastTyped is when a key last typed into the input, to tell a burst
 	// of pasted keys from a lone esc or ↑.
 	lastTyped time.Time
+	// lastKey is when any key last arrived, so a ctrl+c inside a paste is
+	// ignored.
+	lastKey time.Time
+	// exitKind is an esc, ↑ or ctrl+c waiting out the paste gap.
+	exitKind  exitKind
+	exitGen   int
+	exitConv  string
+	quitAsked time.Time
 	// preview says the open conversation was put on screen by the
 	// interface, not chosen: it is not marked read and does not hold the
 	// keyboard until the user acts on it.
@@ -224,6 +232,8 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		m.termFocused = false
 	case enterMsg:
 		return m.onEnterTimer(msg)
+	case exitMsg:
+		return m.onExitTimer(msg)
 	case noticeExpiredMsg:
 		m.onNoticeExpired(msg)
 	case sentMsg:
@@ -256,11 +266,14 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 			return m.readStatus()
 		}
 	case subscribedMsg:
+		if msg.b != m.b {
+			// A new connection has been told nothing, and calls still out on
+			// the old one will not hold up the new one. A resubscribe on the
+			// same connection keeps both: it still knows the focus.
+			m.focusSent, m.focusBusy = nil, false
+			m.readBusy = map[string]bool{}
+		}
 		m.b, m.procDown, m.downErr, m.startErr = msg.b, false, nil, ""
-		// A new connection has been told nothing, and calls still out on the
-		// old one will not hold up the new one.
-		m.focusSent, m.focusBusy = nil, false
-		m.readBusy = map[string]bool{}
 		return m.rereadAll()
 	case resyncMsg:
 		return m.rereadAll()
