@@ -224,9 +224,13 @@ func runWait(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		labels, err := convLabels(c, me)
-		if err != nil {
-			return err
+		// The message is in hand: a failed label lookup must not lose it, so
+		// the conversation id stands in as the label.
+		var labels map[string]string
+		if !wantJSON(cmd) {
+			if labels, err = convLabels(c, me); err != nil {
+				labels = map[string]string{}
+			}
 		}
 		return printMessages(cmd, []store.Message{m}, nil, labels, true)
 	})

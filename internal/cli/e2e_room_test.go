@@ -101,16 +101,8 @@ func TestRoomErrors(t *testing.T) {
 
 func TestOpenRoomCreatedAfterConnectIsVisibleAndJoinable(t *testing.T) {
 	_, a, b := pair(t)
+	// The join works at once: a room the cache does not know is looked up on the server.
 	a.ok("room", "create", "later")
-	var found *chatView
-	for _, c := range b.chats("--all") {
-		if c.Name == "later" {
-			found = &c
-		}
-	}
-	if found == nil || found.Joined == nil || *found.Joined || found.Kind != "room" {
-		t.Fatalf("chats --all lacks the open room as not joined: %+v", found)
-	}
 	if got := b.conv("room", "join", "#later"); got.Name != "later" || got.Kind != "room" {
 		t.Fatalf("join = %+v", got)
 	}
@@ -123,4 +115,15 @@ func TestOpenRoomCreatedAfterConnectIsVisibleAndJoinable(t *testing.T) {
 	if joined == nil || joined.Joined != nil {
 		t.Fatalf("chats lacks the joined room: %+v", joined)
 	}
+
+	// The list of rooms not joined may lag by the daemon's refresh window, so wait for it.
+	a.ok("room", "create", "other")
+	eventually(t, "chats --all to list the new open room", func() bool {
+		for _, c := range b.chats("--all") {
+			if c.Name == "other" {
+				return c.Kind == "room" && c.Joined != nil && !*c.Joined
+			}
+		}
+		return false
+	})
 }

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jpe0824/termchat/internal/ipc"
 )
@@ -120,5 +121,22 @@ func TestCommandGivesUpAfterOneRetry(t *testing.T) {
 	}
 	if b.calls.Load() != 2 || out.String() != "" {
 		t.Fatalf("Status called %d times, stdout %q; want 2 calls and no output", b.calls.Load(), out.String())
+	}
+}
+
+func TestShutdownRetryDelayHonoursTimeout(t *testing.T) {
+	serveStub(t, &shuttingBackend{failures: 99})
+	root := Root()
+	var out, errOut syncBuf
+	root.SetOut(&out)
+	root.SetErr(&errOut)
+	root.SetArgs([]string{"wait", "--timeout", "100ms", "--json"})
+	start := time.Now()
+	err := root.Execute()
+	if d := time.Since(start); d > shutdownRetryDelay-100*time.Millisecond {
+		t.Fatalf("returned after %s; the retry delay held up the timeout", d)
+	}
+	if ExitCode(err) != 5 || out.String() != "" {
+		t.Fatalf("err = %v (exit %d), stdout %q; want exit 5 and no output", err, ExitCode(err), out.String())
 	}
 }

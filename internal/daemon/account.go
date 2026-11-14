@@ -58,7 +58,9 @@ type account struct {
 	openRooms []model.Conversation
 	// listing is the open-rooms refresh in flight, if any.
 	listing *listing
-	known   map[string]bool
+	// listedAt is when openRooms was last read from the server.
+	listedAt time.Time
+	known    map[string]bool
 	// Outbox senders: workers holds conversations with a running sender;
 	// dirty records a kick that arrived while it ran.
 	workers  map[string]bool
@@ -291,7 +293,8 @@ type listing struct {
 // server. The server does not announce a new open room to non-members, so
 // requests that need the list ask for it. Concurrent calls share one server
 // request. On failure the cached list stays. It must not run on the goroutine
-// that drains the connector's updates.
+// that drains the connector's updates. Each call asks the server; callers
+// that can use a slightly old list check openRoomsStale first.
 func (a *account) refreshOpenRooms(ctx context.Context) error {
 	a.mu.Lock()
 	if l := a.listing; l != nil {
@@ -307,11 +310,13 @@ func (a *account) refreshOpenRooms(ctx context.Context) error {
 	a.listing = l
 	a.mu.Unlock()
 
-	_, open, err := a.conn.Conversations(ctx)
+	lctx, cancel := context.WithTimeout(ctx, chatsRefreshTimeout)
+	_, open, err := a.conn.Conversations(lctx)
+	cancel()
 
 	a.mu.Lock()
 	if err == nil {
-		a.openRooms = open
+		a.openRooms, a.listedAt = open, a.d.clock.Now()
 	}
 	a.listing = nil
 	a.mu.Unlock()
@@ -320,5 +325,21 @@ func (a *account) refreshOpenRooms(ctx context.Context) error {
 	return err
 }
 
+// openRoomsStale reports whether the cached list is older than the window.
+func (a *account) openRoomsStale() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.d.clock.Now().Sub(a.listedAt) >= chatsRefreshAfter
+}
+
 // connected reports whether the connector is connected right now.
 func (a *account) connected() bool { return a.conn.State() == connector.StateConnected }
+
+const (
+	// chatsRefreshAfter is how long a successful open-rooms refresh answers
+	// Chats requests before the next one asks the server again.
+	chatsRefreshAfter = 5 * time.Second
+	// chatsRefreshTimeout bounds one refresh, so a slow server cannot hold
+	// up a request that has a cached answer.
+	chatsRefreshTimeout = 3 * time.Second
+)

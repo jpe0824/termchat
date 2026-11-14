@@ -110,6 +110,7 @@ func TestChatsRefreshesOpenRooms(t *testing.T) {
 	open := room("r9", "later", "dana")
 	open.Open = true
 	e.fake.AddConversation(open)
+	e.clock.Advance(chatsRefreshAfter + time.Second)
 	if _, got, err := c.Chats(); err != nil || len(got) != 1 || got[0].ID != "r9" {
 		t.Fatalf("Chats open rooms = %+v, %v", got, err)
 	}
@@ -118,5 +119,63 @@ func TestChatsRefreshesOpenRooms(t *testing.T) {
 	waitUntil(t, "offline", func() bool { s, _ := c.Status(); return s.Conn == connector.StateOffline })
 	if _, got, err := c.Chats(); err != nil || len(got) != 1 {
 		t.Fatalf("offline Chats open rooms = %+v, %v", got, err)
+	}
+}
+
+func TestChatsRefreshHonoursStalenessWindow(t *testing.T) {
+	e := newEnv(t)
+	g := &listGate{Connector: e.fake, entered: make(chan struct{}, 8)}
+	e.conn = g
+	c := e.start()
+	waitUntil(t, "connected", func() bool {
+		s, err := c.Status()
+		return err == nil && s.Conn == connector.StateConnected && !s.Syncing
+	})
+	base := g.calls.Load()
+	for range 5 {
+		if _, _, err := c.Chats(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := g.calls.Load() - base; n != 0 {
+		t.Fatalf("%d refreshes right after connecting, want 0 (the catch-up just listed them)", n)
+	}
+	e.clock.Advance(chatsRefreshAfter + time.Second)
+	for range 5 {
+		if _, _, err := c.Chats(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := g.calls.Load() - base; n != 1 {
+		t.Fatalf("%d refreshes for five Chats after the window, want 1", n)
+	}
+	e.clock.Advance(chatsRefreshAfter + time.Second)
+	if _, _, err := c.Chats(); err != nil {
+		t.Fatal(err)
+	}
+	if n := g.calls.Load() - base; n != 2 {
+		t.Fatalf("%d refreshes after a second window, want 2", n)
+	}
+}
+
+func TestChatsAnswersFromCacheWhenRefreshIsSlow(t *testing.T) {
+	e := newEnv(t)
+	g := &listGate{Connector: e.fake, entered: make(chan struct{}, 8)}
+	e.conn = g
+	c := e.start()
+	waitUntil(t, "connected", func() bool {
+		s, err := c.Status()
+		return err == nil && s.Conn == connector.StateConnected && !s.Syncing
+	})
+	release := make(chan struct{})
+	defer close(release)
+	g.hold.Store(&release)
+	e.clock.Advance(chatsRefreshAfter + time.Second)
+	start := time.Now()
+	if _, _, err := c.Chats(); err != nil {
+		t.Fatalf("Chats with a stuck server: %v", err)
+	}
+	if d := time.Since(start); d > 2*chatsRefreshTimeout {
+		t.Fatalf("Chats took %s with a stuck server", d)
 	}
 }

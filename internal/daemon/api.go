@@ -48,7 +48,7 @@ func (d *daemon) Chats(ctx context.Context) (ipc.Chats, error) {
 	if err != nil {
 		return ipc.Chats{}, err
 	}
-	if a.connected() {
+	if a.connected() && a.openRoomsStale() {
 		// A failure leaves the cached list, which is still the best answer.
 		_ = a.refreshOpenRooms(ctx)
 	}

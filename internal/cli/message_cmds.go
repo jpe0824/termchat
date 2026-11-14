@@ -153,10 +153,16 @@ func messageText(cmd *cobra.Command, args []string) (string, error) {
 }
 
 func newSendCmd() *cobra.Command {
-	return clientCmd(&cobra.Command{
+	cmd := clientCmd(&cobra.Command{
 		Use:   "send <chat> [text]",
 		Short: "Queue a message; the text comes from stdin when omitted or \"-\"",
-		Args:  argRange(1, 2),
+		Long: `Queue a message for <chat> and return at once with its id and state "sending".
+
+Everything after <chat> is the text, even when it starts with "-", so flags
+go before the chat: termchat send --json @bob "- done". With no text, or "-",
+the text is read from standard input (one trailing newline is dropped). "--"
+before the chat also works.`,
+		Args: argRange(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			text, err := messageText(cmd, args)
 			if err != nil {
@@ -182,4 +188,7 @@ func newSendCmd() *cobra.Command {
 			})
 		},
 	})
+	// Text may start with "-", so flag parsing stops at the chat.
+	cmd.Flags().SetInterspersed(false)
+	return cmd
 }

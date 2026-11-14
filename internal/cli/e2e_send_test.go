@@ -16,7 +16,7 @@ type sent struct {
 
 func (p *person) send(stdin string, args ...string) sent {
 	p.t.Helper()
-	r := p.exec(stdin, append([]string{"send"}, append(args, "--json")...)...)
+	r := p.exec(stdin, append([]string{"send", "--json"}, args...)...)
 	if r.code != 0 || r.err != "" {
 		p.t.Fatalf("send %v: exit %d, stderr %q", args, r.code, r.err)
 	}
@@ -148,5 +148,30 @@ func TestReadShowsFailedItemWithReason(t *testing.T) {
 	}
 	if out := a.tableOK("read", "@bob"); !strings.Contains(out, "(failed: the server refused: too noisy)") {
 		t.Fatalf("table = %q", out)
+	}
+}
+
+func TestSendTextMayStartWithDashes(t *testing.T) {
+	_, a, b := pair(t)
+	a.ok("dm", "bob")
+	for _, text := range []string{"- done", "-1", "--json", "--version now", "-n"} {
+		if s := a.send("", append([]string{"@bob"}, text)...); s.State != "sending" || s.MsgID == "" {
+			t.Fatalf("send %q = %+v", text, s)
+		}
+	}
+	// Flags go before the chat; "--" still works.
+	if r := a.do("send", "--json", "@bob", "flag first"); r.code != 0 || !strings.HasPrefix(r.out, `{"msg_id":`) {
+		t.Fatalf("send --json @bob: exit %d, %q, %q", r.code, r.out, r.err)
+	}
+	a.ok("send", "--", "@bob", "--after double dash")
+	a.exec("from stdin\n", "send", "@bob", "-")
+	eventually(t, "all messages", func() bool { return len(b.messages("read", "@alice")) == 8 })
+	var got []string
+	for _, m := range b.messages("read", "@alice") {
+		got = append(got, m.Text)
+	}
+	want := []string{"- done", "-1", "--json", "--version now", "-n", "flag first", "--after double dash", "from stdin"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("messages = %q, want %q", got, want)
 	}
 }

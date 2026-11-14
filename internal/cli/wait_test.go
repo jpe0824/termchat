@@ -3,6 +3,9 @@ package cli
 import (
 	"context"
 	"errors"
+	"io"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -73,3 +76,50 @@ func (c *closedSource) Subscribe(context.Context) (<-chan ipc.Event, error) {
 }
 
 func (c *closedSource) SubscriptionErr() error { return ipc.ErrClosed }
+
+// labelBackend serves one stored message and fails every Chats call after the first.
+type labelBackend struct {
+	ipc.Backend
+	chats atomic.Int32
+}
+
+func (b *labelBackend) Status(context.Context) (ipc.Status, error) {
+	return ipc.Status{Account: "me", Me: model.Person{Handle: "me"}}, nil
+}
+
+func (b *labelBackend) Resolve(context.Context, string) (model.Conversation, error) {
+	return model.Conversation{ID: "c1", Kind: model.ConvRoom, Name: "lobby"}, nil
+}
+
+func (b *labelBackend) Chats(context.Context) (ipc.Chats, error) {
+	if b.chats.Add(1) > 1 {
+		return ipc.Chats{}, errors.New("the server is gone")
+	}
+	return ipc.Chats{Mine: []store.ConvView{{Conversation: model.Conversation{ID: "c1", Kind: model.ConvRoom, Name: "lobby", LastSeq: 7}}}}, nil
+}
+
+func (b *labelBackend) Messages(context.Context, string, int64, int) ([]store.Message, error) {
+	return []store.Message{{ConvID: "c1", MsgID: "m7", Author: "dana", Seq: 7, At: time.Unix(0, 0), Text: "the news"}}, nil
+}
+
+func TestWaitPrintsItsMessageWhenTheLabelLookupFails(t *testing.T) {
+	b := &labelBackend{}
+	serveStub(t, b)
+	old := isTerminal
+	isTerminal = func(io.Writer) bool { return true }
+	defer func() { isTerminal = old }()
+	root := Root()
+	var out, errOut syncBuf
+	root.SetOut(&out)
+	root.SetErr(&errOut)
+	root.SetArgs([]string{"wait", "#lobby", "--since", "0", "--timeout", "5s"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if !strings.Contains(out.String(), "c1  7  ") || !strings.Contains(out.String(), "the news") {
+		t.Fatalf("stdout = %q, want the message labelled with the conversation id", out.String())
+	}
+	if b.chats.Load() < 2 {
+		t.Fatalf("Chats called %d times; the label lookup never ran", b.chats.Load())
+	}
+}

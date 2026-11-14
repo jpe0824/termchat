@@ -175,7 +175,7 @@ func (a *account) catchUp() error {
 		}
 	}
 	a.mu.Lock()
-	a.openRooms = open
+	a.openRooms, a.listedAt = open, a.d.clock.Now()
 	a.mu.Unlock()
 	for _, v := range local {
 		if !listed[v.ID] {

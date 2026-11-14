@@ -101,6 +101,14 @@ func TestChatsListsUnreadMostRecentFirst(t *testing.T) {
 func TestChatsAllListsOpenRoomsNotJoined(t *testing.T) {
 	_, a, b := pair(t)
 	a.ok("room", "create", "lounge")
+	eventually(t, "chats --all to list the open room", func() bool {
+		for _, c := range b.chats("--all") {
+			if c.Name == "lounge" {
+				return true
+			}
+		}
+		return false
+	})
 	if cs := b.chats(); len(cs) != 0 {
 		t.Fatalf("chats without --all = %+v, want []", cs)
 	}

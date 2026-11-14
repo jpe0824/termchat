@@ -80,7 +80,11 @@ func withClientCtx(cmd *cobra.Command, ctx context.Context, fn func(c *ipc.Clien
 	}
 	err := attempt()
 	if errors.Is(err, ipc.ErrShuttingDown) {
-		time.Sleep(shutdownRetryDelay)
+		select {
+		case <-ctx.Done():
+			return fail(ctx.Err())
+		case <-time.After(shutdownRetryDelay):
+		}
 		err = attempt()
 	}
 	return fail(err)
