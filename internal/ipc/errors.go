@@ -24,6 +24,12 @@ var (
 	ErrTimeout         = errors.New("timed out")
 	ErrVersionMismatch = errors.New("background process speaks a different protocol version")
 	ErrNoAccount       = errors.New("no account configured; join a server first")
+	// ErrShuttingDown means the background process was shutting down and
+	// did not run the request: it had no effect and may be repeated.
+	ErrShuttingDown = errors.New("the background process is shutting down")
+	// ErrSubscriptionOverflow is SubscriptionErr's value when a subscription
+	// ended because its reader fell too far behind.
+	ErrSubscriptionOverflow = errors.New("subscription ended: events were not read fast enough")
 	// ErrClosed means the connection to the background process ended.
 	ErrClosed = errors.New("connection to the background process closed")
 )
@@ -39,6 +45,7 @@ const (
 	codeTimeout         = "timeout"
 	codeVersionMismatch = "version_mismatch"
 	codeNoAccount       = "no_account"
+	codeShuttingDown    = "shutting_down"
 	codeInternal        = "internal"
 )
 
@@ -50,6 +57,7 @@ var codes = []struct {
 	{codeAmbiguous, []error{ErrAmbiguous}},
 	{codeSendDenied, []error{ErrSendDenied}},
 	{codeNoAccount, []error{ErrNoAccount}},
+	{codeShuttingDown, []error{ErrShuttingDown}},
 	{codeVersionMismatch, []error{ErrVersionMismatch, connector.ErrVersionMismatch}},
 	// An unknown outcome may also wrap ErrOffline; it is reported as a
 	// timeout, never as "not connected", because the change may have happened.
@@ -97,6 +105,7 @@ func decodeError(w *wireError) error {
 		codeNotConnected: ErrNotConnected, codeNotAuthorised: ErrNotAuthorised,
 		codeForbidden: ErrForbidden, codeInvalid: ErrInvalid, codeTimeout: ErrTimeout,
 		codeVersionMismatch: ErrVersionMismatch, codeNoAccount: ErrNoAccount,
+		codeShuttingDown: ErrShuttingDown,
 	}
 	if s, ok := sentinels[w.Code]; ok {
 		return &codedError{msg: w.Msg, sentinel: s}

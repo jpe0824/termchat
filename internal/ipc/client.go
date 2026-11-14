@@ -41,13 +41,20 @@ type Client struct {
 	wmu sync.Mutex
 	enc *json.Encoder
 
+	// submu orders subscribe and unsubscribe requests, so an unsubscribe
+	// for an ended subscription can never land after a newer subscribe.
+	submu sync.Mutex
+
 	mu      sync.Mutex
 	nextID  uint64
 	pending map[uint64]chan frame
 	sub     *subscription
+	subErr  error
 	done    chan struct{}
 }
 
+// subscription is one Subscribe channel. The reader never waits on it: an
+// event that does not fit ends the subscription instead.
 type subscription struct {
 	ch     chan Event
 	done   chan struct{}
@@ -67,16 +74,45 @@ func (s *subscription) end() {
 	})
 }
 
-func (s *subscription) deliver(ev Event) {
+// offer queues ev without blocking and reports false when the queue is full.
+func (s *subscription) offer(ev Event) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
-		return
+		return true
 	}
 	select {
 	case s.ch <- ev:
-	case <-s.done:
+		return true
+	default:
+		return false
 	}
+}
+
+// detach ends sub, if it is still the client's subscription, recording why;
+// unless the connection is gone it then tells the server to stop sending.
+func (c *Client) detach(sub *subscription, why error) {
+	c.mu.Lock()
+	if c.sub != sub {
+		c.mu.Unlock()
+		return
+	}
+	c.sub, c.subErr = nil, why
+	c.mu.Unlock()
+	sub.end()
+	if errors.Is(why, ErrClosed) {
+		return
+	}
+	go func() {
+		c.submu.Lock()
+		defer c.submu.Unlock()
+		c.mu.Lock()
+		resubscribed := c.sub != nil
+		c.mu.Unlock()
+		if !resubscribed {
+			_ = c.call(opUnsubscribe, nil, nil)
+		}
+	}()
 }
 
 // Dial connects to the background process, starting it if none is running,
@@ -136,6 +172,17 @@ func dialPath(ctx context.Context, sock string) (*Client, error) {
 	return c, nil
 }
 
+// SubscriptionErr reports why the most recent subscription's channel
+// closed: ErrSubscriptionOverflow when its reader fell more than the queue
+// behind, ErrClosed when the connection ended, and nil while it is open or
+// after its context ended. After an overflow, Subscribe again and re-read
+// state; requests on the Client are unaffected.
+func (c *Client) SubscriptionErr() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.subErr
+}
+
 // Close ends the connection; an active subscription's channel closes.
 func (c *Client) Close() error { return c.conn.Close() }
 
@@ -150,8 +197,8 @@ func (c *Client) readLoop() {
 			c.mu.Lock()
 			sub := c.sub
 			c.mu.Unlock()
-			if sub != nil {
-				sub.deliver(*f.Event)
+			if sub != nil && !sub.offer(*f.Event) {
+				c.detach(sub, ErrSubscriptionOverflow)
 			}
 			continue
 		}
@@ -167,10 +214,9 @@ func (c *Client) readLoop() {
 	c.mu.Lock()
 	close(c.done)
 	sub := c.sub
-	c.sub = nil
 	c.mu.Unlock()
 	if sub != nil {
-		sub.end()
+		c.detach(sub, ErrClosed)
 	}
 }
 
@@ -346,17 +392,21 @@ func (c *Client) Stop() error {
 }
 
 // Subscribe streams events on this connection until ctx ends or the
-// connection closes, when the channel closes. The caller must keep reading:
-// a subscriber that falls far behind is disconnected, and should reconnect
-// and re-read state. One subscription per Client.
+// subscription ends, when the channel closes; SubscriptionErr says why. The
+// channel holds a bounded number of events: a consumer that falls further
+// behind loses the subscription (ErrSubscriptionOverflow) rather than
+// stalling the Client, and should Subscribe again and re-read state. One
+// subscription per Client at a time.
 func (c *Client) Subscribe(ctx context.Context) (<-chan Event, error) {
+	c.submu.Lock()
+	defer c.submu.Unlock()
 	sub := &subscription{ch: make(chan Event, eventsBuffer), done: make(chan struct{})}
 	c.mu.Lock()
 	if c.sub != nil {
 		c.mu.Unlock()
 		return nil, fmt.Errorf("%w: already subscribed", ErrInvalid)
 	}
-	c.sub = sub
+	c.sub, c.subErr = sub, nil
 	c.mu.Unlock()
 	if err := c.call(opSubscribe, nil, nil); err != nil {
 		c.mu.Lock()
@@ -370,16 +420,9 @@ func (c *Client) Subscribe(ctx context.Context) (<-chan Event, error) {
 	go func() {
 		select {
 		case <-ctx.Done():
+			c.detach(sub, nil)
 		case <-sub.done:
-			return
 		}
-		c.mu.Lock()
-		if c.sub == sub {
-			c.sub = nil
-		}
-		c.mu.Unlock()
-		sub.end()
-		_ = c.call(opUnsubscribe, nil, nil)
 	}()
 	return sub.ch, nil
 }

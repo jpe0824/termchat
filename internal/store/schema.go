@@ -92,6 +92,16 @@ CREATE TABLE outbox (
 );
 CREATE INDEX outbox_conv ON outbox(conv, created_at, id);
 `,
+	`
+-- skipped holds sequence numbers whose event was received but could not be
+-- stored. They count as held when finding the contiguous run, so a sync is
+-- not asked for the same event again; a valid copy replaces the row.
+CREATE TABLE skipped (
+	conv TEXT NOT NULL,
+	seq  INTEGER NOT NULL,
+	PRIMARY KEY (conv, seq)
+);
+`,
 }
 
 // migrate brings db up to the latest schema inside one immediate transaction,

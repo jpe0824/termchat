@@ -26,6 +26,10 @@ import (
 type stubBackend struct {
 	err     error
 	stopped chan struct{}
+	// When set, Send reports on started and then waits for gate.
+	started chan struct{}
+	gate    chan struct{}
+	sends   atomic.Int32 // Sends that ran: the stand-in for queued rows
 }
 
 func (b *stubBackend) Status(context.Context) (Status, error) {
@@ -36,6 +40,11 @@ func (b *stubBackend) Messages(_ context.Context, conv string, before int64, lim
 	return []store.Message{{ConvID: conv, Seq: before - 1, Text: fmt.Sprint(limit)}}, b.err
 }
 func (b *stubBackend) Send(_ context.Context, conv, text, source string) (string, error) {
+	b.sends.Add(1)
+	if b.started != nil {
+		b.started <- struct{}{}
+		<-b.gate
+	}
 	return conv + "/" + source, b.err
 }
 func (b *stubBackend) Edit(context.Context, string, string, string) error { return b.err }
@@ -140,7 +149,7 @@ func TestRequestsRoundTrip(t *testing.T) {
 func TestEverySentinelSurvivesTheSocket(t *testing.T) {
 	sentinels := []error{
 		ErrNotFound, ErrAmbiguous, ErrSendDenied, ErrNotConnected, ErrNotAuthorised,
-		ErrForbidden, ErrInvalid, ErrTimeout, ErrVersionMismatch, ErrNoAccount,
+		ErrForbidden, ErrInvalid, ErrTimeout, ErrVersionMismatch, ErrNoAccount, ErrShuttingDown,
 	}
 	for _, s := range sentinels {
 		t.Run(s.Error(), func(t *testing.T) {

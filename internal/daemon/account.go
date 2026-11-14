@@ -50,6 +50,7 @@ type account struct {
 	// online is true once connected and caught up; senders and backfill
 	// wait for it. changed is closed and replaced whenever it or state moves.
 	state     connector.ConnState
+	me        model.Person // as the connector last reported it
 	online    bool
 	changed   chan struct{}
 	syncing   bool
@@ -73,7 +74,7 @@ func newAccount(d *daemon, name string, conn connector.Connector, st *store.Stor
 		d: d, name: name, conn: conn, st: st, ownStore: own, log: d.log.With("account", name),
 		ctx: ctx, cancel: cancel,
 		stateCh: make(chan struct{}, 1), peopleCh: make(chan struct{}, 1), bfWake: make(chan struct{}, 1),
-		state: connector.StateOffline, changed: make(chan struct{}),
+		state: connector.StateOffline, me: conn.Me(), changed: make(chan struct{}),
 		known: map[string]bool{}, workers: map[string]bool{}, dirty: map[string]bool{},
 		requeued: map[string]time.Time{}, floor: map[string]int64{},
 	}
@@ -84,7 +85,8 @@ func (a *account) start() {
 		a.learn(people)
 	}
 	a.goRun(func() { _ = a.conn.Run(a.ctx) })
-	a.goRun(a.drain)
+	updates := a.conn.Updates()
+	a.goRun(func() { a.drain(updates) })
 	a.goRun(a.supervise)
 	a.goRun(a.backfillLoop)
 	// Queued items are checked for expiry at once, connected or not.
@@ -123,23 +125,24 @@ func signal(ch chan struct{}) {
 	}
 }
 
-// setState records the connection state; anything but connected ends online.
+// setState records the connection state and ends online whatever the state:
+// a connected state seen here may follow a drop that was never observed, so
+// senders and backfill wait for the catch-up that follows.
 func (a *account) setState(s connector.ConnState) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.state = s
-	if s != connector.StateConnected {
-		a.online = false
-	}
+	a.online = false
 	close(a.changed)
 	a.changed = make(chan struct{})
 }
 
-// setOnline marks the catch-up done, unless the connection dropped meanwhile.
+// setOnline marks the catch-up done, unless the connection dropped meanwhile
+// or another state change is waiting, whose own catch-up comes first.
 func (a *account) setOnline() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.state != connector.StateConnected {
+	if a.state != connector.StateConnected || len(a.stateCh) > 0 {
 		return
 	}
 	a.online = true
@@ -192,11 +195,14 @@ func (a *account) setBackfilling(v bool) {
 }
 
 func (a *account) status() ipc.Status {
-	s := ipc.Status{Account: a.name, Me: a.conn.Me(), Conn: a.conn.State()}
+	s := ipc.Status{Account: a.name}
 	if items, err := a.st.Pending(); err == nil {
 		s.Pending = len(items)
 	}
+	// Cached values only: status is reached from the drain goroutine, which
+	// must not call into the connector.
 	a.mu.Lock()
+	s.Me, s.Conn = a.me, a.state
 	s.Syncing = a.syncing || a.backfill
 	a.mu.Unlock()
 	return s

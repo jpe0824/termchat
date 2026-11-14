@@ -237,10 +237,24 @@ func (s *Store) members(conv string, snap int64) ([]string, error) {
 	return out, nil
 }
 
-// OldestSeq is the lowest Seq held for conv, 0 when none.
+// Skip records that conv's event seq was received but could not be stored.
+// Cursor and OldestSeq then treat seq as held, so a sync moves past it; a
+// valid event for seq applied later is stored normally and clears the mark.
+// Skipping a seq whose event is held does nothing.
+func (s *Store) Skip(conv string, seq int64) error {
+	if conv == "" || seq < 1 {
+		return fmt.Errorf("%w: skip needs a conversation and Seq >= 1", ErrInvalid)
+	}
+	_, err := s.db.Exec(`INSERT OR IGNORE INTO skipped (conv, seq)
+		SELECT ?, ? WHERE NOT EXISTS (SELECT 1 FROM events WHERE conv = ? AND seq = ?)`, conv, seq, conv, seq)
+	return err
+}
+
+// OldestSeq is the lowest Seq held or skipped for conv, 0 when none.
 func (s *Store) OldestSeq(conv string) int64 {
 	var n sql.NullInt64
-	if err := s.db.QueryRow(`SELECT MIN(seq) FROM events WHERE conv = ?`, conv).Scan(&n); err != nil {
+	if err := s.db.QueryRow(`SELECT MIN(seq) FROM (SELECT seq FROM events WHERE conv = ?1
+		UNION ALL SELECT seq FROM skipped WHERE conv = ?1)`, conv).Scan(&n); err != nil {
 		return 0
 	}
 	return n.Int64
@@ -248,16 +262,19 @@ func (s *Store) OldestSeq(conv string) int64 {
 
 // Cursor is the top of the contiguous run of held events that starts at
 // OldestSeq: the largest Seq such that every Seq from OldestSeq up to it is
-// held. An event past a gap is stored but does not advance it, so a sync from
-// Cursor fills the hole.
+// held or skipped. An event past a gap is stored but does not advance it, so
+// a sync from Cursor fills the hole.
 func (s *Store) Cursor(conv string) int64 {
 	oldest := s.OldestSeq(conv)
 	if oldest == 0 {
 		return 0
 	}
 	var top int64
-	err := s.db.QueryRow(`SELECT MIN(e.seq) FROM events e WHERE e.conv = ? AND e.seq >= ?
-		AND NOT EXISTS (SELECT 1 FROM events n WHERE n.conv = e.conv AND n.seq = e.seq + 1)`, conv, oldest).Scan(&top)
+	err := s.db.QueryRow(`SELECT MIN(h.seq) FROM (SELECT seq FROM events WHERE conv = ?1
+			UNION ALL SELECT seq FROM skipped WHERE conv = ?1) h
+		WHERE h.seq >= ?2
+		AND NOT EXISTS (SELECT 1 FROM events n WHERE n.conv = ?1 AND n.seq = h.seq + 1)
+		AND NOT EXISTS (SELECT 1 FROM skipped k WHERE k.conv = ?1 AND k.seq = h.seq + 1)`, conv, oldest).Scan(&top)
 	if err != nil {
 		return 0
 	}

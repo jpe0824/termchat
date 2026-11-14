@@ -8,6 +8,7 @@ import (
 
 	"github.com/jpe0824/termchat/internal/connector"
 	"github.com/jpe0824/termchat/internal/model"
+	"github.com/jpe0824/termchat/internal/store"
 )
 
 const (
@@ -24,9 +25,9 @@ const (
 )
 
 // drain applies pushes from the connector. It blocks on nothing but the
-// store and the connector's channel.
-func (a *account) drain() {
-	updates := a.conn.Updates()
+// store and the updates channel, and calls no connector method: identity
+// and state come from the account's cached copies.
+func (a *account) drain(updates <-chan connector.Update) {
 	for {
 		select {
 		case <-a.ctx.Done():
@@ -144,7 +145,11 @@ func (a *account) refreshPeople() error {
 // catchUp brings the store level with the server after a connect.
 func (a *account) catchUp() error {
 	ctx := a.ctx
-	if err := a.write(func() error { return a.st.SetMe(a.conn.Me().Handle) }); err != nil {
+	me := a.conn.Me()
+	a.mu.Lock()
+	a.me = me
+	a.mu.Unlock()
+	if err := a.write(func() error { return a.st.SetMe(me.Handle) }); err != nil {
 		return err
 	}
 	if err := a.refreshPeople(); err != nil {
@@ -258,7 +263,8 @@ func (a *account) syncConv(ctx context.Context, conv string) error {
 // apply stores events and returns those the store accepted. It writes in
 // chunks so a live update waits for one chunk at most. The store rejects a
 // whole batch for one malformed event, so a rejected chunk is retried one
-// event at a time and the bad ones skipped.
+// event at a time and the bad ones recorded as skipped, which lets the
+// cursor move past them.
 func (a *account) apply(evs []model.Event) []model.Event {
 	var ok []model.Event
 	for chunk := range slices.Chunk(evs, applyChunk) {
@@ -269,6 +275,13 @@ func (a *account) apply(evs []model.Event) []model.Event {
 		for _, ev := range chunk {
 			if err := a.write(func() error { return a.st.Apply(ev) }); err != nil {
 				a.log.Warn("skipping event the store rejected", "conv", ev.ConvID, "seq", ev.Seq, "kind", ev.Kind, "err", err)
+				// Only a malformed event is recorded as skipped; a storage
+				// failure leaves the gap so the next sync fetches it again.
+				if errors.Is(err, store.ErrInvalid) && ev.ConvID != "" && ev.Seq >= 1 {
+					if err := a.write(func() error { return a.st.Skip(ev.ConvID, ev.Seq) }); err != nil {
+						a.log.Error("record skipped event", "conv", ev.ConvID, "seq", ev.Seq, "err", err)
+					}
+				}
 				continue
 			}
 			ok = append(ok, ev)

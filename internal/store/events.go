@@ -53,6 +53,11 @@ func (s *Store) Apply(evs ...model.Event) error {
 			if err != nil {
 				return err
 			}
+			if inserted {
+				if _, err := tx.Exec(`DELETE FROM skipped WHERE conv = ? AND seq = ?`, ev.ConvID, ev.Seq); err != nil {
+					return err
+				}
+			}
 			if ev.Kind == model.MessagePosted && me != "" && ev.Actor == me {
 				// The server confirms a send by echoing our posted event, whichever
 				// state the outbox row reached. MsgIDs are unique only within a

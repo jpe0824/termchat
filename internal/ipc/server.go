@@ -19,6 +19,10 @@ import (
 // to hold up the background process; it reconnects and re-reads state.
 const queueLen = 1024
 
+// shutdownWait bounds how long Close waits for running requests; tests
+// shorten it.
+var shutdownWait = 5 * time.Second
+
 // flushTimeout bounds how long a closing connection may take to write the
 // frames already queued for it.
 const flushTimeout = time.Second
@@ -62,11 +66,14 @@ type Server struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	wg     sync.WaitGroup // connection readers and writers
+	reqs   sync.WaitGroup // requests that have started
+	once   sync.Once
 
-	mu     sync.Mutex
-	ln     net.Listener
-	conns  map[*sconn]struct{}
+	mu    sync.Mutex
+	ln    net.Listener
+	conns map[*sconn]struct{}
+	// closed is set when shutdown begins; from then on no request starts.
 	closed bool
 }
 
@@ -100,24 +107,65 @@ func (s *Server) Serve(ln net.Listener) error {
 	}
 }
 
-// Close stops accepting, closes every connection after flushing what is
-// queued for it, cancels running requests and waits for them to return.
+// Close shuts the server down. From the moment it is called no request
+// starts: each is refused with ErrShuttingDown and has no effect. Requests
+// already started run to completion, waited for up to shutdownWait, and
+// their replies are written before each connection closes. A request still
+// running after that has its context cancelled and its reply is dropped.
+// Close may be called more than once.
 func (s *Server) Close() {
+	s.once.Do(s.shutdown)
+	s.wg.Wait()
+}
+
+func (s *Server) shutdown() {
 	s.mu.Lock()
 	s.closed = true
 	if s.ln != nil {
 		_ = s.ln.Close()
 	}
+	s.mu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		s.reqs.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(shutdownWait):
+		s.log.Warn("requests still running at shutdown; abandoning them")
+	}
+	s.cancel()
+
+	s.mu.Lock()
 	conns := make([]*sconn, 0, len(s.conns))
 	for c := range s.conns {
 		conns = append(conns, c)
 	}
 	s.mu.Unlock()
-	s.cancel()
 	for _, c := range conns {
 		c.close(true)
 	}
-	s.wg.Wait()
+}
+
+// begin registers a request about to start, or reports that shutdown has
+// begun. Checking and counting under one lock means Close never misses a
+// request that started.
+func (s *Server) begin() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return false
+	}
+	s.reqs.Add(1)
+	return true
+}
+
+func (s *Server) shuttingDown() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closed
 }
 
 // Broadcast queues ev for every subscribed connection without waiting. A
@@ -263,47 +311,59 @@ func (c *sconn) readLoop() {
 		if req.Args != nil {
 			a = *req.Args
 		}
-		c.mu.Lock()
-		hello := c.hello
-		c.mu.Unlock()
-		if !hello {
-			if req.Op != opHello || a.Version != Version {
-				c.reply(req.ID, nil, fmt.Errorf("%w: it speaks version %d, the client %d",
-					ErrVersionMismatch, Version, a.Version))
-				c.close(true)
-				return
-			}
-			c.mu.Lock()
-			c.hello = true
-			c.mu.Unlock()
-			c.reply(req.ID, struct{ Version int }{Version}, nil)
+		if !c.s.begin() {
+			c.reply(req.ID, nil, fmt.Errorf("%w; %q was not run", ErrShuttingDown, req.Op))
 			continue
 		}
-		switch req.Op {
-		case opSubscribe, opUnsubscribe, opSetFocus:
-			// Handled in order, so events follow the subscribe reply.
-			c.mu.Lock()
-			switch req.Op {
-			case opSubscribe:
-				c.subscribed = true
-			case opUnsubscribe:
-				c.subscribed = false
-			case opSetFocus:
-				c.focus = Subscriber{Conv: a.Conv, Focused: a.Focused}
-			}
-			c.mu.Unlock()
-			c.reply(req.ID, nil, nil)
-		case opStop:
-			c.reply(req.ID, nil, nil)
-			c.s.b.Stop()
-		default:
-			c.s.wg.Add(1)
-			go func() {
-				defer c.s.wg.Done()
-				res, err := dispatch(c.s.ctx, c.s.b, req.Op, a)
-				c.reply(req.ID, res, err)
-			}()
+		c.handle(req, a)
+	}
+}
+
+// handle runs one request that begin has counted, and marks it done once
+// its reply is queued.
+func (c *sconn) handle(req request, a args) {
+	c.mu.Lock()
+	hello := c.hello
+	c.mu.Unlock()
+	if !hello {
+		defer c.s.reqs.Done()
+		if req.Op != opHello || a.Version != Version {
+			c.reply(req.ID, nil, fmt.Errorf("%w: it speaks version %d, the client %d",
+				ErrVersionMismatch, Version, a.Version))
+			c.close(true)
+			return
 		}
+		c.mu.Lock()
+		c.hello = true
+		c.mu.Unlock()
+		c.reply(req.ID, struct{ Version int }{Version}, nil)
+		return
+	}
+	switch req.Op {
+	case opSubscribe, opUnsubscribe, opSetFocus:
+		// Handled in order, so events follow the subscribe reply.
+		defer c.s.reqs.Done()
+		c.mu.Lock()
+		switch req.Op {
+		case opSubscribe:
+			c.subscribed = true
+		case opUnsubscribe:
+			c.subscribed = false
+		case opSetFocus:
+			c.focus = Subscriber{Conv: a.Conv, Focused: a.Focused}
+		}
+		c.mu.Unlock()
+		c.reply(req.ID, nil, nil)
+	case opStop:
+		c.reply(req.ID, nil, nil)
+		c.s.reqs.Done() // before Stop: the shutdown it triggers waits for started requests
+		c.s.b.Stop()
+	default:
+		go func() {
+			defer c.s.reqs.Done()
+			res, err := dispatch(c.s.ctx, c.s.b, req.Op, a)
+			c.reply(req.ID, res, err)
+		}()
 	}
 }
 
