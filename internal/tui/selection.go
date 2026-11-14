@@ -148,7 +148,7 @@ func (m *Model) commandKey(k tea.KeyPressMsg, g geom) tea.Cmd {
 	}
 	switch s {
 	case "q":
-		return m.confirmQuit()
+		return m.confirmQuit("q")
 	case "?":
 		m.help = true
 	case "tab":

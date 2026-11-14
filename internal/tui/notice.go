@@ -44,6 +44,7 @@ func (m *Model) setInfo(conv, text string) tea.Cmd {
 func (m *Model) ask(question string, yes func() tea.Cmd) {
 	m.noteGen++
 	m.note = &notice{conv: m.openID, text: question, ask: yes}
+	m.tm.askedAt = m.opts.Now()
 }
 
 func (m *Model) onNoticeExpired(msg noticeExpiredMsg) {
@@ -54,7 +55,7 @@ func (m *Model) onNoticeExpired(msg noticeExpiredMsg) {
 
 // noticeKey lets a key press clear the notice shown, or answer its
 // question; done reports that the key was the answer and is used up.
-func (m *Model) noticeKey(s string) (cmd tea.Cmd, done bool) {
+func (m *Model) noticeKey(s string, recent bool) (cmd tea.Cmd, done bool) {
 	n := m.note
 	if n == nil {
 		return nil, false
@@ -69,10 +70,7 @@ func (m *Model) noticeKey(s string) (cmd tea.Cmd, done bool) {
 	if n.ask == nil {
 		return nil, false
 	}
-	if s == "y" {
-		return n.ask(), true
-	}
-	return nil, true
+	return m.answer(n, s, recent), true
 }
 
 // noteLine is what the line above the input says, if anything.

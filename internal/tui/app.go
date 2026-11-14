@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -89,17 +88,8 @@ type Model struct {
 	// readOpen and readNew say the open conversation is owed a MarkRead
 	// for being opened, and for a message that arrived in it.
 	readOpen, readNew bool
-	// lastTyped is when a key last typed into the input, to tell a burst
-	// of pasted keys from a lone esc or ↑.
-	lastTyped time.Time
-	// lastKey is when any key last arrived, so a ctrl+c inside a paste is
-	// ignored.
-	lastKey time.Time
-	// exitKind is an esc, ↑ or ctrl+c waiting out the paste gap.
-	exitKind  exitKind
-	exitGen   int
-	exitConv  string
-	quitAsked time.Time
+	// tm is the key timing that tells pastes from deliberate presses.
+	tm timing
 	// preview says the open conversation was put on screen by the
 	// interface, not chosen: it is not marked read and does not hold the
 	// keyboard until the user acts on it.
@@ -156,55 +146,6 @@ func (m *Model) supervise() tea.Cmd {
 	return func() tea.Msg { go sup.run(ctx); return nil }
 }
 
-func (m *Model) onLaunch(msg launchMsg) tea.Cmd {
-	m.launching = false
-	if m.splashTimed {
-		m.splashDone = true
-	}
-	if msg.err != nil || msg.b == nil {
-		m.procDown, m.downErr = true, msg.err
-		return m.supervise()
-	}
-	m.b = msg.b
-	return tea.Batch(m.supervise(), m.readStatus(), m.requestChats())
-}
-
-// startProcess is the user's explicit request to start the background
-// process while it is down; reconnects on their own never start it.
-func (m *Model) startProcess() tea.Cmd {
-	if !m.procDown || m.starting || m.launching || !m.canStart() {
-		return nil
-	}
-	m.starting, m.startErr = true, ""
-	start, ctx := m.opts.Start, m.ctx
-	return func() tea.Msg {
-		b, err := start(ctx)
-		return startedMsg{b: b, err: err}
-	}
-}
-
-// canStart reports whether starting the process could help: not when one
-// of another version is running.
-func (m *Model) canStart() bool {
-	return m.opts.Start != nil && !errors.Is(m.downErr, ipc.ErrVersionMismatch)
-}
-
-func (m *Model) onStarted(msg startedMsg) {
-	m.starting = false
-	if msg.err != nil || msg.b == nil {
-		if msg.err == nil {
-			msg.err = ipc.ErrClosed
-		}
-		m.startErr = sanitize.Line(msg.err.Error())
-		return
-	}
-	select {
-	case m.adopt <- msg.b:
-	default:
-		_ = msg.b.Close()
-	}
-}
-
 // Update handles msg, then reports focus and marks read if either is due.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmd := m.update(msg)
@@ -234,6 +175,8 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		return m.onEnterTimer(msg)
 	case exitMsg:
 		return m.onExitTimer(msg)
+	case bannerExpiredMsg:
+		m.onBannerExpired(msg)
 	case noticeExpiredMsg:
 		m.onNoticeExpired(msg)
 	case sentMsg:
@@ -308,7 +251,7 @@ func (m *Model) View() tea.View {
 	} else {
 		content = m.frame()
 	}
-	v := tea.NewView(content)
+	v := tea.NewView(m.withBanner(content))
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
 	v.ReportFocus = true

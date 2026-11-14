@@ -52,6 +52,7 @@ type (
 	enterMsg struct{ gen int }
 	// exitMsg lets a deferred esc, ↑ or ctrl+c act once no input followed it.
 	exitMsg          struct{ gen int }
+	bannerExpiredMsg struct{ gen int }
 	noticeExpiredMsg struct{ gen int }
 	// sentMsg is not tied to a connection: a message queued on one that
 	// has since gone is still queued, and its draft is still done.

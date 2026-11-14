@@ -36,11 +36,9 @@ func (m *Model) helpLines() []string {
 // the single-key commands.
 func (m *Model) onKey(k tea.KeyPressMsg) tea.Cmd {
 	s := k.String()
-	now := m.opts.Now()
-	gap := m.opts.PasteGap
-	recent := gap > 0 && !m.lastKey.IsZero() && now.Sub(m.lastKey) < gap
-	m.lastKey = now
+	recent := m.stamp()
 	pending := m.cancelExit()
+	m.clearBanner()
 	if s == "ctrl+c" {
 		if pending {
 			return nil
@@ -50,7 +48,7 @@ func (m *Model) onKey(k tea.KeyPressMsg) tea.Cmd {
 	if m.splashShown() {
 		switch {
 		case s == "q" && m.noAccount:
-			return m.confirmQuit()
+			return m.confirmQuit("q")
 		case !m.noAccount:
 			m.splashDone = true
 		}
@@ -58,7 +56,7 @@ func (m *Model) onKey(k tea.KeyPressMsg) tea.Cmd {
 	}
 	burst := m.inBurst() || recent
 	m.flushEnter()
-	if cmd, done := m.noticeKey(s); done {
+	if cmd, done := m.noticeKey(s, recent); done {
 		return cmd
 	}
 	if m.help {
@@ -74,12 +72,14 @@ func (m *Model) onKey(k tea.KeyPressMsg) tea.Cmd {
 	if m.focus == focusInput && m.threadShown(g) {
 		return m.disabledKey(k, g, burst)
 	}
-	if m.focus == focusInput {
-		// No input to type into: the key is dropped, never run as a command.
-		m.focus = focusList
+	if m.focus == focusInput || m.tm.swallow && recent {
+		// No input to type into: the key, and the rest of its burst, are
+		// dropped, never run as commands.
+		m.focus, m.tm.swallow = focusList, true
 		return nil
 	}
-	return m.commandKey(k, g)
+	m.tm.swallow = false
+	return m.guardKey(k, g, recent)
 }
 
 func (m *Model) onClick(p tea.Mouse) tea.Cmd {
@@ -153,16 +153,7 @@ func (m *Model) onWheel(p tea.Mouse) tea.Cmd {
 	return nil
 }
 
-// inBurst reports whether a key arrives as part of a burst of input, as an
-// unbracketed paste does: an enter is waiting, or the last key typed into
-// the input came less than the paste gap ago.
-func (m *Model) inBurst() bool {
-	if m.enterConv != "" {
-		return true
-	}
-	gap := m.opts.PasteGap
-	return gap > 0 && !m.lastTyped.IsZero() && m.opts.Now().Sub(m.lastTyped) < gap
-}
+const downNote = "background process not running — r to start, esc to leave the input"
 
 // disabledKey handles a key for the input while the background process is
 // down: nothing typed may run as a command. r starts the process, a lone
@@ -179,5 +170,5 @@ func (m *Model) disabledKey(k tea.KeyPressMsg, g geom, burst bool) tea.Cmd {
 	case "pgup", "pgdown":
 		return m.pageKey(s, g)
 	}
-	return m.setNotice(m.openID, "background process not running — r to start, esc to leave the input", false)
+	return m.setNotice(m.openID, downNote, false)
 }

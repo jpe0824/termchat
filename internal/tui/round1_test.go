@@ -238,15 +238,17 @@ func TestEnterWhileSendingSaysSo(t *testing.T) {
 
 // --- previews ---
 
-func TestPasteOpensAPreview(t *testing.T) {
+// A paste reaches only the focused input; a preview has the list or the
+// thread focused, so the paste is ignored and the preview stays unread.
+func TestPasteDoesNotOpenAPreview(t *testing.T) {
 	f := fixture()
 	h := newTester(t, f, markReadOn)
 	h.size(90, 20)
 	h.paste("hi")
-	if h.m.preview || h.m.focus != focusInput {
-		t.Fatalf("paste into a preview: preview %v focus %v", h.m.preview, h.m.focus)
+	if !h.m.preview || h.m.focus == focusInput || h.draft() != "" {
+		t.Fatalf("paste into a preview: preview %v focus %v draft %q", h.m.preview, h.m.focus, h.draft())
 	}
-	if got := f.writes("markread "); !slices.Equal(got, []string{"markread r-platform"}) {
+	if got := f.writes("markread "); got != nil {
 		t.Errorf("marks = %q", got)
 	}
 }

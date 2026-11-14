@@ -10,8 +10,6 @@ import (
 // drafts would be lost.
 const quitAgain = 3 * time.Second
 
-const quitNote = "ctrl+c again to quit — unsent drafts will be lost"
-
 // exitKind is a key that would take the keyboard out of the input, or end
 // the program, waiting to be known as more than the first key of a paste.
 type exitKind int
@@ -21,6 +19,8 @@ const (
 	exitEsc
 	exitUp
 	exitQuit
+	exitGuarded
+	exitConfirm
 )
 
 // deferExit acts on k once the paste gap passes with no other key; at once
@@ -29,26 +29,26 @@ func (m *Model) deferExit(k exitKind) tea.Cmd {
 	if m.opts.PasteGap < 0 {
 		return m.doExit(k)
 	}
-	m.exitGen++
-	m.exitKind, m.exitConv = k, m.openID
-	return m.opts.Tick(m.opts.PasteGap, exitMsg{gen: m.exitGen})
+	m.tm.exitGen++
+	m.tm.exitKind, m.tm.exitConv = k, m.openID
+	return m.opts.Tick(m.opts.PasteGap, exitMsg{gen: m.tm.exitGen})
 }
 
 // cancelExit drops a waiting exit because another key followed it; it
 // reports whether one was waiting.
 func (m *Model) cancelExit() bool {
-	was := m.exitKind != exitNone
-	m.exitKind = exitNone
+	was := m.tm.exitKind != exitNone
+	m.tm.exitKind = exitNone
 	return was
 }
 
 func (m *Model) onExitTimer(msg exitMsg) tea.Cmd {
-	if msg.gen != m.exitGen || m.exitKind == exitNone {
+	if msg.gen != m.tm.exitGen || m.tm.exitKind == exitNone {
 		return nil
 	}
-	k := m.exitKind
-	m.exitKind = exitNone
-	if k != exitQuit && m.exitConv != m.openID {
+	k := m.tm.exitKind
+	m.tm.exitKind = exitNone
+	if k != exitQuit && m.tm.exitConv != m.openID {
 		return nil
 	}
 	return m.doExit(k)
@@ -66,7 +66,11 @@ func (m *Model) doExit(k exitKind) tea.Cmd {
 			m.selectLast()
 		}
 	case exitQuit:
-		return m.confirmQuit()
+		return m.confirmQuit("ctrl+c")
+	case exitGuarded:
+		return m.commandKey(m.tm.exitKey, g)
+	case exitConfirm:
+		return m.tm.exitAsk()
 	}
 	return nil
 }
@@ -82,19 +86,20 @@ func (m *Model) ctrlC(recent bool) tea.Cmd {
 }
 
 // confirmQuit quits, except that with unsent drafts or an edit in progress
-// it first asks for the same key again within quitAgain.
-func (m *Model) confirmQuit() tea.Cmd {
+// it first warns, and quits on the same key again within quitAgain.
+func (m *Model) confirmQuit(key string) tea.Cmd {
 	now := m.opts.Now()
-	if !m.hasDrafts() || !m.quitAsked.IsZero() && now.Sub(m.quitAsked) < quitAgain {
+	again := m.tm.quitKey == key && !m.tm.quitAsked.IsZero() && now.Sub(m.tm.quitAsked) < quitAgain
+	if !m.hasDrafts() || again {
 		return m.quit()
 	}
-	m.quitAsked = now
-	return m.setInfo(m.openID, quitNote)
+	m.tm.quitAsked, m.tm.quitKey = now, key
+	return m.setBanner(m.quitWarning(key))
 }
 
 func (m *Model) hasDrafts() bool {
 	for _, c := range m.drafts {
-		if c.in.text != "" || c.edit != nil {
+		if c.unsent() {
 			return true
 		}
 	}

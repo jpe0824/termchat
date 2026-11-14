@@ -219,3 +219,5 @@ func TestOverflowResubscribeKeepsCallsOut(t *testing.T) {
 		t.Errorf("setfocus = %q, want one call: the connection already knows", got)
 	}
 }
+
+const quitNote = "ctrl+c again to quit — unsent drafts will be lost"

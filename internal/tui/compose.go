@@ -98,7 +98,7 @@ func (m *Model) inputKey(k tea.KeyPressMsg, g geom, burst bool) tea.Cmd {
 	typed := true
 	defer func() {
 		if typed {
-			m.lastTyped = m.opts.Now()
+			m.tm.lastTyped = m.opts.Now()
 		}
 	}()
 	switch s := k.String(); s {
@@ -189,21 +189,6 @@ func (m *Model) onEnterTimer(msg enterMsg) tea.Cmd {
 		return nil
 	}
 	return m.submit()
-}
-
-func (m *Model) onPaste(s string) tea.Cmd {
-	m.lastKey = m.opts.Now()
-	m.cancelExit()
-	m.flushEnter()
-	m.noticeKey("")
-	g := m.geom()
-	if !m.inputUsable(g) {
-		return nil
-	}
-	m.promote()
-	m.toInput()
-	m.composeFor(m.openID).in.insert(cleanInput(s))
-	return nil
 }
 
 // submit acts on enter: saves an edit, or sends the draft. A draft is sent
