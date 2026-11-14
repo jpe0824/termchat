@@ -61,10 +61,22 @@ and wants chat there, reachable by AI agents through a command line.
   [terminals and paste](../guides/terminals-and-paste.md).
 - **Homebrew formula, not cask.** GoReleaser's `brews` section is deprecated
   since 2.10 in favour of `homebrew_casks`, but casks are macOS-only, have no
-  `test` block and no license field, and unsigned binaries in a cask trigger
-  Gatekeeper. A formula installs on macOS and Linux. `goreleaser check` fails
-  on the deprecation warning while `goreleaser release` works; move to casks
-  when they cover Linux or `brews` is removed.
+  `test` block and no license field, and an unsigned binary in a cask is
+  quarantined by macOS Gatekeeper. A formula installs on macOS and Linux and
+  runs `termchat --version` as its test. `goreleaser check` exits 1 on the
+  deprecation warning while `goreleaser release` works and only warns, so CI
+  does not run `check`. When `brews` is removed, the options are: move to
+  `homebrew_casks` (macOS only, no `test`, a post-install hook to clear the
+  quarantine flag or signed and notarised binaries, and Linux users fall back
+  to the release archive or `go install`); or stop using GoReleaser's Homebrew
+  support and keep `Formula/termchat.rb` in the tap as a hand-maintained file
+  updated from `checksums.txt` by a small release step.
+- **The formula is pushed to the tap with a deploy key,** not a personal access
+  token: a read-write deploy key on `jpe0824/homebrew-tap`, whose private half
+  is the Actions secret `HOMEBREW_TAP_DEPLOY_KEY` in this repository. A deploy
+  key is scoped to that one repository and belongs to no person's account.
+  GoReleaser pushes over SSH (`brews[].repository.git`) and skips the push when
+  the variable is empty, so snapshots and forks still build.
 
 ## Known limits
 
@@ -98,8 +110,9 @@ and wants chat there, reachable by AI agents through a command line.
 - **Not built:** typing indicators, presence, threads, reactions, rich
   formatting, federation, clustering. Messages are plain UTF-8; URLs show as
   typed.
-- **The Windows toast and Linux `gdbus` notification routes are untested** on
-  real systems. Whether Herdr honours OSC 99 is unconfirmed.
+- **The Linux `gdbus` notification route is untested** on real systems, and
+  there are no notifications on Windows because the background process does not
+  run there. Whether Herdr honours OSC 99 is unconfirmed.
 - **No login item** starts the background process at boot; it starts on demand.
 
 ## Later projects

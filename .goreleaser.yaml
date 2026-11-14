@@ -61,18 +61,27 @@ changelog:
 # casks are macOS-only, have no `test` block and no license field. A formula
 # installs on macOS and Linux and is tested with `brew test`.
 #
-# Publishing needs the HOMEBREW_TAP_GITHUB_TOKEN environment variable (a token
-# with contents write on jpe0824/homebrew-tap). Without it the formula is still
-# generated in dist/ but nothing is pushed.
+# Publishing pushes Formula/termchat.rb to jpe0824/homebrew-tap over SSH with a
+# read-write deploy key. The private key (contents, not a path, and not
+# password-protected) comes from HOMEBREW_TAP_DEPLOY_KEY. With the variable
+# empty or unset the formula is still generated in dist/ but nothing is pushed.
+# GoReleaser's default ssh_command is `ssh -i <key> -o
+# StrictHostKeyChecking=accept-new -F /dev/null`, so GitHub's host key is
+# accepted on first connect; leave ssh_command unset to keep that default.
 brews:
   - name: termchat
     repository:
       owner: jpe0824
       name: homebrew-tap
       branch: main
-      token: '{{ index .Env "HOMEBREW_TAP_GITHUB_TOKEN" }}'
+      git:
+        url: '{{ if index .Env "HOMEBREW_TAP_DEPLOY_KEY" }}git@github.com:jpe0824/homebrew-tap.git{{ end }}'
+        private_key: '{{ index .Env "HOMEBREW_TAP_DEPLOY_KEY" }}'
     directory: Formula
-    skip_upload: '{{ if index .Env "HOMEBREW_TAP_GITHUB_TOKEN" }}false{{ else }}true{{ end }}'
+    commit_author:
+      name: termchat release workflow
+      email: 41898282+github-actions[bot]@users.noreply.github.com
+    skip_upload: '{{ if index .Env "HOMEBREW_TAP_DEPLOY_KEY" }}false{{ else }}true{{ end }}'
     homepage: https://github.com/jpe0824/termchat
     description: Fast, reliable, chat-only TUI that runs in any terminal
     license: MIT

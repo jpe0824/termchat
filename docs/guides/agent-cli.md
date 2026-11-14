@@ -22,7 +22,7 @@ Every client command takes `--json` and `--account <name>`.
 | Code | Meaning |
 |---|---|
 | 0 | Success. |
-| 1 | Any other failure, including the background process stopping during the command. |
+| 1 | Any other failure: the background process stopping during the command, or a request the server refuses as invalid, for example `termchat room join <room>` for a room you are already in (`termchat: invalid request: already a member`). |
 | 2 | Usage error: bad flag or argument, invalid handle or room name, empty or oversized message text. |
 | 3 | Not found: no such chat, person or room, or an ambiguous chat name. |
 | 4 | No account joined, not connected to the server, not authorised (key removed), or forbidden. |

@@ -184,7 +184,16 @@ GOOS=windows go build ./...   # CI also checks that Windows builds
 `.goreleaser.yaml` builds darwin and linux for amd64 and arm64 plus windows
 amd64, archives them with `LICENSE` and `README.md`, writes `checksums.txt`
 and updates the Homebrew formula in `jpe0824/homebrew-tap`. The release
-workflow runs on tags matching `v*`. The version string comes from
-`-ldflags "-X github.com/jpe0824/termchat/internal/cli.Version=..."`; an
-untagged build reports `dev`. `make release-snapshot` builds the archives
-locally without publishing.
+workflow runs on tags matching `v*`.
+
+To release: merge to `main`, then push a tag (`git tag v0.1.0 && git push origin
+v0.1.0`). The workflow runs the tests, builds, publishes the GitHub release,
+and pushes `Formula/termchat.rb` to the tap over SSH with a deploy key held in
+the `HOMEBREW_TAP_DEPLOY_KEY` secret. With that secret empty (a fork, a
+snapshot) the formula is generated in `dist/` and not pushed.
+
+The version string is `cli.Version`: set by
+`-ldflags "-X github.com/jpe0824/termchat/internal/cli.Version=..."` in
+releases and `make build`; otherwise the module version from the build (so
+`go install ...@v0.1.0` reports `v0.1.0`); otherwise `dev`.
+`make release-snapshot` builds the archives locally without publishing.

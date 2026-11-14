@@ -4,12 +4,32 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"runtime/debug"
 
 	"github.com/spf13/cobra"
 )
 
 // Version is overridden at build time with -ldflags "-X .../internal/cli.Version=...".
+// Without that, init takes the module version from the build (go install
+// ...@v1.2.3), and falls back to "dev".
 var Version = "dev"
+
+func init() {
+	info, ok := debug.ReadBuildInfo()
+	Version = resolveVersion(Version, info, ok)
+}
+
+// resolveVersion prefers a version set by -ldflags, then the main module's
+// version from build info when it is a real one (not "(devel)"), then "dev".
+func resolveVersion(ldflag string, info *debug.BuildInfo, ok bool) string {
+	if ldflag != "" && ldflag != "dev" {
+		return ldflag
+	}
+	if ok && info != nil && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	return "dev"
+}
 
 // usageError marks a mistake in how a command was invoked; it exits with 2.
 type usageError struct{ msg string }

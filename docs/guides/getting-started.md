@@ -172,9 +172,12 @@ never delivered twice.
 ### Quitting
 
 `q` (outside the input) or `ctrl+c` quits. With unsent drafts or an edit in
-progress, the first press shows a warning for three seconds that names the
-conversation holding a draft, and the same key again within those three
-seconds quits. The background process keeps running.
+progress, the first press shows a warning for three seconds, and the same key again
+within those three seconds quits. When the draft is in the conversation you have open, the
+warning reads `q again to quit — unsent drafts will be lost` (or `ctrl+c
+again to quit`, whichever key you pressed); when it is in another
+conversation, it names it, for example `unsent draft in #platform — q again to
+quit`. The background process keeps running.
 
 For the terminal-specific details of paste and timing, see
 [terminals and paste](terminals-and-paste.md). For notifications, see

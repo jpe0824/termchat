@@ -76,33 +76,45 @@ supported on Windows.
 
 ## Quick start
 
-Two people, Ada and Bob, on a private network. Ada runs the server.
+Two people, Ada and Bob. Ada runs the server. This block listens on
+`127.0.0.1`, which is right for trying it on one machine. For a team, use the
+server's address on your private network instead (for example
+`--addr 10.0.0.5:7420`), and give people that address. Without `--addr`, the
+server listens on every network interface, so only leave it off on a machine
+that is itself on a private network.
 
 On the server machine, create the first admin and start the server:
 
 ```sh
 termchat server init --data ~/termchat-server --handle ada --name "Ada"
-termchat serve --data ~/termchat-server
+termchat serve --data ~/termchat-server --addr 127.0.0.1:7420
 ```
 
-`init` prints an invite code. Leave `serve` running (default port 7420) and, on
-Ada's computer, join with the code and the server's address:
+`init` prints an invite code (default port 7420). Leave `serve` running and, in
+another terminal on Ada's computer, join with the code and the server's address,
+and check the connection:
 
 ```sh
-termchat join server.example:7420 --invite <code>
+termchat join 127.0.0.1:7420 --invite <code>
+termchat status      # repeat until the state is "connected"
 termchat
 ```
 
-`termchat` with no arguments opens the interface. Ada invites Bob from her
-computer (admins only), or with `termchat server invite bob --data ...` on the
-server machine:
+`join` returns while the connection is still starting, so wait for `connected`
+before the next command. `termchat` with no arguments opens the interface. Ada
+invites Bob from her computer (admins only), or with
+`termchat server invite bob --data ...` on the server machine:
 
 ```sh
 termchat invite bob --name "Bob"
 ```
 
-On Bob's computer, run the `termchat join ...` line it printed. Then either of
-them can chat from the interface, or from the command line:
+Invite codes are valid for 24 hours and work once. On Bob's computer, run the
+`termchat join ...` line it printed (with Bob's own address for the server),
+then `termchat status` until it shows `connected`. Bob needs his own config,
+data and runtime directories if he is on the same machine as Ada; see
+[the agent guide](docs/guides/agent-cli.md#acting-as-yourself-or-as-an-agent).
+Then either of them can chat from the interface, or from the command line:
 
 ```sh
 termchat dm ada               # on Bob's computer: open the direct chat

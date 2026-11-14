@@ -94,7 +94,9 @@ containing an escape or arrow sequence does not move you out of the input.
 
 `ctrl+c` quits from anywhere. `q` quits when the input does not have focus.
 If any conversation has an unsent draft or an edit in progress, the first press
-shows a warning for three seconds, naming the conversation, for example
+shows a warning for three seconds. For a draft in the conversation you have
+open it reads `q again to quit — unsent drafts will be lost` (or `ctrl+c again
+to quit`); for a draft in another conversation it names it, for example
 `unsent draft in #platform — q again to quit`. Pressing the same key again
 within those three seconds quits. Drafts are not saved: they are lost when the
 interface closes. The background process keeps running, and so does delivery of

@@ -18,9 +18,15 @@ independent of both.
 
 <!-- verify against the code after the overlay work lands: route 1 depends on the interface raising the sequence -->
 
-Route 2 uses `osascript` on macOS, `notify-send` (or `gdbus` when
-`notify-send` is missing) on Linux, and a PowerShell toast on Windows. The
-Windows and `gdbus` paths have not been tried on a real system. On macOS a
+Route 2 uses `osascript` on macOS and `notify-send` (or `gdbus` when
+`notify-send` is missing) on Linux. The `gdbus` path has not been tried on a
+real system.
+
+**Windows has no notifications in this version.** The code contains a
+PowerShell toast route and a `cmd /C` hook runner, but every route is driven
+by the background process, which does not run on Windows (see
+[getting started](getting-started.md#the-background-process)), so none of them
+can fire there. On macOS a
 command-line program cannot post through Apple's notification centre itself, so
 the notification comes from `osascript`; you may need to allow notifications
 for it in System Settings.
@@ -75,7 +81,7 @@ apply usefully. Set `notify.os = false` there.
 
 ## The hook
 
-`hook` is run through `sh -c` (`cmd /C` on Windows) with these environment
+`hook` is run through `sh -c` with these environment
 variables, and nothing else is passed:
 
 | Variable | Value |
