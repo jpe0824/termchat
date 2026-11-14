@@ -329,6 +329,9 @@ func TestSendWhileOfflineReturnsErrOffline(t *testing.T) {
 	if time.Since(began) > time.Second {
 		t.Fatal("offline Send waited")
 	}
+	if errors.Is(err, connector.ErrUnknownOutcome) {
+		t.Fatalf("a request that was never sent reported an unknown outcome: %v", err)
+	}
 	if c.State() != connector.StateOffline {
 		t.Fatalf("State = %s", c.State())
 	}
@@ -616,11 +619,11 @@ func TestServerErrorsFromRealHandlers(t *testing.T) {
 	}
 }
 
-// blockPeople makes people.list wait until release is closed and reports when
-// a request arrives.
-func blockPeople(e *env) (arrived <-chan struct{}, release func()) {
+// blockOn makes requests of type typ wait until release is called and reports
+// when one arrives.
+func blockOn(e *env, typ string) (arrived <-chan struct{}, release func()) {
 	in, rel := make(chan struct{}, 8), make(chan struct{})
-	e.h.Server.Handle(proto.TypePeopleList, func(ctx context.Context, _ *server.Session, _ proto.Frame) (any, *proto.Error) {
+	e.h.Server.Handle(typ, func(ctx context.Context, _ *server.Session, _ proto.Frame) (any, *proto.Error) {
 		in <- struct{}{}
 		select {
 		case <-rel:
@@ -637,7 +640,7 @@ func TestInFlightRequestReturnsErrOffline(t *testing.T) {
 	e.person(t, "ann", false)
 	c := e.client(t, "ann")
 	drain(t, c)
-	arrived, release := blockPeople(e)
+	arrived, release := blockOn(e, proto.TypePeopleList)
 	defer release()
 
 	errc := make(chan error, 1)
@@ -665,12 +668,15 @@ func TestRequestTimesOutAndHonoursContext(t *testing.T) {
 	e.person(t, "ann", false)
 	c := e.client(t, "ann", func(c *Client) { c.timeout = 100 * time.Millisecond })
 	drain(t, c)
-	_, release := blockPeople(e)
+	_, release := blockOn(e, proto.TypePeopleList)
 	defer release()
 
 	_, err := c.People(context.Background())
 	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("err = %v, want a timeout wrapping DeadlineExceeded", err)
+	}
+	if errors.Is(err, connector.ErrUnknownOutcome) {
+		t.Fatalf("a read-only request reported an unknown outcome: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

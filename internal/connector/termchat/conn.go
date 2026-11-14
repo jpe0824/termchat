@@ -62,19 +62,35 @@ type conn struct {
 // connection, which it does when ctx is done or the frame cannot be used.
 type deliver func(ctx context.Context, f proto.Frame) bool
 
-// openConn dials, opens the termchat channel and starts the reader. A nil
-// handler discards pushes.
-func openConn(ctx context.Context, dial dialFunc, addr string, cfg *ssh.ClientConfig, handler deliver) (*conn, error) {
+// connect runs the whole connection sequence (TCP dial, SSH handshake,
+// channel open and hello) under ctx and one timeout, so a peer that goes
+// silent at any step cannot hold the caller. ctx also governs pushes on the
+// connection once it is established; the timeout does not. A nil handler
+// discards pushes.
+func connect(ctx context.Context, timeout time.Duration, dial dialFunc, addr string, cfg *ssh.ClientConfig, handler deliver) (*conn, proto.HelloRes, error) {
+	cctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	cfg.User = sshUser
 	cfg.Timeout = handshakeTimeout
-	client, err := dial(ctx, addr, cfg)
-	if err != nil {
-		return nil, err
+	wrap := func(err error) error {
+		if cerr := cctx.Err(); cerr != nil {
+			return fmt.Errorf("termchat: connect to %s: %w", addr, cerr)
+		}
+		return err
 	}
+
+	client, err := dial(cctx, addr, cfg)
+	if err != nil {
+		return nil, proto.HelloRes{}, wrap(err)
+	}
+	// The dial's own closer ends with the handshake, so keep one until hello
+	// has answered.
+	stop := context.AfterFunc(cctx, func() { client.Close() })
 	ch, reqs, err := client.OpenChannel(channelType, nil)
 	if err != nil {
+		stop()
 		client.Close()
-		return nil, err
+		return nil, proto.HelloRes{}, wrap(err)
 	}
 	go ssh.DiscardRequests(reqs)
 	cn := &conn{
@@ -84,7 +100,19 @@ func openConn(ctx context.Context, dial dialFunc, addr string, cfg *ssh.ClientCo
 		dead:    make(chan struct{}),
 	}
 	go cn.readLoop(ctx, handler)
-	return cn, nil
+
+	var hello proto.HelloRes
+	err = cn.request(cctx, proto.TypeHello, proto.HelloReq{Version: proto.Version}, &hello)
+	if err == nil && !stop() {
+		err = cctx.Err() // the closer already fired
+	}
+	if err != nil {
+		stop()
+		cn.close()
+		<-cn.dead
+		return nil, proto.HelloRes{}, wrap(err)
+	}
+	return cn, hello, nil
 }
 
 func (cn *conn) close() {
@@ -114,6 +142,13 @@ func (cn *conn) readLoop(ctx context.Context, handler deliver) {
 		}
 	}
 }
+
+// inFlight marks an error from a request whose frame was written, so the
+// server may have acted on it.
+type inFlight struct{ err error }
+
+func (e *inFlight) Error() string { return e.err.Error() }
+func (e *inFlight) Unwrap() error { return e.err }
 
 // request sends one frame and decodes the response payload into res (when
 // non-nil). It returns when the response arrives, ctx ends or the connection
@@ -153,10 +188,10 @@ func (cn *conn) request(ctx context.Context, typ string, req, res any) error {
 		case resp := <-ch: // answered just before the connection dropped
 			return decodeResponse(resp, res)
 		default:
-			return offline(nil)
+			return &inFlight{offline(nil)}
 		}
 	case <-ctx.Done():
-		return ctx.Err()
+		return &inFlight{ctx.Err()}
 	}
 }
 

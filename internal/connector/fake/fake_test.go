@@ -3,6 +3,7 @@ package fake_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/jpe0824/termchat/internal/connector"
@@ -257,5 +258,97 @@ func TestRunBlocksUntilContextEnds(t *testing.T) {
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatalf("Run = %v, want nil", err)
+	}
+}
+
+func TestSeqContinuesFromSeededEvents(t *testing.T) {
+	f := fake.New(model.Person{Handle: "me"})
+	f.AddConversation(model.Conversation{ID: "c", Kind: model.ConvRoom},
+		model.Event{Seq: 10, Kind: model.MessagePosted, Actor: "ann", MsgID: "s10"})
+	ctx := context.Background()
+	sent, err := f.Send(ctx, "c", "m1", text("x"), nil)
+	if err != nil || sent.Seq != 11 {
+		t.Fatalf("Send after seeded seq 10 = %+v, %v; want seq 11", sent, err)
+	}
+	f.Push(model.Event{ConvID: "c", Kind: model.MessagePosted, Actor: "ann", MsgID: "p1", Body: &model.Body{}})
+	if u := <-f.Updates(); u.Event.Seq != 12 {
+		t.Fatalf("Push seq = %d, want 12", u.Event.Seq)
+	}
+	evs, _ := f.History(ctx, "c", 0, 10)
+	for i := 1; i < len(evs); i++ {
+		if evs[i].Seq <= evs[i-1].Seq {
+			t.Fatalf("history out of order: %+v", evs)
+		}
+	}
+	mine, _, _ := f.Conversations(ctx)
+	if mine[0].LastSeq != 12 {
+		t.Fatalf("LastSeq = %d, want 12", mine[0].LastSeq)
+	}
+}
+
+func TestSeqContinuesFromSeededLastSeq(t *testing.T) {
+	f := fake.New(model.Person{Handle: "me"})
+	f.AddConversation(model.Conversation{ID: "c", Kind: model.ConvRoom, LastSeq: 7})
+	ev, err := f.Send(context.Background(), "c", "m1", text("x"), nil)
+	if err != nil || ev.Seq != 8 {
+		t.Fatalf("Send = %+v, %v; want seq 8", ev, err)
+	}
+}
+
+func TestSeededEventsAreKeptSortedBySeq(t *testing.T) {
+	f := fake.New(model.Person{Handle: "me"})
+	f.AddConversation(model.Conversation{ID: "c", Kind: model.ConvRoom},
+		model.Event{Seq: 5, Kind: model.MessagePosted, Actor: "ann", MsgID: "e5"},
+		model.Event{Seq: 3, Kind: model.MessagePosted, Actor: "ann", MsgID: "e3"})
+	evs, _ := f.History(context.Background(), "c", 0, 10)
+	if len(evs) != 2 || evs[0].Seq != 3 || evs[1].Seq != 5 {
+		t.Fatalf("history = %+v, want seq 3 then 5", evs)
+	}
+	synced, _, _, _ := f.Sync(context.Background(), map[string]int64{"c": 0})
+	if len(synced) != 2 || synced[0].Seq != 3 {
+		t.Fatalf("sync = %+v, want ascending", synced)
+	}
+}
+
+func TestLeaveReturnsOnlyTheConversationID(t *testing.T) {
+	f := newFake()
+	c, err := f.Room(context.Background(), connector.RoomOp{Kind: connector.RoomLeave, Conv: "c1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (model.Conversation{ID: "c1"}); fmt.Sprint(c) != fmt.Sprint(want) {
+		t.Fatalf("leave returned %+v, want only the ID", c)
+	}
+}
+
+func TestMsgIDFromAnotherActorIsForbidden(t *testing.T) {
+	f := newFake()
+	f.Push(model.Event{ConvID: "c1", Kind: model.MessagePosted, Actor: "ann", MsgID: "x", Body: &model.Body{}})
+	<-f.Updates()
+	if _, err := f.Send(context.Background(), "c1", "x", text("mine"), nil); !errors.Is(err, connector.ErrForbidden) {
+		t.Fatalf("err = %v, want ErrForbidden (msg_id used by another member)", err)
+	}
+	if len(f.Sent()) != 0 {
+		t.Fatal("the refused send was recorded")
+	}
+}
+
+func TestLoseNextSendResponseStoresButReportsUnknownOutcome(t *testing.T) {
+	f := newFake()
+	ctx := context.Background()
+	f.LoseNextSendResponse()
+	_, err := f.Send(ctx, "c1", "m1", text("a"), nil)
+	if !errors.Is(err, connector.ErrUnknownOutcome) {
+		t.Fatalf("err = %v, want ErrUnknownOutcome", err)
+	}
+	if got := f.Sent(); len(got) != 1 || got[0].MsgID != "m1" {
+		t.Fatalf("Sent() = %+v, want the message stored", got)
+	}
+	ev, err := f.Send(ctx, "c1", "m1", text("a"), nil)
+	if err != nil || ev.Seq != 1 {
+		t.Fatalf("retry = %+v, %v; want the original event", ev, err)
+	}
+	if got := len(f.Sent()); got != 1 {
+		t.Fatalf("Sent() has %d events after the retry, want 1", got)
 	}
 }

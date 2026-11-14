@@ -177,29 +177,23 @@ func (c *Client) session(ctx context.Context) (terminal connector.ConnState, con
 	}
 
 	var check hostKeyCheck
-	cn, err := openConn(ctx, c.dial, c.addr, &ssh.ClientConfig{
+	cn, hello, err := connect(ctx, c.timeout, c.dial, c.addr, &ssh.ClientConfig{
 		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
 		HostKeyCallback: check.callback(c.dataDir, c.addr, false),
 	}, c.deliver)
-	if err != nil {
-		if _, herr := check.result(); errors.Is(herr, ErrHostKeyChanged) {
-			return connector.StateHostKeyChanged, false
-		}
-		return "", false
-	}
-	defer cn.close()
-
-	hctx, cancel := context.WithTimeout(ctx, c.timeout)
-	hello, err := helloOn(hctx, cn)
-	cancel()
 	switch {
+	case err == nil:
+	case errors.Is(err, ErrHostKeyChanged) || hostKeyRefused(&check):
+		return connector.StateHostKeyChanged, false
 	case errors.Is(err, connector.ErrVersionMismatch):
 		return connector.StateVersionMismatch, false
 	case errors.Is(err, connector.ErrNotAuthorised):
 		return connector.StateNotAuthorised, false
-	case err != nil:
+	default:
 		return "", false
-	case hello.Person == nil:
+	}
+	defer cn.close()
+	if hello.Person == nil {
 		return connector.StateNotAuthorised, false
 	}
 
@@ -266,10 +260,9 @@ func (c *Client) keepAlive(ctx context.Context, cn *conn) {
 	}
 }
 
-func helloOn(ctx context.Context, cn *conn) (proto.HelloRes, error) {
-	var res proto.HelloRes
-	err := cn.request(ctx, proto.TypeHello, proto.HelloReq{Version: proto.Version}, &res)
-	return res, err
+func hostKeyRefused(check *hostKeyCheck) bool {
+	_, err := check.result()
+	return errors.Is(err, ErrHostKeyChanged)
 }
 
 // deliver turns a push frame into an Update. A frame it cannot decode ends the
@@ -306,19 +299,26 @@ func (c *Client) deliver(ctx context.Context, f proto.Frame) bool {
 // key on first contact and refuses a server whose key differs from the pin.
 // When the device key is already registered the invite is not spent.
 func Join(ctx context.Context, server, inviteCode, dataDir string) (config.Account, error) {
+	return join(ctx, server, inviteCode, dataDir, defaultDial, requestTimeout)
+}
+
+func join(ctx context.Context, server, inviteCode, dataDir string, dial dialFunc, timeout time.Duration) (config.Account, error) {
 	addr := normalizeAddr(server)
 	signer, err := loadOrCreateKey(dataDir, addr)
 	if err != nil {
 		return config.Account{}, err
 	}
 	var check hostKeyCheck
-	cn, err := openConn(ctx, defaultDial, addr, &ssh.ClientConfig{
+	cn, hello, err := connect(ctx, timeout, dial, addr, &ssh.ClientConfig{
 		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
 		HostKeyCallback: check.callback(dataDir, addr, true),
 	}, nil)
 	if err != nil {
 		if _, herr := check.result(); errors.Is(herr, ErrHostKeyChanged) {
 			return config.Account{}, fmt.Errorf("%w (%s)", ErrHostKeyChanged, addr)
+		}
+		if errors.Is(err, connector.ErrNotAuthorised) || errors.Is(err, connector.ErrVersionMismatch) {
+			return config.Account{}, err
 		}
 		return config.Account{}, fmt.Errorf("termchat: connect to %s: %w", addr, err)
 	}
@@ -329,16 +329,12 @@ func Join(ctx context.Context, server, inviteCode, dataDir string) (config.Accou
 		}
 	}
 
-	hctx, cancel := context.WithTimeout(ctx, requestTimeout)
-	defer cancel()
-	hello, err := helloOn(hctx, cn)
-	if err != nil {
-		return config.Account{}, err
-	}
 	person := hello.Person
 	if person == nil {
+		rctx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
 		var res proto.InviteRedeemRes
-		if err := cn.request(hctx, proto.TypeInviteRedeem, proto.InviteRedeemReq{Code: inviteCode}, &res); err != nil {
+		if err := cn.request(rctx, proto.TypeInviteRedeem, proto.InviteRedeemReq{Code: inviteCode}, &res); err != nil {
 			return config.Account{}, err
 		}
 		person = &res.Person

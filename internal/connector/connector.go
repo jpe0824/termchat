@@ -84,6 +84,9 @@ var (
 	ErrRateLimited     = errors.New("rate limited")
 	ErrVersionMismatch = errors.New("version mismatch")
 	ErrInternal        = errors.New("internal error")
+	// ErrUnknownOutcome marks a change request that was sent but never
+	// answered: it may or may not have taken effect.
+	ErrUnknownOutcome = errors.New("outcome unknown")
 )
 
 // Connector is one account's connection to a chat network.
@@ -93,6 +96,17 @@ var (
 // consumer should therefore drain Updates from its own goroutine and must not
 // wait on a request method from the goroutine that drains it. Methods are
 // safe for concurrent use and return ErrOffline while not connected.
+//
+// Unknown outcomes: the server leaves a request's own result out of the
+// pushes it sends back, so when a change request (Send, Edit, Delete,
+// MarkRead, OpenDM, Room, DeviceInvite, CreateAgent, AdminInvite) is sent but
+// no response arrives (timeout, cancelled context, dropped connection) it
+// returns an error matching ErrUnknownOutcome, and also ErrOffline when the
+// connection dropped. The change may or may not have happened. Retry Send with
+// the same msgID, which never duplicates; for every other change request call
+// Sync (or re-read with Conversations) before deciding whether to repeat it.
+// A request that was never sent, because the connector was not connected,
+// returns plain ErrOffline and changed nothing.
 type Connector interface {
 	// Run owns the connection until ctx ends, reconnecting with backoff, and
 	// returns nil once ctx is cancelled.

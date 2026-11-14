@@ -21,9 +21,12 @@ import (
 type relay struct {
 	ln      net.Listener
 	blocked atomic.Bool
-	wg      sync.WaitGroup
-	mu      sync.Mutex
-	conns   []net.Conn
+	// blockedDown black-holes only server-to-client traffic, so requests
+	// still reach the server but their responses are lost.
+	blockedDown atomic.Bool
+	wg          sync.WaitGroup
+	mu          sync.Mutex
+	conns       []net.Conn
 }
 
 func newRelay(t *testing.T, target string) *relay {
@@ -55,8 +58,8 @@ func newRelay(t *testing.T, target string) *relay {
 			r.mu.Unlock()
 			var poisoned atomic.Bool
 			r.wg.Add(2)
-			go r.pipe(s, c, &poisoned)
-			go r.pipe(c, s, &poisoned)
+			go r.pipe(s, c, &poisoned, false)
+			go r.pipe(c, s, &poisoned, true)
 		}
 	}()
 	t.Cleanup(func() {
@@ -71,7 +74,7 @@ func newRelay(t *testing.T, target string) *relay {
 	return r
 }
 
-func (r *relay) pipe(dst, src net.Conn, poisoned *atomic.Bool) {
+func (r *relay) pipe(dst, src net.Conn, poisoned *atomic.Bool, down bool) {
 	defer r.wg.Done()
 	defer dst.Close()
 	defer src.Close()
@@ -79,7 +82,7 @@ func (r *relay) pipe(dst, src net.Conn, poisoned *atomic.Bool) {
 	for {
 		n, err := src.Read(buf)
 		if n > 0 {
-			if r.blocked.Load() {
+			if r.blocked.Load() || (down && r.blockedDown.Load()) {
 				poisoned.Store(true)
 			}
 			if !poisoned.Load() {

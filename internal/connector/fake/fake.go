@@ -4,6 +4,7 @@
 package fake
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"maps"
@@ -34,6 +35,8 @@ type Fake struct {
 	events   map[string][]model.Event
 	sent     []model.Event
 	failSend error
+	loseNext bool
+	lastSeq  map[string]int64
 	pageSize int
 	clock    int
 	nextConv int
@@ -51,6 +54,7 @@ func New(me model.Person) *Fake {
 		people:  []model.Person{me},
 		convs:   map[string]*model.Conversation{},
 		events:  map[string][]model.Event{},
+		lastSeq: map[string]int64{},
 	}
 }
 
@@ -96,6 +100,15 @@ func (f *Fake) FailNextSend(err error) {
 	f.mu.Unlock()
 }
 
+// LoseNextSendResponse makes the next Send store its message, as a server
+// would, and then fail with ErrUnknownOutcome as if the response never
+// arrived. Retrying with the same msgID returns the stored event.
+func (f *Fake) LoseNextSendResponse() {
+	f.mu.Lock()
+	f.loseNext = true
+	f.mu.Unlock()
+}
+
 // Sent returns the events created by Send, oldest first. A duplicate send
 // does not add an entry.
 func (f *Fake) Sent() []model.Event {
@@ -129,6 +142,7 @@ func (f *Fake) AddConversation(c model.Conversation, events ...model.Event) {
 		c.Members = []string{f.me.Handle}
 	}
 	f.convs[c.ID] = &c
+	f.lastSeq[c.ID] = max(f.lastSeq[c.ID], c.LastSeq)
 	for _, ev := range events {
 		ev.ConvID = c.ID
 		f.appendLocked(ev)
@@ -145,15 +159,19 @@ func (f *Fake) Push(ev model.Event) {
 }
 
 // appendLocked stores ev, filling Seq and At, and keeps LastSeq current.
+// Events stay sorted by Seq, and a filled Seq always exceeds every Seq seen
+// for the conversation.
 func (f *Fake) appendLocked(ev model.Event) model.Event {
 	if ev.Seq == 0 {
-		ev.Seq = int64(len(f.events[ev.ConvID])) + 1
+		ev.Seq = f.lastSeq[ev.ConvID] + 1
 	}
+	f.lastSeq[ev.ConvID] = max(f.lastSeq[ev.ConvID], ev.Seq)
 	if ev.At.IsZero() {
 		f.clock++
 		ev.At = epoch.Add(time.Duration(f.clock) * time.Second)
 	}
 	f.events[ev.ConvID] = append(f.events[ev.ConvID], ev)
+	slices.SortStableFunc(f.events[ev.ConvID], func(a, b model.Event) int { return cmp.Compare(a.Seq, b.Seq) })
 	if c := f.convs[ev.ConvID]; c != nil {
 		c.LastSeq = max(c.LastSeq, ev.Seq)
 	}
@@ -271,6 +289,11 @@ func (f *Fake) Send(_ context.Context, conv, msgID string, body model.Body, ment
 	}
 	for _, ev := range f.events[conv] {
 		if ev.Kind == model.MessagePosted && ev.MsgID == msgID {
+			// A msgID is unique per conversation, so another member's use of
+			// it must not reveal their message to the caller.
+			if ev.Actor != f.me.Handle {
+				return model.Event{}, fmt.Errorf("%w: msg_id already used", connector.ErrForbidden)
+			}
 			return ev, nil
 		}
 	}
@@ -279,6 +302,10 @@ func (f *Fake) Send(_ context.Context, conv, msgID string, body model.Body, ment
 		MsgID: msgID, Body: &body, Mentions: mentions,
 	})
 	f.sent = append(f.sent, ev)
+	if f.loseNext {
+		f.loseNext = false
+		return model.Event{}, connector.ErrUnknownOutcome
+	}
 	return ev, nil
 }
 
@@ -400,6 +427,7 @@ func (f *Fake) Room(_ context.Context, op connector.RoomOp) (model.Conversation,
 	switch op.Kind {
 	case connector.RoomLeave:
 		f.dropMember(c, f.me.Handle)
+		return model.Conversation{ID: c.ID}, nil // as the real connector: the server returns nothing
 	case connector.RoomInvite:
 		f.addMember(c, op.Handle)
 	case connector.RoomRemove:
