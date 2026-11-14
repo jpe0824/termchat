@@ -16,7 +16,7 @@ builds:
     flags:
       - -trimpath
     ldflags:
-      - -s -w -X github.com/jpe0824/termchat/internal/cli.Version={{ .Version }}
+      - -s -w -X github.com/jpe0824/termchat/internal/cli.Version=v{{ .Version }}
     goos: [darwin, linux, windows]
     goarch: [amd64, arm64]
     ignore:
