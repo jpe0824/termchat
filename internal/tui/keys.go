@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"math"
-
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
@@ -15,6 +13,7 @@ var helpKeys = [][2]string{
 	{"esc", "back to the chat list (narrow windows)"},
 	{"pgup pgdn", "scroll the thread"},
 	{"home end", "oldest / newest message"},
+	{"r", "start the background process when it is not running"},
 	{"?", "show or hide this help"},
 	{"q  ctrl+c", "quit"},
 	{"mouse", "click a chat to open it; the wheel scrolls"},
@@ -94,9 +93,11 @@ func (m *Model) onKey(k tea.KeyPressMsg) tea.Cmd {
 	case "pgdown":
 		return m.scroll(page)
 	case "home":
-		return m.scroll(math.MinInt32)
+		return m.scrollToTop()
 	case "end":
-		return m.scroll(math.MaxInt32)
+		return m.scrollToBottom()
+	case "r":
+		return m.startProcess()
 	}
 	return nil
 }

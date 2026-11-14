@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -12,9 +13,13 @@ import (
 // ● all is well, ○ waiting, ! needs the user.
 func (m *Model) state() (glyph, words string, st lipgloss.Style) {
 	switch {
+	case m.procDown && m.startErr != "":
+		return "!", "could not start the background process: " + m.startErr, m.st.bad
+	case m.procDown && errors.Is(m.downErr, ipc.ErrVersionMismatch):
+		return "!", "background process is a different version — run: termchat daemon stop", m.st.bad
 	case m.procDown:
 		return "!", "background process not running", m.st.bad
-	case !m.haveStatus:
+	case m.launching || !m.haveStatus:
 		return "○", "connecting", m.st.warn
 	}
 	switch m.status.Conn {
@@ -43,10 +48,15 @@ func (m *Model) topBar(g geom) string {
 		if m.status.Syncing && !m.procDown {
 			full = "syncing " + full
 		}
-		if m.server != "" && !m.procDown {
+		if m.server != "" {
 			options = append(options, m.server+" "+full)
 		}
 		options = append(options, full, glyph+" "+words)
+		// The words cut to the room left, before falling back to the glyph.
+		room := m.w - lipgloss.Width(left) - lipgloss.Width(glyph) - 6
+		if room > 1 {
+			options = append(options, glyph+" "+truncate(words, room))
+		}
 	}
 	options = append(options, glyph, "")
 	for _, o := range options {
@@ -54,7 +64,7 @@ func (m *Model) topBar(g geom) string {
 		if o != "" {
 			right = " " + o + " ┐"
 		}
-		if lipgloss.Width(left)+lipgloss.Width(right) <= m.w {
+		if lipgloss.Width(left)+lipgloss.Width(right)+1 <= m.w {
 			if o != "" {
 				right = " " + strings.Replace(o, glyph, st.Render(glyph), 1) + " ┐"
 			}
@@ -80,6 +90,9 @@ func (m *Model) footer(g geom) string {
 		keys = []string{"esc chats", "? help"}
 	default:
 		keys = []string{"esc chats", "pgup/pgdn scroll", "? help", "q quit"}
+	}
+	if m.procDown && !m.help && m.canStart() {
+		keys = append([]string{"r start"}, keys...)
 	}
 	for n := len(keys); n > 0; n-- {
 		left := "└─ " + strings.Join(keys[:n], "  ") + " "

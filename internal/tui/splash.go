@@ -29,6 +29,9 @@ func (m *Model) splashStatus() []string {
 	if m.noAccount {
 		return []string{"no server joined yet", "", joinHint, "", m.st.faint.Render("q quit")}
 	}
+	if m.launching {
+		return []string{m.st.warn.Render("○") + " starting…"}
+	}
 	glyph, words, st := m.state()
 	switch {
 	case m.server != "" && words == "connected":

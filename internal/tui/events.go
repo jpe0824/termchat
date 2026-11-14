@@ -16,8 +16,9 @@ import (
 // is back. Each new subscription is reported with subscribedMsg, on which
 // the interface re-reads everything it shows.
 type supervisor struct {
-	b    Backend
-	opts Options
+	b     Backend
+	opts  Options
+	adopt <-chan Backend
 }
 
 func (s *supervisor) run(ctx context.Context) {
@@ -27,8 +28,14 @@ func (s *supervisor) run(ctx context.Context) {
 		}
 	}()
 	for ctx.Err() == nil {
-		if s.b == nil && !s.dial(ctx) {
-			continue
+		if s.b == nil {
+			select {
+			case s.b = <-s.adopt:
+			default:
+				if !s.dial(ctx) {
+					continue
+				}
+			}
 		}
 		// The interface does not draw notifications itself yet.
 		ch, err := s.b.SubscribeUI(ctx, false)
@@ -58,6 +65,9 @@ func (s *supervisor) forward(ctx context.Context, ch <-chan ipc.Event) bool {
 		select {
 		case <-ctx.Done():
 			return false
+		case b := <-s.adopt:
+			// Started by the user after this connection came back.
+			_ = b.Close()
 		case ev, ok := <-ch:
 			if !ok {
 				return ctx.Err() == nil
@@ -71,7 +81,7 @@ func (s *supervisor) forward(ctx context.Context, ch <-chan ipc.Event) bool {
 func (s *supervisor) dial(ctx context.Context) bool {
 	if s.opts.Dial == nil {
 		s.send(ctx, backendDownMsg{err: errors.New("no way to reach the background process")})
-		<-ctx.Done()
+		s.wait(ctx)
 		return false
 	}
 	b, err := s.opts.Dial(ctx)
@@ -100,10 +110,14 @@ func (s *supervisor) drop(ctx context.Context, why error) {
 	s.wait(ctx)
 }
 
+// wait returns after retryEvery, or at once when the user started the
+// process and its connection is handed over.
 func (s *supervisor) wait(ctx context.Context) {
 	select {
 	case <-ctx.Done():
 	case <-s.opts.After(retryEvery):
+	case b := <-s.adopt:
+		s.b = b
 	}
 }
 

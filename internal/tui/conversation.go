@@ -274,15 +274,41 @@ func (m *Model) threadPane(g geom) (width, vh int) {
 // scroll moves the thread view by delta lines (negative is up). Reaching the
 // top asks for the page before.
 func (m *Model) scroll(delta int) tea.Cmd {
+	return m.scrollWith(func(top, maxTop int) int {
+		// Compared, not added, so no delta can overflow.
+		switch {
+		case delta >= maxTop-top:
+			return maxTop
+		case delta <= -top:
+			return 0
+		}
+		return top + delta
+	}, delta < 0)
+}
+
+// scrollToTop shows the oldest held message and asks for the page before.
+func (m *Model) scrollToTop() tea.Cmd {
+	return m.scrollWith(func(int, int) int { return 0 }, true)
+}
+
+// scrollToBottom follows the newest message.
+func (m *Model) scrollToBottom() tea.Cmd {
+	return m.scrollWith(func(_, maxTop int) int { return maxTop }, false)
+}
+
+// scrollWith moves the view to to(top, maxTop); up says the move was
+// towards older messages, so arriving at the top loads the page before.
+func (m *Model) scrollWith(to func(top, maxTop int) int, up bool) tea.Cmd {
 	g := m.geom()
 	if m.thread == nil || g.thr.w == 0 || m.help {
 		return nil
 	}
 	width, vh := m.threadPane(g)
 	lines := m.threadLines(width, g.mode)
-	top := m.thread.top(lines, vh) + delta
+	maxTop := max(len(lines)-vh, 0)
+	top := to(m.thread.top(lines, vh), maxTop)
 	m.thread.setTop(lines, top, vh)
-	if top <= 0 {
+	if top == 0 && up {
 		return m.requestOlder()
 	}
 	return nil

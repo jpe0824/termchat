@@ -36,9 +36,19 @@ type (
 	eventMsg       struct{ ev ipc.Event }
 	subscribedMsg  struct{ b Backend }
 	backendDownMsg struct{ err error }
-	resyncMsg      struct{}
-	serverMsg      struct{ name string }
-	statusMsg      struct {
+	// launchMsg is the first connection attempt's result; startedMsg is
+	// the result of the user asking to start the background process.
+	launchMsg struct {
+		b   Backend
+		err error
+	}
+	startedMsg struct {
+		b   Backend
+		err error
+	}
+	resyncMsg struct{}
+	serverMsg struct{ name string }
+	statusMsg struct {
 		b   Backend
 		st  ipc.Status
 		err error
@@ -72,9 +82,18 @@ type Model struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	b      Backend
+	adopt  chan Backend
 
 	w, h       int
 	splashDone bool
+	// splashTimed records that the opening screen's time is up while the
+	// launch dial is still out; it closes when the dial returns.
+	splashTimed bool
+	launching   bool
+	starting    bool
+	supervised  bool
+	startErr    string
+	downErr     error
 
 	status     ipc.Status
 	haveStatus bool
@@ -98,15 +117,16 @@ type Model struct {
 	olderBusy               bool
 }
 
-// New returns the interface's root model. b may be nil when the background
-// process could not be reached; with Options.Dial and Options.Send the
-// interface keeps trying.
+// New returns the interface's root model. With b nil and Options.Start set,
+// the first connection is made inside the program, so the opening screen
+// draws at once. With Options.Dial and Options.Send it reconnects whenever
+// the background process goes away, without ever starting one.
 func New(b Backend, opts Options) *Model {
 	opts.fill()
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Model{
 		opts: opts, st: newStyles(opts.Env("NO_COLOR") == ""),
-		ctx: ctx, cancel: cancel, b: b, procDown: b == nil,
+		ctx: ctx, cancel: cancel, b: b, procDown: b == nil, adopt: make(chan Backend, 1),
 		splashDone: !opts.Splash,
 	}
 }
@@ -119,15 +139,80 @@ func (m *Model) Init() tea.Cmd {
 	if m.opts.Splash {
 		cmds = append(cmds, m.opts.Tick(splashFor, splashDoneMsg{}))
 	}
-	if m.opts.Send != nil {
-		sup := &supervisor{b: m.b, opts: m.opts}
-		ctx := m.ctx
-		cmds = append(cmds, func() tea.Msg { go sup.run(ctx); return nil })
+	if m.b == nil && m.opts.Start != nil {
+		m.launching, m.procDown = true, false
+		start, ctx := m.opts.Start, m.ctx
+		cmds = append(cmds, func() tea.Msg {
+			b, err := start(ctx)
+			return launchMsg{b: b, err: err}
+		})
+		return tea.Batch(cmds...)
 	}
+	cmds = append(cmds, m.supervise())
 	if m.b != nil {
 		cmds = append(cmds, m.readStatus(), m.requestChats())
 	}
 	return tea.Batch(cmds...)
+}
+
+// supervise starts the subscription goroutine, once.
+func (m *Model) supervise() tea.Cmd {
+	if m.opts.Send == nil || m.supervised {
+		return nil
+	}
+	m.supervised = true
+	sup := &supervisor{b: m.b, opts: m.opts, adopt: m.adopt}
+	ctx := m.ctx
+	return func() tea.Msg { go sup.run(ctx); return nil }
+}
+
+func (m *Model) onLaunch(msg launchMsg) tea.Cmd {
+	m.launching = false
+	if m.splashTimed {
+		m.splashDone = true
+	}
+	if msg.err != nil || msg.b == nil {
+		m.procDown, m.downErr = true, msg.err
+		return m.supervise()
+	}
+	m.b = msg.b
+	return tea.Batch(m.supervise(), m.readStatus(), m.requestChats())
+}
+
+// startProcess is the user's explicit request to start the background
+// process while it is down; reconnects on their own never start it.
+func (m *Model) startProcess() tea.Cmd {
+	if !m.procDown || m.starting || m.launching || !m.canStart() {
+		return nil
+	}
+	m.starting, m.startErr = true, ""
+	start, ctx := m.opts.Start, m.ctx
+	return func() tea.Msg {
+		b, err := start(ctx)
+		return startedMsg{b: b, err: err}
+	}
+}
+
+// canStart reports whether starting the process could help: not when one
+// of another version is running.
+func (m *Model) canStart() bool {
+	return m.opts.Start != nil && !errors.Is(m.downErr, ipc.ErrVersionMismatch)
+}
+
+func (m *Model) onStarted(msg startedMsg) {
+	m.starting = false
+	if msg.err != nil || msg.b == nil {
+		if msg.err == nil {
+			msg.err = ipc.ErrClosed
+		}
+		m.startErr = sanitize.Line(msg.err.Error())
+		return
+	}
+	select {
+	case m.adopt <- msg.b:
+	default:
+		_ = msg.b.Close()
+	}
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -142,19 +227,27 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseWheelMsg:
 		return m, m.onWheel(msg.Mouse())
 	case splashDoneMsg:
-		m.splashDone = true
+		if m.launching {
+			m.splashTimed = true
+		} else {
+			m.splashDone = true
+		}
+	case launchMsg:
+		return m, m.onLaunch(msg)
+	case startedMsg:
+		m.onStarted(msg)
 	case statusPollMsg:
 		m.polling = false
 		if m.noAccount && m.b != nil {
 			return m, m.readStatus()
 		}
 	case subscribedMsg:
-		m.b, m.procDown = msg.b, false
+		m.b, m.procDown, m.downErr, m.startErr = msg.b, false, nil, ""
 		return m, m.rereadAll()
 	case resyncMsg:
 		return m, m.rereadAll()
 	case backendDownMsg:
-		m.procDown = true
+		m.procDown, m.downErr = true, msg.err
 	case serverMsg:
 		m.server = msg.name
 	case eventMsg:

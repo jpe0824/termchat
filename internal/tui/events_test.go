@@ -18,6 +18,7 @@ type supHarness struct {
 	out   chan tea.Msg
 	waits chan chan time.Time
 	dials chan dialResult
+	adopt chan Backend
 	stop  context.CancelFunc
 	done  chan struct{}
 }
@@ -30,7 +31,7 @@ type dialResult struct {
 func startSupervisor(t *testing.T, b Backend) *supHarness {
 	t.Helper()
 	s := &supHarness{t: t, out: make(chan tea.Msg, 64), waits: make(chan chan time.Time, 8),
-		dials: make(chan dialResult, 8), done: make(chan struct{})}
+		dials: make(chan dialResult, 8), adopt: make(chan Backend, 1), done: make(chan struct{})}
 	opts := Options{
 		Send: func(m tea.Msg) { s.out <- m },
 		After: func(d time.Duration) <-chan time.Time {
@@ -53,7 +54,11 @@ func startSupervisor(t *testing.T, b Backend) *supHarness {
 	opts.fill()
 	ctx, cancel := context.WithCancel(context.Background())
 	s.stop = cancel
-	sup := &supervisor{b: b, opts: opts}
+	opts.Start = func(context.Context) (Backend, error) {
+		t.Error("the subscription goroutine must never start the background process")
+		return nil, errors.New("not allowed")
+	}
+	sup := &supervisor{b: b, opts: opts, adopt: s.adopt}
 	go func() { defer close(s.done); sup.run(ctx) }()
 	t.Cleanup(func() {
 		cancel()
@@ -205,4 +210,36 @@ func TestStaleThreadResultDropped(t *testing.T) {
 	}
 	mustNotContain(t, h.view(), "did the meter import")
 	mustContain(t, h.view(), "got a minute?")
+}
+
+func TestReconnectNeverStartsTheProcess(t *testing.T) {
+	f := fixture()
+	s := startSupervisor(t, f)
+	s.next()
+	f.endSub(ipc.ErrClosed)
+	s.next()
+	for range 3 {
+		s.wait() <- time.Now()
+		s.dials <- dialResult{err: ipc.ErrNotRunning}
+		if m, ok := s.next().(backendDownMsg); !ok || !errors.Is(m.err, ipc.ErrNotRunning) {
+			t.Fatalf("want backendDownMsg(ErrNotRunning), got %#v", m)
+		}
+	}
+}
+
+func TestAdoptedConnectionIsSubscribed(t *testing.T) {
+	f := fixture()
+	s := startSupervisor(t, f)
+	s.next()
+	f.endSub(ipc.ErrClosed)
+	s.next()
+	s.wait() // waiting to redial
+	g := fixture()
+	s.adopt <- g
+	if m, ok := s.next().(subscribedMsg); !ok || m.b != Backend(g) {
+		t.Fatalf("want subscribedMsg with the adopted connection, got %#v", m)
+	}
+	if g.callCount("subscribe false") != 1 {
+		t.Errorf("adopted connection calls: %v", g.calls)
+	}
 }

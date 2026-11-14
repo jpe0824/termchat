@@ -40,8 +40,10 @@ type Options struct {
 	Tick func(d time.Duration, msg tea.Msg) tea.Cmd
 	// After is the clock the reconnect loop waits on.
 	After func(d time.Duration) <-chan time.Time
-	// Dial connects to the background process again after it went away.
+	// Dial connects to a running background process; it never starts one.
 	Dial func(ctx context.Context) (Backend, error)
+	// Start connects and starts the background process when none runs.
+	Start func(ctx context.Context) (Backend, error)
 	// Send delivers a message to the running program from the subscription
 	// goroutine. Without it no subscription is kept.
 	Send func(tea.Msg)

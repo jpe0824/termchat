@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"os"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
@@ -12,10 +11,6 @@ import (
 	"github.com/jpe0824/termchat/internal/ipc"
 	"github.com/jpe0824/termchat/internal/tui"
 )
-
-// tuiDialWait bounds the first connection attempt; the interface opens
-// either way and keeps trying in the background.
-const tuiDialWait = 5 * time.Second
 
 func newTUICmd() *cobra.Command {
 	return &cobra.Command{
@@ -38,35 +33,43 @@ func rootRun(cmd *cobra.Command, args []string) error {
 	return runTUI(cmd)
 }
 
-// runTUI runs the interface until the user quits. Tests replace it.
+// tuiDialers are the interface's two ways to connect: dial only reaches a
+// running background process and is what reconnects use, so a process the
+// user stopped stays stopped; start may launch one, and runs at launch and
+// when the user asks.
+func tuiDialers() (dial, start func(context.Context) (tui.Backend, error)) {
+	wrap := func(f func(context.Context) (*ipc.Client, error)) func(context.Context) (tui.Backend, error) {
+		return func(ctx context.Context) (tui.Backend, error) {
+			c, err := f(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return c, nil
+		}
+	}
+	return wrap(ipc.DialRunning), wrap(ipc.Dial)
+}
+
+// runTUI runs the interface until the user quits. The program starts at
+// once; the first connection is made inside it. Tests replace it.
 var runTUI = func(cmd *cobra.Command) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fail(err)
 	}
-	ctx := cmdContext(cmd)
-	dial := func(ctx context.Context) (tui.Backend, error) {
-		c, err := ipc.Dial(ctx)
-		if err != nil {
-			return nil, err
-		}
-		return c, nil
-	}
-	first, cancel := context.WithTimeout(ctx, tuiDialWait)
-	b, _ := dial(first)
-	cancel()
-
+	dial, start := tuiDialers()
 	var p *tea.Program
-	m := tui.New(b, tui.Options{
+	m := tui.New(nil, tui.Options{
 		Splash:  cfg.Splash,
 		Version: Version,
 		Server:  configuredServer,
 		Env:     os.Getenv,
 		Dial:    dial,
+		Start:   start,
 		Send:    func(msg tea.Msg) { p.Send(msg) },
 	})
 	defer m.Close()
-	p = tea.NewProgram(m, tea.WithContext(ctx),
+	p = tea.NewProgram(m, tea.WithContext(cmdContext(cmd)),
 		tea.WithInput(cmd.InOrStdin()), tea.WithOutput(cmd.OutOrStdout()))
 	_, err = p.Run()
 	return err

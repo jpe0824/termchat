@@ -211,11 +211,26 @@ type tester struct {
 	m     *Model
 	ticks []tick
 	quit  bool
+	// hold keeps commands in held instead of running them, so a test can
+	// look at the model while a backend call is still out.
+	hold bool
+	held []tea.Cmd
 }
 
 func newTester(t *testing.T, b Backend, mod ...func(*Options)) *tester {
 	t.Helper()
-	h := &tester{t: t}
+	return buildTester(t, false, b, mod...)
+}
+
+// heldTester is newTester with every command held, Init's included.
+func heldTester(t *testing.T, b Backend, mod ...func(*Options)) *tester {
+	t.Helper()
+	return buildTester(t, true, b, mod...)
+}
+
+func buildTester(t *testing.T, hold bool, b Backend, mod ...func(*Options)) *tester {
+	t.Helper()
+	h := &tester{t: t, hold: hold}
 	opts := Options{
 		Version:  "v0.1.0",
 		Server:   func() string { return "team.example:2222" },
@@ -238,6 +253,10 @@ func newTester(t *testing.T, b Backend, mod ...func(*Options)) *tester {
 func (h *tester) run(cmd tea.Cmd) {
 	h.t.Helper()
 	if cmd == nil {
+		return
+	}
+	if h.hold {
+		h.held = append(h.held, cmd)
 		return
 	}
 	h.deliver(cmd())
