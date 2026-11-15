@@ -76,7 +76,9 @@ func TestWaitReturnsNextIncoming(t *testing.T) {
 			_, a, b := pair(t)
 			a.ok("dm", "bob")
 			a.ok("send", "@bob", "before the wait")
-			eventually(t, "bob has the dm", func() bool { return b.do("read", "@alice", "--json").code == 0 })
+			// A message that reaches bob's device after the wait starts is new to
+			// it, so the wait must start only once bob holds this one.
+			eventually(t, "bob has the first message", func() bool { return b.hasText("@alice", "before the wait") })
 			w := b.startWait(chat...)
 			pingUntilDone(t, w, func(text string) { a.ok("send", "@bob", text) })
 			r := w.result(t)
