@@ -52,6 +52,16 @@ func pinnedKey(dataDir, addr string) (ssh.PublicKey, error) {
 	return nil, ErrHostKeyUnpinned
 }
 
+// ServerKey implements connector.ServerKeyer: the SHA256 fingerprint of the
+// host key pinned for the account's server, or "" when none is pinned.
+func (c *Client) ServerKey() string {
+	key, err := pinnedKey(c.dataDir, c.addr)
+	if err != nil {
+		return ""
+	}
+	return ssh.FingerprintSHA256(key)
+}
+
 // pinKey records key as the host key of addr. It succeeds when the same key
 // is already pinned and returns ErrHostKeyChanged when a different one is.
 func pinKey(dataDir, addr string, key ssh.PublicKey) error {

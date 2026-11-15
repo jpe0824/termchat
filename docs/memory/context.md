@@ -89,7 +89,15 @@ and wants chat there, reachable by AI agents through a command line.
   parse stops the process from starting, and the client reports only that the
   socket cannot be reached.
 - **A server's host key change needs a manual step on every client**
-  (delete its line from `known_servers`), by design.
+  (delete its line from `known_servers`, then `join` again), by design. `join`
+  replaces the configured account only when it names the same server and the
+  connection is `not_authorised` or `host_key_changed`.
+- **Gaps in a conversation's log are repaired by a sync from the supervise
+  goroutine** (`internal/daemon/gaps.go`): a live event past a gap, a room
+  change's own events (the server never pushes them to the requesting device)
+  and a failed store write all queue one. A removal by `server user remove`
+  in another process is therefore seen by connected members at the next event
+  in that room, not at once.
 - **`wait` is not resumable inside a call.** If the background process stops
   during `wait`, it exits 1; callers rerun it with `--since`. A stalled store
   call inside the background process can hold `wait` for up to the socket

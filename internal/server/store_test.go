@@ -301,7 +301,7 @@ func TestRedeemForExistingHandleAddsKey(t *testing.T) {
 	if _, err := s.RedeemInvite(code, "fp1", []byte("k1")); err != nil {
 		t.Fatal(err)
 	}
-	code2, err := s.CreateInvite("dana", "Other Name", time.Hour)
+	code2, err := s.CreateDeviceInvite("dana", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -823,15 +823,15 @@ func TestRedeemInviteIssuedBeforeRemovalFails(t *testing.T) {
 	if _, err := s.RedeemInvite(code, "fpb", []byte("k")); err != nil {
 		t.Fatal(err)
 	}
-	code2, err := s.CreateInvite("bob", "", time.Hour) // second device
+	code2, err := s.CreateDeviceInvite("bob", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := s.RemovePerson("bob"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.RedeemInvite(code2, "fpb2", []byte("k")); !errors.Is(err, ErrExists) {
-		t.Fatalf("redeem for removed handle: %v, want ErrExists", err)
+	if _, err := s.RedeemInvite(code2, "fpb2", []byte("k")); !errors.Is(err, ErrInviteInvalid) {
+		t.Fatalf("redeem for removed handle: %v, want ErrInviteInvalid", err)
 	}
 	if ok, _ := s.HasKey("fpb2"); ok {
 		t.Fatal("key registered for a removed handle")

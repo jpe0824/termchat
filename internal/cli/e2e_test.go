@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -25,6 +26,11 @@ import (
 // background processes apart.
 var binDir string
 
+// runRoot is this test binary's own directory under /tmp. Every simulated
+// person lives under it, so the stray-process check sees only this run's
+// processes and never another run's.
+var runRoot string
+
 func TestMain(m *testing.M) {
 	code := 0
 	if runtime.GOOS != "windows" {
@@ -34,6 +40,13 @@ func TestMain(m *testing.M) {
 			os.Exit(1)
 		}
 		binDir = dir
+		// Unix socket paths are limited to about 100 bytes.
+		root, err := os.MkdirTemp("/tmp", "tcr")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "mkdir:", err)
+			os.Exit(1)
+		}
+		runRoot = root
 		build := exec.Command("go", "build", "-o", filepath.Join(dir, "termchat"), "../../cmd/termchat")
 		build.Env = append(os.Environ(), "CGO_ENABLED=0")
 		if out, err := build.CombinedOutput(); err != nil {
@@ -43,7 +56,7 @@ func TestMain(m *testing.M) {
 	}
 	code = m.Run()
 	if binDir != "" {
-		if pids := daemonPIDs("tc[0-9]+"); len(pids) > 0 {
+		if pids := strayDaemons(); len(pids) > 0 {
 			fmt.Fprintf(os.Stderr, "background processes outlived the tests: %v\n", pids)
 			for _, pid := range pids {
 				if p, err := os.FindProcess(pid); err == nil {
@@ -53,14 +66,21 @@ func TestMain(m *testing.M) {
 			code = 1
 		}
 		_ = os.RemoveAll(binDir)
+		_ = os.RemoveAll(runRoot)
 	}
 	os.Exit(code)
 }
 
+// strayDaemons lists the background processes of any person of this run.
+func strayDaemons() []int {
+	return daemonPIDs(regexp.QuoteMeta(runRoot) + "/[^/ ]+")
+}
+
 // daemonPIDs lists live "daemon run" processes whose binary is
-// <person dir>/b/termchat, where the person directory name matches dirRE.
+// <person dir>/b/termchat, where the person directory matches dirRE. The match
+// is not anchored because the process may report /tmp as /private/tmp.
 func daemonPIDs(dirRE string) []int {
-	out, _ := exec.Command("pgrep", "-f", "/"+dirRE+"/b/termchat daemon run").Output()
+	out, _ := exec.Command("pgrep", "-f", dirRE+"/b/termchat daemon run").Output()
 	var pids []int
 	for _, f := range strings.Fields(string(out)) {
 		var pid int
@@ -126,7 +146,7 @@ func (s *testServer) start(t *testing.T) {
 type person struct {
 	t    *testing.T
 	bin  string
-	id   string // the person's directory name under /tmp
+	dir  string // the person's directory, under runRoot
 	env  []string
 	run  string
 	cfg  string // config directory
@@ -136,8 +156,7 @@ type person struct {
 func newPerson(t *testing.T) *person {
 	t.Helper()
 	skipOnWindows(t)
-	// Unix socket paths are limited to about 100 bytes.
-	dir, err := os.MkdirTemp("/tmp", "tc")
+	dir, err := os.MkdirTemp(runRoot, "p")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +173,7 @@ func newPerson(t *testing.T) *person {
 	if err := os.WriteFile(bin, src, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	p := &person{t: t, bin: bin, id: filepath.Base(dir), run: filepath.Join(dir, "r"),
+	p := &person{t: t, bin: bin, dir: dir, run: filepath.Join(dir, "r"),
 		cfg: filepath.Join(dir, "c"), data: filepath.Join(dir, "d")}
 	p.env = append(os.Environ(),
 		"TERMCHAT_CONFIG_DIR="+filepath.Join(dir, "c"),
@@ -181,7 +200,7 @@ func newPerson(t *testing.T) *person {
 }
 
 // daemons returns the pids of this person's background processes.
-func (p *person) daemons() []int { return daemonPIDs(p.id) }
+func (p *person) daemons() []int { return daemonPIDs(regexp.QuoteMeta(p.dir)) }
 
 type result struct {
 	out, err string

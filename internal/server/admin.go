@@ -37,7 +37,7 @@ func InitFirstAdmin(st *Store, handle, displayName string) (string, error) {
 	if err := st.CreatePerson(model.Person{Handle: h, DisplayName: displayName, Admin: true}); err != nil {
 		return "", err
 	}
-	return st.CreateInvite(h, displayName, InviteTTL)
+	return st.CreateDeviceInvite(h, InviteTTL)
 }
 
 // InviteHandle issues an invite for handle. A handle with no account gets one
@@ -54,7 +54,11 @@ func InviteHandle(st *Store, handle, displayName string) (code string, existing 
 	case !errors.Is(perr, ErrNotFound):
 		return "", false, perr
 	}
-	code, err = st.CreateInvite(h, displayName, InviteTTL)
+	if existing {
+		code, err = st.CreateDeviceInvite(h, InviteTTL)
+	} else {
+		code, err = st.CreateInvite(h, displayName, InviteTTL)
+	}
 	return code, existing, err
 }
 

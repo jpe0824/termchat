@@ -46,9 +46,9 @@ func (e *env) person(t *testing.T, handle string, admin bool) {
 // started.
 func (e *env) joined(t *testing.T, handle string) (*Client, string) {
 	t.Helper()
-	code, err := e.h.Store.CreateInvite(handle, handle, server.InviteTTL)
+	code, err := e.h.Store.CreateDeviceInvite(handle, server.InviteTTL)
 	if err != nil {
-		t.Fatalf("CreateInvite: %v", err)
+		t.Fatalf("CreateDeviceInvite: %v", err)
 	}
 	dir := t.TempDir()
 	acct, err := Join(context.Background(), e.addr, code, dir)

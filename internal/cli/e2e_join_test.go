@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"golang.org/x/crypto/ssh"
+
 	"github.com/jpe0824/termchat/internal/server"
 )
 
@@ -39,8 +41,10 @@ func TestStatusReportsAccountAndState(t *testing.T) {
 	p := newPerson(t)
 	s.joinAs(t, p, "alice", "Alice")
 
+	fp := ssh.FingerprintSHA256(s.Server.HostKey())
 	got := p.jsonOf("status")
-	want := map[string]any{"account": "alice", "handle": "alice", "state": "connected", "pending": float64(0), "syncing": false}
+	want := map[string]any{"account": "alice", "handle": "alice", "state": "connected", "pending": float64(0), "syncing": false,
+		"server_key": fp}
 	m := got.(map[string]any)
 	if len(m) != len(want) {
 		t.Fatalf("status keys = %v, want %v", m, want)
@@ -50,7 +54,7 @@ func TestStatusReportsAccountAndState(t *testing.T) {
 			t.Fatalf("status %s = %v, want %v", k, m[k], v)
 		}
 	}
-	want2 := "account  alice\nhandle   @alice\nstate    connected\npending  0\nsyncing  no\n"
+	want2 := "account     alice\nhandle      @alice\nstate       connected\npending     0\nsyncing     no\nserver key  " + fp + "\n"
 	if table := p.tableOK("status", "--account", "alice"); table != want2 {
 		t.Fatalf("status table:\n%s\nwant:\n%s", table, want2)
 	}
@@ -65,7 +69,8 @@ func TestJoinTableOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	b.ok("daemon", "start")
-	if out := b.tableOK("join", s.addr, "--invite", code); out != "joined "+s.addr+" as @bob\n" {
+	want := "joined " + s.addr + " as @bob\nserver key " + ssh.FingerprintSHA256(s.Server.HostKey()) + "\n"
+	if out := b.tableOK("join", s.addr, "--invite", code); out != want {
 		t.Fatalf("join table = %q", out)
 	}
 }
@@ -129,4 +134,45 @@ func TestAccountFlagMustMatch(t *testing.T) {
 	s.joinAs(t, p, "alice", "Alice")
 	p.do("status", "--account", "carol").fail(t, 2, `unknown account "carol"; the configured account is "alice"`)
 	p.ok("status", "--account", "alice")
+}
+
+// stateOf reads the person's connection state from status.
+func stateOf(p *person) string {
+	var st struct{ State string }
+	r := p.do("status", "--json")
+	if r.code != 0 || json.Unmarshal([]byte(r.out), &st) != nil {
+		return ""
+	}
+	return st.State
+}
+
+// A device whose key was revoked joins again with a new invite, in place of
+// the account it had, without anyone editing config.toml.
+func TestRevokedDeviceJoinsAgain(t *testing.T) {
+	s := startServer(t)
+	a, b := newPerson(t), newPerson(t)
+	s.joinAs(t, a, "alice", "Alice")
+	s.joinAs(t, b, "bob", "Bob")
+	keys, err := s.Store.Keys("bob")
+	if err != nil || len(keys) != 1 {
+		t.Fatalf("Keys(bob) = %v, %v", keys, err)
+	}
+	if err := s.Store.RemoveKey(keys[0].Fingerprint); err != nil {
+		t.Fatal(err)
+	}
+	s.Server.Kick(keys[0].Fingerprint)
+	eventually(t, "bob not_authorised", func() bool { return stateOf(b) == "not_authorised" })
+
+	// Joining another server is still refused.
+	b.do("join", "127.0.0.1:1", "--invite", "AAAAAAAAAA").fail(t, 1, "invalid request: an account is already configured")
+
+	code, existing, err := server.InviteHandle(s.Store, "bob", "")
+	if err != nil || !existing {
+		t.Fatalf("InviteHandle = %v, existing %v", err, existing)
+	}
+	b.ok("join", s.addr, "--invite", code)
+	eventually(t, "bob connected again", func() bool { return stateOf(b) == "connected" })
+	if keys, _ := s.Store.Keys("bob"); len(keys) != 1 {
+		t.Fatalf("bob has %d keys, want 1", len(keys))
+	}
 }

@@ -87,11 +87,15 @@ func (s *supervisor) forward(ctx context.Context, ch <-chan ipc.Event) bool {
 	}
 }
 
-// drain is first and the events waiting behind it on ch, without waiting
-// for more; open is false when ch turned out closed.
+// maxBatch bounds one batch, so a long run of waiting events reaches the
+// update loop as several messages rather than one of any size.
+const maxBatch = 256
+
+// drain is first and up to maxBatch-1 events waiting behind it on ch,
+// without waiting for more; open is false when ch turned out closed.
 func drain(ch <-chan ipc.Event, first ipc.Event) (evs []ipc.Event, open bool) {
 	evs = []ipc.Event{first}
-	for {
+	for len(evs) < maxBatch {
 		select {
 		case ev, ok := <-ch:
 			if !ok {
@@ -102,6 +106,7 @@ func drain(ch <-chan ipc.Event, first ipc.Event) (evs []ipc.Event, open bool) {
 			return evs, true
 		}
 	}
+	return evs, true
 }
 
 // dial connects again; on failure it reports the process down and waits.

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -15,7 +17,6 @@ import (
 	"github.com/jpe0824/termchat/internal/ipc"
 	"github.com/jpe0824/termchat/internal/model"
 	"github.com/jpe0824/termchat/internal/sanitize"
-	"github.com/jpe0824/termchat/internal/store"
 )
 
 // isTerminal reports whether w is a terminal. Tests replace it.
@@ -36,12 +37,39 @@ func wantJSON(cmd *cobra.Command) bool {
 func emit(cmd *cobra.Command, v any, text func(w io.Writer) error) error {
 	out := cmd.OutOrStdout()
 	if wantJSON(cmd) {
-		enc := json.NewEncoder(out)
+		var buf bytes.Buffer
+		enc := json.NewEncoder(&buf)
 		enc.SetEscapeHTML(false)
-		return enc.Encode(v)
+		if err := enc.Encode(v); err != nil {
+			return err
+		}
+		_, err := out.Write(escapeC1(buf.Bytes()))
+		return err
 	}
 	return text(out)
 }
+
+// escapeC1 rewrites DEL and the C1 controls (U+007F to U+009F), which
+// encoding/json leaves raw, as \u00XX escapes. JSON's structure is ASCII
+// below DEL, so these runes can only be inside strings, where the escape
+// decodes to the same rune; a terminal that acts on 8-bit controls then never
+// receives one from another person's text.
+func escapeC1(b []byte) []byte {
+	if !bytes.ContainsFunc(b, isC1) {
+		return b
+	}
+	out := make([]byte, 0, len(b)+16)
+	for _, r := range string(b) {
+		if isC1(r) {
+			out = fmt.Appendf(out, `\u%04x`, r)
+			continue
+		}
+		out = utf8.AppendRune(out, r)
+	}
+	return out
+}
+
+func isC1(r rune) bool { return r >= 0x7f && r <= 0x9f }
 
 func table(out io.Writer) *tabwriter.Writer { return tabwriter.NewWriter(out, 0, 0, 2, ' ', 0) }
 
@@ -65,10 +93,13 @@ type statusJSON struct {
 	State   string `json:"state"`
 	Pending int    `json:"pending"`
 	Syncing bool   `json:"syncing"`
+	// ServerKey is the pinned server key's fingerprint, as serve prints it.
+	ServerKey string `json:"server_key"`
 }
 
 func statusOf(s ipc.Status) statusJSON {
-	return statusJSON{Account: s.Account, Handle: s.Me.Handle, State: string(s.Conn), Pending: s.Pending, Syncing: s.Syncing}
+	return statusJSON{Account: s.Account, Handle: s.Me.Handle, State: string(s.Conn), Pending: s.Pending, Syncing: s.Syncing,
+		ServerKey: s.ServerKey}
 }
 
 type convJSON struct {
@@ -129,7 +160,7 @@ type msgJSON struct {
 
 // msgsOf converts messages for output. failures maps the ids of the user's
 // failed outbox items to the reason; it may be nil.
-func msgsOf(ms []store.Message, failures map[string]string) []msgJSON {
+func msgsOf(ms []ipc.Message, failures map[string]string) []msgJSON {
 	out := make([]msgJSON, 0, len(ms))
 	for _, m := range ms {
 		j := msgJSON{
@@ -140,7 +171,7 @@ func msgsOf(ms []store.Message, failures map[string]string) []msgJSON {
 		if j.Mentions == nil {
 			j.Mentions = []string{}
 		}
-		if m.Status == store.StatusFailed {
+		if m.Status == ipc.MsgFailed {
 			j.Error = failures[m.MsgID]
 		}
 		out = append(out, j)
@@ -160,9 +191,9 @@ func writeMessage(w io.Writer, m msgJSON, prefix string) {
 		tags = append(tags, "(edited)")
 	}
 	switch m.Status {
-	case store.StatusSending:
+	case ipc.MsgSending:
 		tags = append(tags, "(sending)")
-	case store.StatusFailed:
+	case ipc.MsgFailed:
 		tags = append(tags, "(failed: "+cell(m.Error)+")")
 	}
 	seq := "-"

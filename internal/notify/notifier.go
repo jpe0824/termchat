@@ -125,6 +125,7 @@ func (n *Notifier) start(sem chan struct{}, what string, build func() *command) 
 // and environment values cannot hold NUL, and a notification's fields are
 // displayed or exported as plain text.
 func clean(p Notification) Notification {
+	p.ConvID = sanitize.Text(p.ConvID)
 	p.ConvName = sanitize.Text(p.ConvName)
 	p.Sender = sanitize.Text(p.Sender)
 	p.Text = sanitize.Text(p.Text)

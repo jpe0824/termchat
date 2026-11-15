@@ -263,12 +263,15 @@ func (d *daemon) account() (*account, error) {
 func (d *daemon) Stop() { d.stop() }
 
 // Join implements ipc.Backend: it registers with the server, saves the
-// account and brings it up without a restart.
+// account and brings it up without a restart. A configured account is
+// replaced only when the join names its server and its connection is stuck in
+// not_authorised or host_key_changed, which only a new join can leave.
 func (d *daemon) Join(ctx context.Context, server, code string) error {
 	d.mu.Lock()
-	if d.acct != nil || d.joining || len(d.cfg.Accounts) > 0 {
+	old, err := d.replaceable(server)
+	if err != nil {
 		d.mu.Unlock()
-		return fmt.Errorf("%w: an account is already configured", ipc.ErrInvalid)
+		return err
 	}
 	d.joining = true
 	d.mu.Unlock()
@@ -297,13 +300,42 @@ func (d *daemon) Join(ctx context.Context, server, code string) error {
 		d.mu.Unlock()
 		return fmt.Errorf("%w: shutting down", ipc.ErrNotConnected)
 	}
-	d.cfg.Accounts = append(d.cfg.Accounts, acct)
+	prev := d.cfg.Accounts
+	d.cfg.Accounts = []config.Account{acct}
 	if err := d.cfg.Save(); err != nil {
-		d.cfg.Accounts = d.cfg.Accounts[:len(d.cfg.Accounts)-1]
+		d.cfg.Accounts = prev
 		d.mu.Unlock()
 		return fmt.Errorf("save config: %w", err)
 	}
+	d.acct = nil
 	d.mu.Unlock()
+	if old != nil {
+		old.shutdown()
+		d.log.Info("replaced account", "account", old.name)
+	}
 	d.log.Info("joined server", "account", acct.Name)
 	return d.bringUp(acct)
+}
+
+// replaceable reports whether a join to server may proceed, and returns the
+// running account it would replace, if any. Callers hold d.mu.
+func (d *daemon) replaceable(server string) (*account, error) {
+	refuse := fmt.Errorf("%w: an account is already configured", ipc.ErrInvalid)
+	if d.joining {
+		return nil, refuse
+	}
+	if d.acct == nil {
+		if len(d.cfg.Accounts) > 0 {
+			return nil, refuse
+		}
+		return nil, nil
+	}
+	if len(d.cfg.Accounts) != 1 || termchat.ServerAddr(d.cfg.Accounts[0].Server) != termchat.ServerAddr(server) {
+		return nil, refuse
+	}
+	switch d.acct.conn.State() {
+	case connector.StateNotAuthorised, connector.StateHostKeyChanged:
+		return d.acct, nil
+	}
+	return nil, refuse
 }

@@ -44,6 +44,7 @@ func (l *ledger) handleUpdate(u connector.Update) {
 	case u.Event != nil:
 		ev := *u.Event
 		l.nt.consider(l.ingest([]model.Event{ev}), livePush)
+		l.checkGap(ev.ConvID, ev.Seq)
 		if l.unknown(ev.Actor, ev.Target) {
 			signal(l.peopleCh)
 		}
@@ -81,10 +82,11 @@ func (l *ledger) markGone(conv string) {
 	l.emitRemoved(conv)
 }
 
-// supervise reacts to connection changes and people refresh requests.
+// supervise reacts to connection changes, gaps in a conversation's log and
+// people refresh requests.
 func (a *account) supervise() {
 	signal(a.stateCh) // the connector may already be connected
-	var retry <-chan time.Time
+	var retry, repairRetry <-chan time.Time
 	for {
 		select {
 		case <-a.ctx.Done():
@@ -95,6 +97,14 @@ func (a *account) supervise() {
 		case <-a.stateCh:
 			if !a.onState() {
 				retry = a.d.clock.After(resyncAfter)
+			}
+		case <-repairRetry:
+			repairRetry = nil
+			signal(a.gapCh)
+		case <-a.gapCh:
+			if a.repairGaps() && repairRetry == nil {
+				repairRetry = a.d.clock.After(resyncAfter)
+				a.log.Warn("gap repair incomplete; retrying", "after", resyncAfter)
 			}
 		case <-a.peopleCh:
 			if err := a.refreshPeople(); err != nil {
@@ -299,7 +309,7 @@ func (l *ledger) applyIn(evs []model.Event, size int) (accepted, added []model.E
 			if err := put(ev); err != nil {
 				l.log.Warn("skipping event the store rejected", "conv", ev.ConvID, "seq", ev.Seq, "kind", ev.Kind, "err", err)
 				// Only a malformed event is recorded as skipped; a storage
-				// failure leaves the gap so the next sync fetches it again.
+				// failure leaves the gap, which checkGap queues for a sync.
 				if errors.Is(err, store.ErrInvalid) && ev.ConvID != "" && ev.Seq >= 1 {
 					if err := l.write(func() error { return l.st.Skip(ev.ConvID, ev.Seq) }); err != nil {
 						l.log.Error("record skipped event", "conv", ev.ConvID, "seq", ev.Seq, "err", err)

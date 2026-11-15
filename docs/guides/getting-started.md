@@ -13,8 +13,11 @@ termchat ([README](../../README.md#install)) and run:
 termchat join chat.internal:7420 --invite 4N5FHFRB65
 ```
 
-In a terminal it prints `joined chat.internal:7420 as @bob`; piped, it prints
-the status as JSON. The address is `host:port`; with no port, 7420 is used.
+In a terminal it prints `joined chat.internal:7420 as @bob` and the server's
+key fingerprint, `server key SHA256:...`; piped, it prints the status as JSON.
+Check the fingerprint against the one the server's operator sees (`termchat
+serve` prints it as `host key SHA256:...`). The address is `host:port`; with
+no port, 7420 is used.
 
 `join` creates a key for this device (in your data directory, mode 0600),
 records the server's host key so later changes are noticed, registers the key
@@ -58,9 +61,11 @@ termchat daemon stop     # stop it; exits 0 if none is running
 ```
 
 `status` reports one of `connecting`, `connected`, `offline`, `not_authorised`
-(your key was removed), `host_key_changed` or `version_mismatch`. Messages
-sent while offline wait in the outbox and are delivered when the connection
-returns.
+(your key was removed), `host_key_changed` or `version_mismatch`, and the
+pinned `server key`. Messages sent while offline wait in the outbox and are
+delivered when the connection returns. After `not_authorised` or
+`host_key_changed`, join the same server again with a new invite (see the
+[server guide](server.md#a-device-that-was-revoked)).
 
 Stop the background process after upgrading termchat, and after editing
 `config.toml` (it reads the file at start). The next command starts a new one.

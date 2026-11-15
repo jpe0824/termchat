@@ -135,6 +135,7 @@ func TestPendingRetriesAreBounded(t *testing.T) {
 		pushUnknown(e, "d9", fmt.Sprintf("m%d", i), fmt.Sprintf("message %d", i), int64(i))
 	}
 	waitLogged(t, logs, "cannot evaluate", 70)
+	waitLogged(t, logs, "dropped pending", 6)
 	if n := logs.count("dropped pending"); n != 6 {
 		t.Fatalf("%d dropped lines, want 6", n)
 	}

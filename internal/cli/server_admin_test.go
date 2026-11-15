@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
-	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -20,8 +19,8 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/jpe0824/termchat/internal/model"
-	"github.com/jpe0824/termchat/internal/proto"
 	"github.com/jpe0824/termchat/internal/server"
+	"github.com/jpe0824/termchat/internal/testutil"
 )
 
 type syncBuf struct {
@@ -450,51 +449,14 @@ func TestInitThenServeThenRedeem(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client, err := ssh.Dial("tcp", addr, &ssh.ClientConfig{
-		User: "termchat",
-		Auth: []ssh.AuthMethod{ssh.PublicKeys(key)},
-		HostKeyCallback: func(_ string, _ net.Addr, k ssh.PublicKey) error {
-			if got := ssh.FingerprintSHA256(k); got != hostKey {
-				return errors.New("host key " + got + " differs from the printed " + hostKey)
-			}
-			return nil
-		},
-		Timeout: 5 * time.Second,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer client.Close()
-	ch, reqs, err := client.OpenChannel("termchat", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	go ssh.DiscardRequests(reqs)
-	c := proto.NewCodec(ch)
-	roundTrip := func(id uint64, typ string, payload any) proto.Frame {
-		b, _ := json.Marshal(payload)
-		if err := c.Write(proto.Frame{ID: id, Type: typ, Payload: b}); err != nil {
-			t.Fatal(err)
+	p := testutil.RedeemAt(t, addr, func(_ string, _ net.Addr, k ssh.PublicKey) error {
+		if got := ssh.FingerprintSHA256(k); got != hostKey {
+			return errors.New("host key " + got + " differs from the printed " + hostKey)
 		}
-		f, err := c.Read()
-		if err != nil {
-			t.Fatal(err)
-		}
-		return f
-	}
-	if f := roundTrip(1, proto.TypeHello, proto.HelloReq{Version: proto.Version}); f.Error != nil {
-		t.Fatalf("hello: %v", f.Error)
-	}
-	f := roundTrip(2, proto.TypeInviteRedeem, proto.InviteRedeemReq{Code: code})
-	if f.Error != nil {
-		t.Fatalf("redeem: %v", f.Error)
-	}
-	var res proto.InviteRedeemRes
-	if err := json.Unmarshal(f.Payload, &res); err != nil {
-		t.Fatal(err)
-	}
-	if res.Person.Handle != "ann" || !res.Person.Admin {
-		t.Fatalf("redeemed %+v, want admin ann", res.Person)
+		return nil
+	}, key, code)
+	if p.Handle != "ann" || !p.Admin {
+		t.Fatalf("redeemed %+v, want admin ann", p)
 	}
 
 	// Admin commands work against the running server's directory.

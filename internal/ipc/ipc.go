@@ -81,6 +81,9 @@ type Status struct {
 	// Syncing is true while the catch-up after connecting or the history
 	// backfill is running.
 	Syncing bool
+	// ServerKey is the fingerprint of the server key the account pinned when
+	// it joined, "" when the network pins none.
+	ServerKey string
 }
 
 // Chats is the conversation list: the user's own conversations and the open

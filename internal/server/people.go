@@ -290,10 +290,21 @@ func newInviteCode() (string, error) {
 	return inviteEncoding.EncodeToString(b[:])[:10], nil
 }
 
-// CreateInvite issues a single-use code that expires after ttl. Redeeming it
-// for an existing handle adds a device to that person.
+// Invite kinds. A person invite creates its handle and fails once the handle
+// exists; a device invite adds a key to its handle and fails unless the handle
+// exists. The kind is checked when the code is redeemed, because a handle can
+// be taken or removed while an invite waits. An invite with any other kind,
+// including those stored before kinds were recorded, is never redeemable.
+const (
+	invitePerson = "person"
+	inviteDevice = "device"
+)
+
+// CreateInvite issues a single-use code that creates the person handle when
+// redeemed before ttl passes. A handle that exists or was removed is refused
+// with ErrExists.
 func (s *Store) CreateInvite(handle, displayName string, ttl time.Duration) (string, error) {
-	return s.createInvite(handle, displayName, false, "", ttl)
+	return s.createInvite(handle, displayName, invitePerson, false, "", ttl)
 }
 
 // CreateAgentInvite is CreateInvite for an agent identity owned by owner.
@@ -302,10 +313,17 @@ func (s *Store) CreateAgentInvite(handle, displayName, owner string, ttl time.Du
 	if err != nil {
 		return "", err
 	}
-	return s.createInvite(handle, displayName, true, o, ttl)
+	return s.createInvite(handle, displayName, invitePerson, true, o, ttl)
 }
 
-func (s *Store) createInvite(handle, displayName string, agent bool, owner string, ttl time.Duration) (string, error) {
+// CreateDeviceInvite issues a single-use code that adds the redeeming key to
+// the existing person handle. A handle with no account is refused with
+// ErrNotFound.
+func (s *Store) CreateDeviceInvite(handle string, ttl time.Duration) (string, error) {
+	return s.createInvite(handle, "", inviteDevice, false, "", ttl)
+}
+
+func (s *Store) createInvite(handle, displayName, kind string, agent bool, owner string, ttl time.Duration) (string, error) {
 	h, err := cleanName(handle)
 	if err != nil {
 		return "", err
@@ -317,28 +335,39 @@ func (s *Store) createInvite(handle, displayName string, agent bool, owner strin
 	if reserved {
 		return "", fmt.Errorf("%w: handle %s was removed", ErrExists, h)
 	}
+	switch _, err := personByHandle(s.db, h); {
+	case err == nil && kind == invitePerson:
+		return "", fmt.Errorf("%w: person %s", ErrExists, h)
+	case errors.Is(err, ErrNotFound) && kind == inviteDevice:
+		return "", err
+	case err != nil && !errors.Is(err, ErrNotFound):
+		return "", err
+	}
 	code, err := newInviteCode()
 	if err != nil {
 		return "", err
 	}
-	_, err = s.db.Exec(`INSERT INTO invites (code, handle, display_name, agent, owner, expires_at)
-		VALUES (?, ?, ?, ?, ?, ?)`, code, h, displayName, boolInt(agent), owner, toMS(s.now().Add(ttl)))
+	_, err = s.db.Exec(`INSERT INTO invites (code, handle, display_name, agent, owner, kind, expires_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`, code, h, displayName, boolInt(agent), owner, kind, toMS(s.now().Add(ttl)))
 	return code, err
 }
 
-// RedeemInvite consumes a code and registers the key. A new handle becomes a
-// person; an existing handle just gains the key. A fingerprint that is already
-// registered fails with ErrExists and leaves the invite unused.
+// RedeemInvite consumes a code and registers the key, either as a new person
+// or as another device of an existing one, as the invite's kind says. An
+// invite whose kind no longer matches its handle fails with ErrInviteInvalid.
+// A fingerprint that is already registered fails with ErrExists. Both leave
+// the invite unused.
 func (s *Store) RedeemInvite(code, fingerprint string, pub []byte) (model.Person, error) {
 	code = strings.ToUpper(strings.TrimSpace(code))
 	var person model.Person
 	err := s.write(func(tx *sql.Tx) error {
 		var inv model.Person
 		var agent int
+		var kind string
 		var expires int64
 		var used sql.NullInt64
-		err := tx.QueryRow(`SELECT handle, display_name, agent, owner, expires_at, used_at
-			FROM invites WHERE code = ?`, code).Scan(&inv.Handle, &inv.DisplayName, &agent, &inv.Owner, &expires, &used)
+		err := tx.QueryRow(`SELECT handle, display_name, agent, owner, kind, expires_at, used_at
+			FROM invites WHERE code = ?`, code).Scan(&inv.Handle, &inv.DisplayName, &agent, &inv.Owner, &kind, &expires, &used)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrInviteInvalid
 		}
@@ -351,10 +380,20 @@ func (s *Store) RedeemInvite(code, fingerprint string, pub []byte) (model.Person
 		}
 		inv.Agent = agent != 0
 
-		person, err = personByHandle(tx, inv.Handle)
-		if errors.Is(err, ErrNotFound) {
+		switch kind {
+		case inviteDevice:
+			person, err = personByHandle(tx, inv.Handle)
+			if errors.Is(err, ErrNotFound) {
+				return ErrInviteInvalid
+			}
+		case invitePerson:
 			person = inv
 			err = insertPerson(tx, person, now)
+			if errors.Is(err, ErrExists) {
+				return ErrInviteInvalid
+			}
+		default:
+			return ErrInviteInvalid
 		}
 		if err != nil {
 			return err

@@ -24,6 +24,22 @@ func TestDrainTakesWhatIsWaitingWithoutWaiting(t *testing.T) {
 	}
 }
 
+// One batch holds at most maxBatch events; the rest wait on the channel for
+// the next.
+func TestDrainStopsAtTheBatchBound(t *testing.T) {
+	ch := make(chan ipc.Event, 300)
+	for range 300 {
+		ch <- ipc.Event{Kind: ipc.KindConv}
+	}
+	evs, open := drain(ch, ipc.Event{Kind: ipc.KindMessage})
+	if len(evs) != 256 || !open {
+		t.Fatalf("drained %d open %v, want 256 and open", len(evs), open)
+	}
+	if left := len(ch); left != 300-255 {
+		t.Fatalf("%d left on the channel, want %d", left, 300-255)
+	}
+}
+
 // A batch of events re-reads what they touch once, and writes their
 // notifications in the order they came.
 func TestEventBatchRereadsOnceAndKeepsNotificationOrder(t *testing.T) {

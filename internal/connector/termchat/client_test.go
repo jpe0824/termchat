@@ -16,6 +16,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/jpe0824/termchat/internal/config"
 	"github.com/jpe0824/termchat/internal/connector"
 	"github.com/jpe0824/termchat/internal/model"
 	"github.com/jpe0824/termchat/internal/proto"
@@ -39,7 +40,7 @@ func assertMode0600(t *testing.T, path string) {
 func TestJoinGeneratesKeyAndPinsHost(t *testing.T) {
 	e := newEnv(t)
 	e.person(t, "ann", false)
-	code, _ := e.h.Store.CreateInvite("ann", "Ann", server.InviteTTL)
+	code, _ := e.h.Store.CreateDeviceInvite("ann", server.InviteTTL)
 	dir := t.TempDir()
 
 	acct, err := Join(context.Background(), e.addr, code, dir)
@@ -78,7 +79,7 @@ func TestJoinGeneratesKeyAndPinsHost(t *testing.T) {
 func TestJoinReusesKeyAndDoesNotSpendInviteWhenRegistered(t *testing.T) {
 	e := newEnv(t)
 	e.person(t, "ann", false)
-	first, _ := e.h.Store.CreateInvite("ann", "Ann", server.InviteTTL)
+	first, _ := e.h.Store.CreateDeviceInvite("ann", server.InviteTTL)
 	dir := t.TempDir()
 	if _, err := Join(context.Background(), e.addr, first, dir); err != nil {
 		t.Fatal(err)
@@ -86,7 +87,7 @@ func TestJoinReusesKeyAndDoesNotSpendInviteWhenRegistered(t *testing.T) {
 	keyFile := keyPath(dir, e.addr)
 	before, _ := os.ReadFile(keyFile)
 
-	spare, _ := e.h.Store.CreateInvite("ann", "Ann", server.InviteTTL)
+	spare, _ := e.h.Store.CreateDeviceInvite("ann", server.InviteTTL)
 	acct, err := Join(context.Background(), e.addr, spare, dir)
 	if err != nil || acct.Handle != "ann" {
 		t.Fatalf("second Join = %+v, %v", acct, err)
@@ -104,7 +105,7 @@ func TestJoinReusesKeyAndDoesNotSpendInviteWhenRegistered(t *testing.T) {
 func TestJoinWithBadOrExpiredCode(t *testing.T) {
 	e := newEnv(t)
 	e.person(t, "ann", false)
-	expired, _ := e.h.Store.CreateInvite("ann", "Ann", -time.Hour)
+	expired, _ := e.h.Store.CreateDeviceInvite("ann", -time.Hour)
 	for name, code := range map[string]string{"unknown": "NOSUCHCODE", "expired": expired} {
 		_, err := Join(context.Background(), e.addr, code, t.TempDir())
 		if !errors.Is(err, connector.ErrNotAuthorised) {
@@ -119,7 +120,7 @@ func TestJoinWithBadOrExpiredCode(t *testing.T) {
 func TestJoinRefusesDifferentPinnedHostKey(t *testing.T) {
 	e := newEnv(t)
 	e.person(t, "ann", false)
-	code, _ := e.h.Store.CreateInvite("ann", "Ann", server.InviteTTL)
+	code, _ := e.h.Store.CreateDeviceInvite("ann", server.InviteTTL)
 	dir := t.TempDir()
 	if _, err := Join(context.Background(), e.addr, code, dir); err != nil {
 		t.Fatal(err)
@@ -782,5 +783,23 @@ func TestHelloReturningPersonSetsMe(t *testing.T) {
 	}
 	if caps := c.Caps(); !(caps.Edit && caps.Delete && caps.Rooms && caps.Agents) {
 		t.Fatalf("Caps = %+v", caps)
+	}
+}
+
+func TestServerKeyIsThePinnedFingerprint(t *testing.T) {
+	e := newEnv(t)
+	e.person(t, "ann", false)
+	dir := t.TempDir()
+	if got := New(config.Account{Name: "ann", Server: e.addr, Handle: "ann"}, dir).ServerKey(); got != "" {
+		t.Fatalf("ServerKey before join = %q, want empty", got)
+	}
+	code, _ := e.h.Store.CreateDeviceInvite("ann", server.InviteTTL)
+	acct, err := Join(context.Background(), e.addr, code, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := ssh.FingerprintSHA256(e.h.Server.HostKey())
+	if got := New(acct, dir).ServerKey(); got != want {
+		t.Fatalf("ServerKey = %q, want %q", got, want)
 	}
 }

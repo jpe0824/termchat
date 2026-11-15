@@ -66,6 +66,7 @@ must work while the TUI is closed.
 | `internal/paths` | Config, data and runtime directories and their environment overrides. |
 | `internal/sanitize` | Making untrusted text safe to print to a terminal. |
 | `internal/testutil` | A harness that starts a real server for end-to-end tests. |
+| `internal/archtest` | A test that reads every Go file's imports and enforces the import rules in `CLAUDE.md`. |
 
 ## The event-log model
 
@@ -80,6 +81,11 @@ edits, and several devices.
   per conversation and the server sends what is missing. History older than the
   first 50 events is fetched by scrolling or by the background backfill, so
   search covers everything and works offline.
+- **Gaps:** a live event that lands past events the device does not hold, a
+  room change whose own events the server did not push back to the device
+  that made it, and an event the local store failed to write each queue a sync
+  of that conversation, run by the background process's supervising goroutine
+  (`internal/daemon/gaps.go`) and retried while the gap remains.
 - **Exactly once:** the client gives every message its own id. The server
   records `(conversation, msg_id)` with a unique constraint, so a retried send
   is recognised and never posted twice.

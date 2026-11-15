@@ -25,7 +25,8 @@ run clients. Start with no termchat data on either.
       an invite code. `termchat serve --data <dir>` prints `listening on ...` and a
       host key fingerprint.
 - [ ] Client on the server machine: `termchat join <address>:7420 --invite <code>`
-      succeeds and `termchat` opens the interface.
+      succeeds, prints `server key SHA256:...` equal to the server's fingerprint,
+      and `termchat` opens the interface.
 - [ ] `termchat server invite <second-handle>` (or `termchat invite` from the
       first client), then on the **second machine**: `termchat join <address>:7420
       --invite <code>` and `termchat`. The first client sees no host-key prompt and
@@ -35,7 +36,8 @@ run clients. Start with no termchat data on either.
 - [ ] Stop the server, send a message from a client (it shows `sending…`), start
       the server, and the message is delivered once.
 - [ ] `termchat server key remove` on the second machine's key: that client
-      shows `not authorised` rather than retrying in a loop.
+      shows `not authorised` rather than retrying in a loop. A new invite for the
+      same handle and `termchat join` on that machine bring it back.
 - [ ] `termchat server backup` then `restore` into an empty directory, serve
       from it, and the clients reconnect without a host-key warning.
 - [ ] The server guide's systemd and Docker steps work on a clean machine.

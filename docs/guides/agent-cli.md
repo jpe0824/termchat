@@ -54,11 +54,13 @@ termchat daemon stop                        # stop it; prints nothing
 ```
 
 `join`, `status` and `daemon start` print this JSON (table: `account`, `handle`,
-`state`, `pending`, `syncing`):
+`state`, `pending`, `syncing`, `server key`):
 
 ```json
-{"account":"ada","handle":"ada","state":"connected","pending":0,"syncing":false}
+{"account":"ada","handle":"ada","state":"connected","pending":0,"syncing":false,"server_key":"SHA256:..."}
 ```
+
+`server_key` is the fingerprint of the server key pinned at `join`.
 
 `state` is `connecting`, `connected`, `offline`, `not_authorised`,
 `host_key_changed` or `version_mismatch`. `pending` counts messages waiting to

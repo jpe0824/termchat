@@ -46,6 +46,9 @@ func OpenStore(dir string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
+	if err := privateFiles(DBPath(dir)); err != nil {
+		return nil, err
+	}
 	dsn := DBPath(dir) +
 		"?_txlock=immediate" +
 		"&_pragma=busy_timeout(5000)" +
@@ -64,6 +67,35 @@ func OpenStore(dir string) (*Store, error) {
 		return nil, err
 	}
 	return &Store{db: db, now: time.Now}, nil
+}
+
+// privateFiles creates the database file 0600 before SQLite opens it, so it is
+// private from its first byte whatever the directory's mode, and narrows any
+// existing database, WAL or shared-memory file. SQLite creates the WAL and
+// shared-memory files with the database file's mode.
+func privateFiles(path string) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	for _, p := range []string{path, path + "-wal", path + "-shm"} {
+		fi, err := os.Stat(p)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if fi.Mode().Perm()&0o077 != 0 {
+			if err := os.Chmod(p, 0o600); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // Close releases the database.

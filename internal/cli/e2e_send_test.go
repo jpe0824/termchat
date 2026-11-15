@@ -101,7 +101,7 @@ func TestSendReportsFailureNotSilence(t *testing.T) {
 	if m := a.jsonOf("status").(map[string]any); m["pending"] != float64(1) {
 		t.Fatalf("status = %v, want 1 pending", m)
 	}
-	if out := a.tableOK("status"); !strings.Contains(out, "pending  1\n") {
+	if out := a.tableOK("status"); !strings.Contains(out, "pending     1\n") {
 		t.Fatalf("status table = %q", out)
 	}
 	own := a.messages("read", "@bob")

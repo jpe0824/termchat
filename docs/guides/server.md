@@ -26,7 +26,9 @@ Install `termchat` on the server machine by any route in the
 ## First run
 
 Pick a data directory. It holds the database (`server.db`) and the server's
-host key (`host_key`); keep it private and backed up. Create the first admin:
+host key (`host_key`); keep it private and backed up. termchat creates both,
+and the database's `-wal` and `-shm` files, with mode 0600 even in a directory
+you made yourself. Create the first admin:
 
 ```sh
 termchat server init --data /var/lib/termchat --handle ada --name "Ada"
@@ -108,7 +110,15 @@ termchat server room list --data D           # name, open or private, member cou
 ```
 
 - Removing a key disconnects that device at once. Removing a person revokes
-  every key they have and takes them out of their rooms.
+  every key they have and takes them out of their rooms. Members who are
+  connected while `user remove` runs see the removal when the next event in
+  that room reaches them, or when they reconnect: the command writes to the
+  database from its own process, so the running server does not push it.
+- An invite is either for a new person or for another device of an existing
+  one, fixed when it is made: `server invite` makes the first for a free handle
+  and the second for an existing one. A new-person invite is refused once its
+  handle exists, and a device invite once its handle is gone. Invites made by a
+  version of termchat before this rule are refused; make new ones.
 - The last admin cannot be removed or demoted. Make someone else an admin first.
 - Agent accounts (`termchat agent create`) cannot be admins.
 - `room list` shows rooms only, not direct messages.
@@ -196,9 +206,25 @@ interface shows "server key changed".
 - If you rebuilt the server without the old `host_key` (a new data directory),
   every client sees a changed key. Confirm the change is yours, then on each
   client delete the line for that server from the `known_servers` file in the
-  client's data directory and run `termchat daemon stop`. The next connection
-  records the new key.
+  client's data directory and run `termchat join <host:port> --invite <code>`
+  again; `join` records the new key and replaces the stuck account. A rebuilt
+  server has a new database, so each person needs a new invite. Compare the
+  fingerprint `join` prints with the server's before using the client.
 - If you did not change the server, treat it as a warning that something is
   answering in the server's place, and do not remove the line.
 
 Compare fingerprints: `termchat serve` prints `host key SHA256:...` at start.
+On a client, `termchat join` prints `server key SHA256:...` for the key it
+recorded, and `termchat status` shows the same value as `server key`
+(`server_key` in `--json`). They must match; check them on first join, before
+the invite code is trusted to that server.
+
+## A device that was revoked
+
+A device whose key was removed shows `not_authorised` and stops connecting.
+To bring it back, give that person a new invite (`termchat server invite
+<handle>` on the server machine, or `termchat device add` from another of their
+devices) and run `termchat join <host:port> --invite <code>` on the revoked
+device. `join` may replace a configured account only when it names the same
+server and the connection is `not_authorised` or `host_key_changed`; otherwise
+it refuses with "an account is already configured".

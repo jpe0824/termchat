@@ -87,6 +87,9 @@ CREATE TABLE reads (
 	// A removed person keeps their row so the handle can never be registered
 	// again; every lookup treats removed_at IS NOT NULL as absent.
 	`ALTER TABLE people ADD COLUMN removed_at INTEGER`,
+	// 'person' or 'device'. Rows that predate the column keep '' and are
+	// never redeemable.
+	`ALTER TABLE invites ADD COLUMN kind TEXT NOT NULL DEFAULT ''`,
 }
 
 // migrate brings db up to the latest schema. It runs in an immediate

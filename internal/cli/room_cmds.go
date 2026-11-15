@@ -7,7 +7,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/jpe0824/termchat/internal/connector"
 	"github.com/jpe0824/termchat/internal/ipc"
 	"github.com/jpe0824/termchat/internal/model"
 )
@@ -25,8 +24,8 @@ func newRoomCmd() *cobra.Command {
 				return err
 			}
 			private, _ := cmd.Flags().GetBool("private")
-			return roomOp(cmd, "", func(model.Conversation) connector.RoomOp {
-				return connector.RoomOp{Kind: connector.RoomCreate, Name: name, Open: !private}
+			return roomOp(cmd, "", func(model.Conversation) ipc.RoomOp {
+				return ipc.RoomOp{Kind: ipc.RoomCreate, Name: name, Open: !private}
 			}, func(r model.Conversation) string { return "created " + convLabel(r, "") + " " + cell(r.ID) })
 		},
 	})
@@ -52,19 +51,19 @@ type roomChangeSpec struct {
 }
 
 var roomChanges = []roomChangeSpec{
-	{"join <room>", "Join an open room", connector.RoomJoin, "",
+	{"join <room>", "Join an open room", ipc.RoomJoin, "",
 		func(r model.Conversation, _ string) string { return "joined " + convLabel(r, "") }},
-	{"leave <room>", "Leave a room", connector.RoomLeave, "",
+	{"leave <room>", "Leave a room", ipc.RoomLeave, "",
 		func(r model.Conversation, _ string) string { return "left " + convLabel(r, "") }},
-	{"invite <room> <handle>", "Invite a person to a room", connector.RoomInvite, "handle",
+	{"invite <room> <handle>", "Invite a person to a room", ipc.RoomInvite, "handle",
 		func(r model.Conversation, arg string) string {
 			return "invited @" + cell(arg) + " to " + convLabel(r, "")
 		}},
-	{"remove <room> <handle>", "Remove a person from a room", connector.RoomRemove, "handle",
+	{"remove <room> <handle>", "Remove a person from a room", ipc.RoomRemove, "handle",
 		func(r model.Conversation, arg string) string {
 			return "removed @" + cell(arg) + " from " + convLabel(r, "")
 		}},
-	{"rename <room> <name>", "Rename a room", connector.RoomRename, "room name",
+	{"rename <room> <name>", "Rename a room", ipc.RoomRename, "room name",
 		func(r model.Conversation, _ string) string { return "renamed to " + convLabel(r, "") }},
 }
 
@@ -85,8 +84,8 @@ func roomChange(spec roomChangeSpec) *cobra.Command {
 					return err
 				}
 			}
-			return roomOp(cmd, args[0], func(conv model.Conversation) connector.RoomOp {
-				op := connector.RoomOp{Kind: spec.kind, Conv: conv.ID}
+			return roomOp(cmd, args[0], func(conv model.Conversation) ipc.RoomOp {
+				op := ipc.RoomOp{Kind: spec.kind, Conv: conv.ID}
 				if spec.arg == "handle" {
 					op.Handle = arg
 				} else {
@@ -101,7 +100,7 @@ func roomChange(spec roomChangeSpec) *cobra.Command {
 // roomOp resolves ref (when set) to a room, runs the operation and prints the
 // resulting room. Fields the server leaves out of its answer are taken from
 // the room as it was resolved.
-func roomOp(cmd *cobra.Command, ref string, op func(model.Conversation) connector.RoomOp,
+func roomOp(cmd *cobra.Command, ref string, op func(model.Conversation) ipc.RoomOp,
 	said func(r model.Conversation) string) error {
 	return withClient(cmd, cmdContext(cmd), func(c *ipc.Client) error {
 		me, err := whoAmI(c)

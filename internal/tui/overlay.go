@@ -242,8 +242,10 @@ func (m *Model) ovMoveKey(c keyCtx) tea.Cmd {
 
 func (m *Model) ovGoKey(keyCtx) tea.Cmd { return m.ovGo() }
 
+// ovBackKey only goes back: ovBack chooses the selection on the step it
+// returns to, which the form's own row count says nothing about.
 func (m *Model) ovBackKey(keyCtx) tea.Cmd {
-	m.ovSelect(func(*overlay, int, int) { m.ovBack() })
+	m.ovBack()
 	return nil
 }
 

@@ -9,13 +9,12 @@ import (
 
 	"github.com/jpe0824/termchat/internal/ipc"
 	"github.com/jpe0824/termchat/internal/model"
-	"github.com/jpe0824/termchat/internal/store"
 )
 
 // printMessages writes messages as a JSON array (one object when single),
 // or as table lines. labels, when set, names each message's conversation.
 // failures maps ids of the user's failed outbox items to their reason.
-func printMessages(cmd *cobra.Command, ms []store.Message, failures, labels map[string]string, single bool) error {
+func printMessages(cmd *cobra.Command, ms []ipc.Message, failures, labels map[string]string, single bool) error {
 	list := msgsOf(ms, failures)
 	var v any = list
 	if single {
@@ -62,7 +61,7 @@ func newReadCmd() *cobra.Command {
 				}
 				var failures map[string]string
 				for _, m := range ms {
-					if m.Status == store.StatusFailed {
+					if m.Status == ipc.MsgFailed {
 						if failures, err = failedReasons(c, conv.ID); err != nil {
 							return err
 						}
@@ -85,7 +84,7 @@ func failedReasons(c *ipc.Client, conv string) (map[string]string, error) {
 	}
 	out := map[string]string{}
 	for _, it := range items {
-		if it.State == store.StatusFailed {
+		if it.State == ipc.MsgFailed {
 			out[it.MsgID] = it.Err
 		}
 	}
@@ -178,7 +177,7 @@ before the chat also works.`,
 				res := struct {
 					MsgID string `json:"msg_id"`
 					State string `json:"state"`
-				}{id, store.StatusSending}
+				}{id, ipc.MsgSending}
 				return emit(cmd, res, func(w io.Writer) error {
 					_, err := fmt.Fprintf(w, "queued %s (%s)\n", cell(id), res.State)
 					return err

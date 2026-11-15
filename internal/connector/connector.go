@@ -89,6 +89,13 @@ var (
 	ErrUnknownOutcome = errors.New("outcome unknown")
 )
 
+// ServerKeyer is implemented by a connector that pins its server's key.
+// ServerKey returns the pinned key's fingerprint in the form the server
+// prints it, or "" when none is pinned.
+type ServerKeyer interface {
+	ServerKey() string
+}
+
 // Connector is one account's connection to a chat network.
 //
 // Updates delivers pushes in the order received and never drops one: when the

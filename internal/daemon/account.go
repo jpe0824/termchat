@@ -71,8 +71,13 @@ type ledger struct {
 	// and sync pages are written in small chunks for the same reason.
 	wmu sync.Mutex
 
+	// serverKey is the pinned server key's fingerprint. Only a join changes
+	// the pin, and a join brings up a new account.
+	serverKey string
+
 	stateCh  chan struct{} // connection state may have changed
 	peopleCh chan struct{} // an event named an unknown handle
+	gapCh    chan struct{} // gaps has conversations to repair
 
 	// mu guards the fields below and the account's that say so.
 	mu       sync.Mutex
@@ -81,6 +86,8 @@ type ledger struct {
 	syncing  bool
 	backfill bool
 	known    map[string]bool
+	// gaps maps each conversation to repair to the Seq it must be held up to.
+	gaps map[string]int64
 }
 
 func newAccount(d *daemon, name string, conn connector.Connector, st *store.Store, own bool) *account {
@@ -88,13 +95,16 @@ func newAccount(d *daemon, name string, conn connector.Connector, st *store.Stor
 	a := &account{
 		ledger: &ledger{
 			name: name, st: st, log: d.log.With("account", name), srv: d.srv,
-			stateCh: make(chan struct{}, 1), peopleCh: make(chan struct{}, 1),
-			state: connector.StateOffline, me: conn.Me(), known: map[string]bool{},
+			stateCh: make(chan struct{}, 1), peopleCh: make(chan struct{}, 1), gapCh: make(chan struct{}, 1),
+			state: connector.StateOffline, me: conn.Me(), known: map[string]bool{}, gaps: map[string]int64{},
 		},
 		d: d, conn: conn, ownStore: own,
 		ctx: ctx, cancel: cancel,
 		bfWake: make(chan struct{}, 1), changed: make(chan struct{}),
 		workers: map[string]bool{}, dirty: map[string]bool{}, floor: map[string]int64{},
+	}
+	if k, ok := conn.(connector.ServerKeyer); ok {
+		a.serverKey = k.ServerKey()
 	}
 	a.nt = newNotifications(d.cfg, d.notifier, d.srv, st, a.log, d.clock)
 	a.rooms = &openRooms{clock: d.clock, fetch: func(ctx context.Context) ([]model.Conversation, error) {
@@ -222,7 +232,7 @@ func (l *ledger) setBackfilling(v bool) {
 }
 
 func (l *ledger) status() ipc.Status {
-	s := ipc.Status{Account: l.name}
+	s := ipc.Status{Account: l.name, ServerKey: l.serverKey}
 	if items, err := l.st.Pending(); err == nil {
 		s.Pending = len(items)
 	}

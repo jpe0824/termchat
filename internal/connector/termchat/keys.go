@@ -19,6 +19,10 @@ import (
 const DefaultPort = "7420"
 
 // normalizeAddr returns server as host:port, adding DefaultPort when absent.
+// ServerAddr is server as an account records it: host:port, with the default
+// port added when none is given.
+func ServerAddr(server string) string { return normalizeAddr(server) }
+
 func normalizeAddr(server string) string {
 	server = strings.TrimSpace(server)
 	if _, _, err := net.SplitHostPort(server); err == nil {

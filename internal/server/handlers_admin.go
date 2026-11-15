@@ -12,7 +12,7 @@ func (s *Server) deviceInvite(_ context.Context, c call, _ proto.DeviceInviteReq
 	if err := requireHuman(c.me); err != nil {
 		return nil, err
 	}
-	code, err := s.store.CreateInvite(c.me.Handle, c.me.DisplayName, InviteTTL)
+	code, err := s.store.CreateDeviceInvite(c.me.Handle, InviteTTL)
 	if err != nil {
 		return nil, err
 	}

@@ -14,7 +14,6 @@ import (
 	"github.com/jpe0824/termchat/internal/config"
 	"github.com/jpe0824/termchat/internal/ipc"
 	"github.com/jpe0824/termchat/internal/model"
-	"github.com/jpe0824/termchat/internal/store"
 )
 
 // shutdownRetryDelay is how long a command waits for a background process
@@ -139,7 +138,13 @@ func newJoinCmd() *cobra.Command {
 					return err
 				}
 				return emit(cmd, statusOf(s), func(w io.Writer) error {
-					_, err := fmt.Fprintf(w, "joined %s as @%s\n", cell(args[0]), cell(s.Me.Handle))
+					if _, err := fmt.Fprintf(w, "joined %s as @%s\n", cell(args[0]), cell(s.Me.Handle)); err != nil {
+						return err
+					}
+					if s.ServerKey == "" {
+						return nil
+					}
+					_, err := fmt.Fprintf(w, "server key %s\n", cell(s.ServerKey))
 					return err
 				})
 			})
@@ -182,6 +187,9 @@ func printStatus(w io.Writer, s statusJSON) error {
 	fmt.Fprintf(tw, "state\t%s\n", cell(s.State))
 	fmt.Fprintf(tw, "pending\t%d\n", s.Pending)
 	fmt.Fprintf(tw, "syncing\t%s\n", syncing)
+	if s.ServerKey != "" {
+		fmt.Fprintf(tw, "server key\t%s\n", cell(s.ServerKey))
+	}
 	return tw.Flush()
 }
 
@@ -239,7 +247,7 @@ func newChatsCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				slices.SortStableFunc(mine, func(a, b store.ConvView) int { return b.LastAt.Compare(a.LastAt) })
+				slices.SortStableFunc(mine, func(a, b ipc.ConvView) int { return b.LastAt.Compare(a.LastAt) })
 				list := make([]chatJSON, 0, len(mine)+len(open))
 				labels := make([]string, 0, cap(list))
 				for _, v := range mine {

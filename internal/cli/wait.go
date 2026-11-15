@@ -11,7 +11,6 @@ import (
 
 	"github.com/jpe0824/termchat/internal/ipc"
 	"github.com/jpe0824/termchat/internal/model"
-	"github.com/jpe0824/termchat/internal/store"
 )
 
 // waitPage is how many messages one read of the store asks for while
@@ -22,8 +21,8 @@ const waitPage = 200
 type waitSource interface {
 	Subscribe(ctx context.Context) (<-chan ipc.Event, error)
 	SubscriptionErr() error
-	Messages(conv string, beforeSeq int64, limit int) ([]store.Message, error)
-	Chats() ([]store.ConvView, []model.Conversation, error)
+	Messages(conv string, beforeSeq int64, limit int) ([]ipc.Message, error)
+	Chats() ([]ipc.ConvView, []model.Conversation, error)
 }
 
 // waitFilter selects the messages wait returns: incoming ones, never the
@@ -34,7 +33,7 @@ type waitFilter struct {
 	mentions bool
 }
 
-func (f waitFilter) incoming(m store.Message) bool {
+func (f waitFilter) incoming(m ipc.Message) bool {
 	return m.Status == "" && !m.Deleted && m.Author != f.me &&
 		(f.conv == "" || m.ConvID == f.conv) &&
 		(!f.mentions || slices.Contains(m.Mentions, f.me))
@@ -48,14 +47,14 @@ func (f waitFilter) incoming(m store.Message) bool {
 // behind is replaced and the store is read again from the last position seen
 // in each conversation. An edit does not count as a new message; a
 // conversation that first appears after waiting began is not rescanned.
-func waitNext(ctx context.Context, src waitSource, f waitFilter, since *int64) (store.Message, error) {
+func waitNext(ctx context.Context, src waitSource, f waitFilter, since *int64) (ipc.Message, error) {
 	events, err := src.Subscribe(ctx)
 	if err != nil {
-		return store.Message{}, err
+		return ipc.Message{}, err
 	}
 	baseline := map[string]int64{}
 	if err := snapshot(src, f, baseline); err != nil {
-		return store.Message{}, err
+		return ipc.Message{}, err
 	}
 	if since != nil {
 		baseline[f.conv] = *since
@@ -66,7 +65,7 @@ func waitNext(ctx context.Context, src waitSource, f waitFilter, since *int64) (
 	for {
 		select {
 		case <-ctx.Done():
-			return store.Message{}, ctx.Err()
+			return ipc.Message{}, ctx.Err()
 		case ev, open := <-events:
 			if open {
 				if m := ev.Message; ev.Kind == ipc.KindMessage && m != nil && !m.Edited && f.incoming(*m) {
@@ -81,10 +80,10 @@ func waitNext(ctx context.Context, src waitSource, f waitFilter, since *int64) (
 				if err == nil {
 					err = ipc.ErrClosed
 				}
-				return store.Message{}, err
+				return ipc.Message{}, err
 			}
 			if events, err = src.Subscribe(ctx); err != nil {
-				return store.Message{}, err
+				return ipc.Message{}, err
 			}
 			if m, ok, err := recheck(src, f, baseline); err != nil || ok {
 				return m, err
@@ -109,10 +108,10 @@ func snapshot(src waitSource, f waitFilter, baseline map[string]int64) error {
 
 // recheck looks for matching messages in the conversations that have moved
 // past their baseline since it was taken.
-func recheck(src waitSource, f waitFilter, baseline map[string]int64) (store.Message, bool, error) {
+func recheck(src waitSource, f waitFilter, baseline map[string]int64) (ipc.Message, bool, error) {
 	mine, _, err := src.Chats()
 	if err != nil {
-		return store.Message{}, false, err
+		return ipc.Message{}, false, err
 	}
 	for _, v := range mine {
 		if f.conv != "" && v.ID != f.conv {
@@ -131,20 +130,20 @@ func recheck(src waitSource, f waitFilter, baseline map[string]int64) (store.Mes
 		}
 		baseline[v.ID] = v.LastSeq
 	}
-	return store.Message{}, false, nil
+	return ipc.Message{}, false, nil
 }
 
 // earliestAfter returns the lowest-numbered message of conv after since that
 // passes f.
-func earliestAfter(src waitSource, f waitFilter, conv string, since int64) (store.Message, bool, error) {
-	var held []store.Message
+func earliestAfter(src waitSource, f waitFilter, conv string, since int64) (ipc.Message, bool, error) {
+	var held []ipc.Message
 	var before int64
 	for {
 		page, err := src.Messages(conv, before, waitPage)
 		if err != nil {
-			return store.Message{}, false, err
+			return ipc.Message{}, false, err
 		}
-		stored := slices.DeleteFunc(slices.Clone(page), func(m store.Message) bool { return m.Status != "" })
+		stored := slices.DeleteFunc(slices.Clone(page), func(m ipc.Message) bool { return m.Status != "" })
 		if len(stored) == 0 {
 			break
 		}
@@ -160,7 +159,7 @@ func earliestAfter(src waitSource, f waitFilter, conv string, since int64) (stor
 			return m, true, nil
 		}
 	}
-	return store.Message{}, false, nil
+	return ipc.Message{}, false, nil
 }
 
 func newWaitCmd() *cobra.Command {
@@ -232,7 +231,7 @@ func runWait(cmd *cobra.Command, args []string) error {
 				labels = map[string]string{}
 			}
 		}
-		return printMessages(cmd, []store.Message{m}, nil, labels, true)
+		return printMessages(cmd, []ipc.Message{m}, nil, labels, true)
 	})
 	var x *exitError
 	if errors.As(err, &x) && x.code == exitOther {

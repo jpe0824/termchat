@@ -47,17 +47,20 @@ Import boundaries (the reason: each layer stays replaceable, and a client can ne
 - `internal/ipc` and `internal/daemon` never import `proto` or `server`.
 - The CLI's client commands and the TUI talk to `internal/ipc` and `internal/model`, plus `sanitize`, `config`, `paths`, and the OSC helpers in `notify` for the TUI. They never open the store or call a connector. `ipc` re-exports the store and connector types they display (`ipc.Message`, `ipc.ConvView`, `ipc.RoomOp`); use those aliases. Only the server-admin CLI files (`serve.go`, `server_admin.go`) may import `internal/server`.
 - No cgo anywhere; SQLite is `modernc.org/sqlite`. `CGO_ENABLED=0` must build and test. macOS and Linux are supported; Windows must compile.
+- `internal/archtest` enforces the rules above from every file's imports (CLI tests may import `server`; no test outside `server`, `connector/termchat` and `testutil` imports `proto`). Change its table only when the rule itself changes.
 
 Message guarantees:
 - A message is never dropped silently and never delivered twice. Ordering is by server event number, never a clock.
 - A send is written to the outbox first and retried with the same message id, which the server dedups. An outbox item waiting longer than 10 minutes fails with reason "expired" instead of going out late.
 - An unknown outcome (request sent, no answer: `connector.ErrUnknownOutcome`) is settled by syncing, never guessed. Only `Send` is safe to repeat blindly.
+- A gap in a conversation's held log (live event past missing ones, a room change's own events, a failed store write) is queued with `checkGap` and synced by `supervise`, never by the drain goroutine.
 - The server never parses a message body (it is an opaque `model.Body`); mentions travel beside it as handles. There is no end-to-end encryption: whoever runs the server can read messages.
 
 Privacy on the server (`internal/server/authz.go`):
 - A conversation the caller cannot see answers exactly like one that does not exist (`not_found`). Load conversations only through `visibleConv` or `memberConv`.
 - Managing a room needs current membership; admins are the exception. Authorisation reads the caller as stored now, so a removed or demoted person loses access on the next request.
 - A removed handle is tombstoned and can never be registered again. The last admin cannot be removed or demoted.
+- An invite records its kind: `person` (creates the handle; refused once it exists) or `device` (adds a key to an existing handle; refused once it is gone). `RedeemInvite` checks the kind inside the redeeming transaction; in production code it is the only path that adds a key (`Store.AddKey` serves the test harness).
 
 Terminal safety:
 - Every string from another person or the server passes through `internal/sanitize` (`Text`, `Line`) before it is drawn or printed.

@@ -93,7 +93,7 @@ func TestConnectTimeoutGoesOfflineAndRedials(t *testing.T) {
 func TestJoinTimesOutWhenChannelOpenHangs(t *testing.T) {
 	e := newEnv(t)
 	e.person(t, "ann", false)
-	code, _ := e.h.Store.CreateInvite("ann", "Ann", server.InviteTTL)
+	code, _ := e.h.Store.CreateDeviceInvite("ann", server.InviteTTL)
 	r := newRelay(t, e.addr)
 	errc := make(chan error, 1)
 	go func() {
