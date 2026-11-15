@@ -71,7 +71,7 @@ func (m *Model) inBurst() bool {
 
 // guardKey runs a command key, holding a guarded one to a lone press.
 func (m *Model) guardKey(k tea.KeyPressMsg, g geom, recent bool) tea.Cmd {
-	if m.opts.PasteGap < 0 || !guarded[k.String()] {
+	if b, ok := mainBinding(k.String()); m.opts.PasteGap < 0 || !ok || b.kind != keyGuarded {
 		return m.commandKey(k, g)
 	}
 	if recent {
@@ -155,7 +155,10 @@ func (m *Model) onPaste(s string) tea.Cmd {
 	m.noticeKey("", true)
 	g := m.geom()
 	switch {
-	case m.ov != nil && !m.help:
+	case m.ov != nil && m.help:
+		// Help covers the overlay: a paste goes nowhere and needs no word.
+		return nil
+	case m.ov != nil:
 		return m.ovPaste(s)
 	case m.inputActive(g):
 		m.promote()

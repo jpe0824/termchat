@@ -74,6 +74,9 @@ func (m *Model) searchRows() []ovRow {
 	rows := make([]ovRow, 0, len(ov.results))
 	for _, r := range ov.results {
 		conv := sanitize.Line(r.ConvID)
+		if m.left(r.ConvID) {
+			conv += " (left)"
+		}
 		if i := m.indexOf(r.ConvID); i >= 0 {
 			c := m.convs[i]
 			conv = m.convName(c.Conversation)
@@ -82,16 +85,15 @@ func (m *Model) searchRows() []ovRow {
 			}
 		}
 		text := sanitize.Line(r.Text)
-		hl := ""
+		lead := conv + " · " + m.author(r) + " · "
+		row := ovRow{id: "s:" + r.ConvID + ":" + strconv.FormatInt(r.Seq, 10), text: lead + text, from: len(lead)}
 		for _, w := range words {
-			if i := matchAt(text, w); i >= 0 {
-				hl = text[i : i+len(w)]
+			if at, end := foldMatch(text, w); at >= 0 {
+				row.hlAt, row.hlEnd = len(lead)+at, len(lead)+end
 				break
 			}
 		}
-		lead := conv + " · " + m.author(r) + " · "
-		rows = append(rows, ovRow{id: "s:" + r.ConvID + ":" + strconv.FormatInt(r.Seq, 10),
-			text: lead + text, hl: hl, from: len(lead)})
+		rows = append(rows, row)
 	}
 	return rows
 }
@@ -113,9 +115,17 @@ func (m *Model) searchGo() tea.Cmd {
 		return nil
 	}
 	r := m.ov.results[i]
+	if m.left(r.ConvID) {
+		m.ov.err = "you are no longer in this conversation"
+		return nil
+	}
 	m.closeOverlay()
 	return m.openAt(r.ConvID, r.Seq)
 }
+
+// left reports whether the chat list, once read, no longer holds conv: its
+// history stays searchable, but it cannot be opened.
+func (m *Model) left(conv string) bool { return m.haveList && m.indexOf(conv) < 0 }
 
 // openAt opens conv with message seq in view and marked for a while,
 // reading history back to it first when it is older than what is held.

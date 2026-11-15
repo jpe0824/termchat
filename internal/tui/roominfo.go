@@ -103,6 +103,10 @@ func (m *Model) roomBody(w int) (head []string, empty string, tail []string) {
 // other rows do what they say; in a form, enter invites or renames.
 func (m *Model) roomGo() tea.Cmd {
 	ov := m.ov
+	if (ov.step == stepInvite || ov.step == stepRename) && !m.canManage() {
+		ov.err = "you can no longer manage this room"
+		return nil
+	}
 	switch ov.step {
 	case stepInvite:
 		h, why := m.pickedHandle()

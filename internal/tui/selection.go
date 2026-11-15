@@ -138,8 +138,8 @@ func (m *Model) clickThread(g geom, x, y int) tea.Cmd {
 	return nil
 }
 
-// commandKey handles a key when the input does not have it. Only commands
-// act here.
+// commandKey handles a key when the input does not have it. Only the
+// commands of keyTable's main groups act here.
 func (m *Model) commandKey(k tea.KeyPressMsg, g geom) tea.Cmd {
 	s := k.String()
 	list := m.listActive(g)
@@ -147,16 +147,24 @@ func (m *Model) commandKey(k tea.KeyPressMsg, g geom) tea.Cmd {
 	if list {
 		hasSel = false
 	}
-	switch s {
-	case "q":
+	b, ok := mainBinding(s)
+	if !ok {
+		// Only the input takes text: here a key that would type does nothing.
+		if keyText(k) != "" {
+			return m.hintToType(list)
+		}
+		return nil
+	}
+	switch b.act {
+	case actQuit:
 		return m.confirmQuit("q")
-	case "?":
+	case actHelp:
 		m.help = true
-	case "tab":
+	case actTab:
 		m.cycleFocus(g)
-	case "esc":
+	case actEsc:
 		m.escape(g, list)
-	case "up", "k", "down", "j":
+	case actMove:
 		d := 1
 		if s == "up" || s == "k" {
 			d = -1
@@ -169,7 +177,7 @@ func (m *Model) commandKey(k tea.KeyPressMsg, g geom) tea.Cmd {
 		default:
 			return m.scrollKey(d)
 		}
-	case "enter", "i":
+	case actEnter:
 		if list && s == "enter" {
 			if id := m.cursorID(); id != "" {
 				return m.open(id)
@@ -178,41 +186,36 @@ func (m *Model) commandKey(k tea.KeyPressMsg, g geom) tea.Cmd {
 			m.promote()
 			m.toInput()
 		}
-	case "pgup", "pgdown", "home", "end":
+	case actPage:
 		return m.held(func() tea.Cmd { return m.pageKey(s, g) })
-	case "ctrl+k":
+	case actJump:
 		return m.openOverlay(ovJump)
-	case "ctrl+n":
+	case actNew:
 		return m.openOverlay(ovNew)
-	case "ctrl+o":
+	case actPanel:
 		return m.openOverlay(ovRoom)
-	case "/":
+	case actSearch:
 		if m.focus != focusInput {
 			return m.openOverlay(ovSearch)
 		}
-	case "r":
+	case actR:
 		if m.procDown {
 			return m.startProcess()
 		}
 		if hasSel && sel.m.Status == ipc.MsgFailed {
 			return m.retry(sel.m.MsgID)
 		}
-	case "e", "d":
+	case actEdit, actDelete:
 		if hasSel && m.delivered(sel.m) && m.b != nil && !m.procDown {
-			if s == "e" {
+			if b.act == actEdit {
 				m.startEdit(sel)
 			} else {
 				m.askDelete(sel)
 			}
 		}
-	case "x":
+	case actDiscard:
 		if hasSel && sel.m.Status == ipc.MsgFailed {
 			m.askDiscard(sel)
-		}
-	default:
-		// Only the input takes text: here a key that would type does nothing.
-		if keyText(k) != "" {
-			return m.hintToType(list)
 		}
 	}
 	return nil

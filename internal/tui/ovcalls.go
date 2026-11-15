@@ -58,7 +58,15 @@ func (m *Model) ovCall(op, done string, call func(Backend) (convID string, err e
 func (m *Model) onOvDone(msg ovDoneMsg) tea.Cmd {
 	ov := m.ov
 	if ov == nil || ov.gen != msg.gen {
-		return nil
+		// The overlay has closed; a failure is still the user's to know.
+		if msg.err == nil {
+			return nil
+		}
+		text := failure(opVerb[msg.op], msg.err)
+		if m.openID == "" {
+			return m.setBanner(text)
+		}
+		return m.setNotice(m.openID, text, true)
 	}
 	ov.busy = false
 	if msg.err != nil {

@@ -80,6 +80,7 @@ type (
 	focusSetMsg struct{ b Backend }
 	peopleMsg   struct {
 		b      Backend
+		gen    int
 		people []model.Person
 		err    error
 	}

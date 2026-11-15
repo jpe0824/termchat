@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"os"
 	"time"
 
@@ -76,6 +77,16 @@ var runTUI = func(cmd *cobra.Command) error {
 	p = tea.NewProgram(m, tea.WithContext(cmdContext(cmd)),
 		tea.WithInput(cmd.InOrStdin()), tea.WithOutput(cmd.OutOrStdout()))
 	_, err = p.Run()
+	return tuiExit(err)
+}
+
+// tuiExit words the end of the interface. On a panic the framework has
+// already restored the terminal and printed the panic and its stack; this
+// adds the one thing the user needs to know.
+func tuiExit(err error) error {
+	if errors.Is(err, tea.ErrProgramPanic) {
+		return errors.New("the chat interface stopped on an internal error; unsent drafts in it were lost")
+	}
 	return err
 }
 

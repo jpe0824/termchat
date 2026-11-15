@@ -152,41 +152,6 @@ func (m *Model) rowLine(r ovRow, sel bool, w int) string {
 	return out
 }
 
-// clipRow cuts a row's text to w cells around its hl part: a part past the
-// edge brings the text from r.from on into view from a little before the
-// part, the gap marked by "…".
-func clipRow(r ovRow, w int) (pre, mark, post string) {
-	text, cut := r.text, min(r.from, len(r.text))
-	find := func() int {
-		if i := matchAt(text[cut:], r.hl); i >= 0 {
-			return cut + i
-		}
-		return -1
-	}
-	i := find()
-	if i >= 0 && lipgloss.Width(text[:i+len(r.hl)]) > w {
-		from := i
-		for n := 0; n < 4 && from > cut; n++ {
-			from = (&input{text: text}).prev(from)
-		}
-		text = text[:cut] + "…" + text[from:]
-		i = find()
-	}
-	text = truncate(text, w)
-	if i < 0 || i+len(r.hl) > len(text) {
-		return text, "", ""
-	}
-	return text[:i], text[i : i+len(r.hl)], text[i+len(r.hl):]
-}
-
-// matchAt is where hl first appears in s, ignoring case, or -1.
-func matchAt(s, hl string) int {
-	if hl == "" || len(strings.ToLower(s)) != len(s) {
-		return -1
-	}
-	return strings.Index(strings.ToLower(s), strings.ToLower(hl))
-}
-
 // ovRowAt is the row drawn at screen row y, if any.
 func (m *Model) ovRowAt(y int) (int, bool) {
 	p := m.ovPlace()

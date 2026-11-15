@@ -72,11 +72,12 @@ type ovAsk struct {
 	yes   func() tea.Cmd
 }
 
-// ovRow is one row of an overlay's list. hl is a part of text to mark,
-// looked for from byte from on.
+// ovRow is one row of an overlay's list. text[hlAt:hlEnd] is a part to
+// mark, whole characters, none when hlEnd is 0; from is where the part of
+// text that may be cut to bring it into view starts.
 type ovRow struct {
-	id, text, hl string
-	from         int
+	id, text          string
+	hlAt, hlEnd, from int
 }
 
 func (o *overlay) hasField() bool {
@@ -108,9 +109,7 @@ func (m *Model) openOverlay(kind ovKind) tea.Cmd {
 	m.ov = ov
 	m.clearBanner()
 	switch kind {
-	case ovSearch:
-		return nil
-	case ovNew:
+	case ovSearch, ovNew:
 		return m.requestChats()
 	}
 	return m.requestPeople()
