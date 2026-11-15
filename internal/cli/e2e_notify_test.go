@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/jpe0824/termchat/internal/config"
 )
 
 // quietConfig is every simulated person's config.toml: test traffic must
@@ -88,5 +90,22 @@ func TestCheckQuietConfig(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestJoinKeepsNotifySection(t *testing.T) {
+	s := startServer(t)
+	a := newPerson(t)
+	s.joinAs(t, a, "alice", "Alice")
+	path := filepath.Join(a.cfg, "config.toml")
+	if err := checkQuietConfig(path); err != nil {
+		t.Fatalf("after join: %v", err)
+	}
+	var c config.Config
+	if _, err := toml.DecodeFile(path, &c); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Accounts) != 1 || c.Accounts[0].Handle != "alice" {
+		t.Fatalf("accounts after join = %+v, want only alice", c.Accounts)
 	}
 }

@@ -178,7 +178,9 @@ GOOS=windows go build ./...   # CI also checks that Windows builds
 - End-to-end tests in `internal/cli`, `internal/daemon` and `internal/server`
   start a real server (`internal/testutil`) and drive real clients against it.
   The CLI end-to-end tests run the compiled command, so the suite takes about
-  a minute.
+  a minute. Each simulated person starts with a `config.toml` that sets
+  `[notify] os = false` and no hook, so the suite posts no desktop
+  notifications; a person's test fails if its config would allow either.
 - `internal/connector/fake` is a scripted connector for testing the store,
   outbox, notifier and socket API without a server.
 - TUI tests send key and mouse messages to the model and compare rendered
