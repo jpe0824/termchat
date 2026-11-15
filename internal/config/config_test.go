@@ -17,7 +17,7 @@ func TestConfigDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.CLI.Send != "allow" || !c.MarkRead || !c.Splash || c.Notify.OSC != "auto" || !c.Notify.Terminal || !c.Notify.OS {
+	if c.CLI.Send != "allow" || !c.MarkRead || !c.Splash || c.Notify.OSC != "auto" || !c.Notify.Terminal || c.Notify.OS != OSFallback {
 		t.Fatalf("unexpected defaults: %+v", c)
 	}
 }
@@ -30,7 +30,7 @@ func TestConfigRoundTrip(t *testing.T) {
 	}
 	c.Accounts = []Account{{Name: "home", Server: "chat.example.com:7777", Handle: "jason"}}
 	c.CLI.Send = "deny"
-	c.Notify.OS = false
+	c.Notify.OS = OSOff
 	c.Notify.OSC = "777"
 	c.Notify.Hook = "/usr/local/bin/notify"
 	c.Rooms = map[string]string{"abc": "muted", "def": "mentions"}

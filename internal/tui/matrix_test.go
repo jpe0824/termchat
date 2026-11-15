@@ -62,6 +62,7 @@ var starts = []start{
 	{"chat list, process down", pasteWidths, thenDown(openedAt(fixture, "esc")), false},
 	{"own delivered message", pasteWidths, openedAt(fixture, "up", "up"), true},
 	{"own failed message", pasteWidths, openedAt(failedFixture, "up"), true},
+	{"other person's message", pasteWidths, openedAt(fixture, "up", "up", "up"), true},
 	{"delete question", pasteWidths, openedAt(fixture, "up", "up", "d"), true},
 	{"discard question", pasteWidths, openedAt(failedFixture, "up", "x"), true},
 	{"input", pasteWidths, openedAt(fixture), false},
@@ -211,6 +212,9 @@ func checkPaste(t *testing.T, st start, w int, parts []string, cut int) {
 	if started != 0 {
 		fail("started the background process %d times", started)
 	}
+	if h.clips != nil {
+		fail("copied %q to the clipboard", h.clips)
+	}
 	for _, c := range f.writes("messages ") {
 		if !strings.HasPrefix(c, "messages "+before.open+" ") {
 			fail("read another conversation: %q", c)
@@ -299,6 +303,12 @@ func TestDeliberateKeysStillWork(t *testing.T) {
 			if c := h.m.drafts["r-platform"]; c == nil || c.edit == nil || c.edit.msgID != "r-platform-m6" ||
 				h.draft() != "on it" || h.m.focus != focusInput {
 				t.Errorf("e: draft %q focus %v", h.draft(), h.m.focus)
+			}
+
+			_, h = openedAt(fixture, "up", "up")(t, w, &n)
+			h.key("c")
+			if !slices.Equal(h.clips, []string{"on it"}) {
+				t.Errorf("c: clips %q", h.clips)
 			}
 
 			for _, down := range []func(*testing.T, int, *int) (*fakeBackend, *tester){

@@ -89,8 +89,9 @@ directory. See [architecture](../termchat.md#where-state-lives).
 
 The sample frame in the [README](../../README.md) shows the wide layout: chat
 list on the left, the open conversation in the middle, members on the right,
-the input at the bottom of the thread, and the keys that work right now in the
-footer. The top bar shows the server and the connection state.
+the input at the bottom of the thread, and the keys that work right now: keys
+for the messages on a line under the input, keys for the whole window on the
+bottom border. The top bar shows the server and the connection state.
 
 ### Layouts by width
 
@@ -103,8 +104,10 @@ The layout follows the window size and redraws on every resize.
 | 36 to 69 (narrow) | The thread only. A `‹ chats ●7` marker in its header shows unread messages elsewhere; `esc` or a click on it shows the chat list full-width. |
 | under 36 (tiny) | The thread with timestamps dropped and each author on their own line, for a side pane. |
 
-In short windows the footer goes first, then the top bar, so the thread and
-input stay visible. Below 20 columns by 5 rows the screen only says the window
+In short windows the empty row under the key hints goes first (under 16 rows),
+then the keys on the bottom border (under 12), then the hints and the rule
+above them (under 11), then the top bar (under 8), so the thread and input stay
+visible. Below 20 columns by 5 rows the screen only says the window
 is too small.
 
 ### Opening screen
@@ -114,15 +117,17 @@ The `TERMCHAT` banner shows for 0.7 seconds or until a key or click. Set
 
 ### Focus: list, thread, input
 
-Keyboard focus is in one of three places, and the footer always lists the keys
-that work there. `?` opens the same table inside the program (outside the
+Keyboard focus is in one of three places, and the key hints always list the
+keys that work there: under the input for the thread and input, on the bottom
+border for the chat list and the whole window. While the input has focus the
+border offers no key that would type into it. `?` opens the same table inside the program (outside the
 input, where letters type). Every key below comes from one key table in the
 code, so the help overlay and this guide agree.
 
 | Focus | Keys |
 |---|---|
 | **Chat list** | `↑ ↓` or `k j` move; `enter` opens the chat; `tab` goes to the thread (standard and wide layouts); `/` search; `pgup pgdn` scroll the thread, `home end` jump to its oldest and newest message; `r` starts a stopped background process; `q` quits. |
-| **Thread** | `↑ ↓` or `k j` step through your own messages once one is selected, otherwise scroll; `i` or `enter` go to the input; `e` edit and `d` delete your selected message (`d` asks y/n); `r` retry a failed message, or start a stopped background process; `x` discard a failed message (asks y/n); `esc` goes from a selection to the input, otherwise to the chat list; `tab` goes to the chat list; `/` search; `pgup pgdn home end` scroll; `q` quits. |
+| **Thread** | `↑ ↓` or `k j` step through messages once one is selected, otherwise scroll; `i` or `enter` go to the input; `e` edit and `d` delete your selected message (`d` asks y/n); `r` retry a failed message, or start a stopped background process; `x` discard a failed message (asks y/n); `c` copy the selected message; `esc` goes from a selection to the input, otherwise to the chat list; `tab` goes to the chat list; `/` search; `pgup pgdn home end` scroll; `q` quits. |
 | **Input** | Letters type, including `q` and `?`. `← →`, `home end`, `ctrl+a ctrl+e`, `backspace`, `delete`, `ctrl+w` and `ctrl+u` edit. `enter` sends (or saves an edit); `alt+enter` or `ctrl+j` inserts a line break; `esc` cancels an edit, otherwise leaves the input; `↑` in an empty input selects your newest message; `tab` types a tab; `pgup pgdn` scroll the thread. |
 | **A y/n question** | `y` answers yes, only as a lone key press. Any other key answers no. |
 | **Anywhere** | `ctrl+k` jump, `ctrl+n` new conversation, `ctrl+o` room panel, `/` search (not from the input), `ctrl+c` quits. |
@@ -135,7 +140,7 @@ input, because it types a tab there.
 
 Some keys act only as a deliberate single press: `ctrl+k`, `ctrl+n`, `ctrl+o`,
 `enter` on the chat list, `tab` outside the input, `/`, `r`, `q`, `i`, `e`, `d`,
-`x`, `y`, and the action keys in overlays. A key of this kind is ignored when
+`x`, `c`, `y`, and the action keys in overlays. A key of this kind is ignored when
 another key arrives within `paste_gap_ms` before or after it, so pasted text
 cannot trigger it; `enter`, `esc` and `↑` in the input, `ctrl+c`, and `esc` in
 overlays wait for the same gap before acting. Movement keys and `?` act at
@@ -145,8 +150,8 @@ The conversation shown at launch is a preview: it is on screen but is not
 marked read and does not take the keyboard until you act on it (open it with
 `enter` or a click, press `i` or `enter` on its thread, click in it, or scroll
 it). Opening a conversation from the list puts focus in the input. The mouse
-works everywhere: click a row to open it, click the input to type, click your
-own message to select it, use the wheel to scroll.
+works everywhere: click a row to open it, click the input to type, click a
+message to select it, use the wheel to scroll.
 
 ### Sending
 
@@ -163,13 +168,28 @@ own message to select it, use the wheel to scroll.
 ### Editing and deleting your messages
 
 In the input, `↑` on an empty draft selects your newest message; the focus is
-then the thread with a selection. `↑ ↓` or `k j` move among your own messages,
-and `esc` returns to the input.
+then the thread with a selection. `↑ ↓` or `k j` move through the messages,
+and `esc` returns to the input. Any message can be selected, but only your own
+can be edited or deleted.
 
 - `e` loads a delivered message into the input for editing. `enter` saves,
   `esc` cancels. Edited messages show `(edited)`.
 - `d` asks `delete this message? y/n`. Deleted messages stay as `message
   deleted`; the old text is removed from the server and from every client.
+
+### Copying a message
+
+Select any message, yours or someone else's, with a click or with `↑` from an
+empty input. Then press `c`, or click the selected message again. Its whole
+text goes to the system clipboard, without the time, the author or markers such
+as `[agent]` and `(edited)`, and the line above the input says
+`copied to clipboard (N characters)`. Escape sequences and control characters
+are dropped from the copy.
+
+The copy goes through the terminal (OSC 52), so it works over SSH and inside a
+multiplexer when the terminal allows it. A terminal never says whether it
+refused, so the note shows either way; see
+[terminals and paste](terminals-and-paste.md#copying) if nothing arrives.
 
 ### Failed messages, retry and discard
 
@@ -177,7 +197,7 @@ A message that could not be delivered shows `failed (reason) — retry?`, for
 example `failed (expired) — retry?`. A message that waits more than ten minutes
 for the connection fails as expired instead of going out late. Select it:
 
-- `r` (or a click) retries it.
+- `r`, or a first click, retries it. A click on it while it is selected copies it.
 - `x` asks `discard this message? y/n` and removes it.
 
 Nothing is ever resent automatically after it has failed, and a message is
@@ -275,7 +295,7 @@ paste_gap_ms = 25       # milliseconds; 0 to 200; see terminals-and-paste.md
 
 [notify]
   terminal = true       # route 1: terminal escape sequences
-  os = true             # route 2: operating system notification
+  os = true             # route 2: true (when route 1 does not apply), "always" or false
   osc = "auto"          # "auto", "9", "99", "777" or "off"
   hook = ""             # route 3: a command to run for each notification
 
@@ -285,12 +305,12 @@ paste_gap_ms = 25       # milliseconds; 0 to 200; see terminals-and-paste.md
 
 | Key | Default | Meaning |
 |---|---|---|
-| `mark_read` | `true` | The interface marks a conversation read when you open it or read new messages at the bottom. Off: it never does. |
+| `mark_read` | `true` | The interface marks a conversation read when you open it, or when new messages arrive at the bottom while the terminal is focused (where the terminal never reports focus, on your next key or mouse input). Off: it never does. |
 | `splash` | `true` | Show the opening screen. |
 | `paste_gap_ms` | `25` | Wait after `enter` for more pasted input. Values outside 0 to 200 are clamped. `0` sends at once. |
 | `cli.send` | `"allow"` | `"deny"` makes `termchat send` fail with exit code 6. |
 | `notify.terminal` | `true` | Let the interface raise notifications with terminal escape sequences. |
-| `notify.os` | `true` | Post through the operating system when the terminal route does not apply. |
+| `notify.os` | `true` | `true`: post through the operating system when the terminal route does not apply. `"always"`: post through it as well as the terminal route. `false`: never. |
 | `notify.osc` | `"auto"` | Which escape sequence to use; `"off"` disables. |
 | `notify.hook` | `""` | Command run for each notification. |
 | `rooms.<id>` | none, meaning `mentions` | Notification mode for one room. Find a room's id with `termchat chats --json`. |

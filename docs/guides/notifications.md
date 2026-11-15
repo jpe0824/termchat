@@ -10,11 +10,19 @@ closed.
 | Route | Raised by | Used when |
 |---|---|---|
 | 1. Terminal escape sequence | the interface, in your terminal | The interface is open, `notify.terminal = true`, and your terminal is one termchat knows (or `notify.osc` names a sequence). The terminal turns the sequence into a system notification. It works over SSH. |
-| 2. Operating system | the background process | Route 1 did not apply (no interface open, or it cannot raise sequences, or `notify.terminal = false`) and `notify.os = true`. |
+| 2. Operating system | the background process | `notify.os = true` and route 1 did not apply (no interface open, or it cannot raise sequences, or `notify.terminal = false`); or `notify.os = "always"`, whether or not route 1 applied. |
 | 3. Hook command | the background process | `notify.hook` is set. It runs for every notification, in addition to route 1 or 2. |
 
-Routes 1 and 2 are alternatives: a notification is not shown twice. The hook is
+With `notify.os = true`, routes 1 and 2 are alternatives: a notification is
+shown once. With `notify.os = "always"`, route 2 also fires when route 1 did,
+so you get the terminal notice and the system notification. Either way the
+operating system is asked at most once per message, and the rules in
+[what notifies](#what-notifies) apply to both routes together. The hook is
 independent of both.
+
+Use `"always"` in terminals that keep the notice inside their own window.
+Herdr does this: it shows the OSC 99 sequence as an in-app notice and posts no
+system notification, so while you are in another app you would see nothing.
 
 How route 1 is chosen. When the interface starts, it works out which escape
 sequence your terminal understands (from `notify.osc` and the environment, see
@@ -23,9 +31,9 @@ show notifications; if `notify.osc` is `off` or the terminal is unknown, it says
 it cannot. For each notification, the background process checks `notify.terminal`
 and whether an interface that can show it is attached. If so, it sends the
 notification to that interface, which writes the escape sequence followed by a
-bell to the terminal, and the operating-system route is not used. Otherwise,
-with `notify.os` on, the background process posts it through the operating
-system. The interface decides at start: changing `notify.osc` needs the
+bell to the terminal, and the operating-system route is not used unless
+`notify.os` is `"always"`. Otherwise, with `notify.os` on, the background
+process posts it through the operating system. The interface decides at start: changing `notify.osc` needs the
 interface restarted, and `notify.terminal`, `notify.os` and `notify.hook` need
 `termchat daemon stop`.
 
@@ -54,6 +62,7 @@ A message notifies when all of these hold:
   have moved. Reading it on your phone or laptop first silences it here.
 - It is **not in the conversation on screen**: an interface with that
   conversation open in a focused terminal window counts as watching it.
+  See [how focus is detected](#how-focus-is-detected).
 
 Not notified, ever: edits, deletions, membership changes, and history that is
 being filled in.
@@ -76,12 +85,32 @@ Set a room's mode in `config.toml` under `[rooms]`, keyed by the room's id
 The mode does not apply to direct messages. The background process reads the
 config at start: run `termchat daemon stop` after editing.
 
+## How focus is detected
+
+The interface turns on the terminal's focus reporting, so the terminal says
+when its window gains or loses focus. Until the first such report arrives,
+focus is **unknown**, and the interface counts as **not focused**: messages in
+the conversation on screen notify like any other. Some terminals and
+multiplexers never report focus (Herdr panes, and tmux without
+`set -g focus-events on`), so focus stays unknown for the whole session there.
+
+Focus also decides when a new message in the open conversation is marked read
+(with `mark_read` on, and the thread at its newest message):
+
+- **Focused:** at once.
+- **Not focused:** when the window gets focus back.
+- **Unknown:** on your next key press, paste, click or scroll in the
+  interface. Input from before the message arrived does not count, so a
+  message that arrives while you are away stays unread.
+
+Opening a conversation marks it read in all three cases.
+
 ## Config keys
 
 ```toml
 [notify]
   terminal = true    # route 1
-  os = true          # route 2
+  os = true          # route 2: true, "always" or false
   osc = "auto"       # "auto", "9", "99", "777" or "off"
   hook = ""          # route 3: a shell command
 ```
@@ -122,7 +151,7 @@ variables:
 
 | Terminal | Detected by | Sequence |
 |---|---|---|
-| Herdr (assumed) | `HC_TERMINAL_ID` set | OSC 99 (kitty style) |
+| Herdr | `HC_TERMINAL_ID` set | OSC 99 (kitty style) |
 | kitty | `KITTY_WINDOW_ID` set | OSC 99 |
 | iTerm2 | `TERM_PROGRAM=iTerm.app` | OSC 9 |
 | WezTerm | `TERM_PROGRAM=WezTerm` | OSC 9 |
@@ -133,14 +162,13 @@ variables:
 Terminals also need notifications turned on in their own settings, and some
 only notify while the terminal window is in the background.
 
-**Herdr is assumed to accept the kitty-style sequence (OSC 99). This has not
-been confirmed.** The assumption comes from Herdr's binaries mentioning
-`kitty_desktop_notification`. If notifications do not appear in Herdr, set
-`osc` to another value, and test again as below:
+**Herdr accepts the kitty-style sequence (OSC 99) but shows it as a notice
+inside Herdr only**, with no system notification. To be told while you are in
+another app, set `os = "always"`:
 
 ```toml
 [notify]
-  osc = "9"       # or "777"; or "off" to fall back to the OS route
+  os = "always"   # the Herdr notice and a system notification
 ```
 
 ## Testing notifications in your terminal

@@ -78,12 +78,18 @@ type Model struct {
 	enterConv string
 	enterT    timer
 
-	// termFocused is the terminal's focus: assumed until a blur says not.
-	termFocused bool
-	quitting    bool
-	focusSent   *focusReport
-	focusBusy   bool
-	readBusy    map[string]bool
+	// termFocus is the terminal's focus. It stays unknown until the terminal
+	// sends a focus or blur event, which some terminals and multiplexers
+	// never do.
+	termFocus termFocus
+	// inputSince says a key or mouse input arrived after the newest message
+	// in the open conversation: with focus unknown, that is the evidence
+	// someone is looking.
+	inputSince bool
+	quitting   bool
+	focusSent  *focusReport
+	focusBusy  bool
+	readBusy   map[string]bool
 	// readOpen and readNew say the open conversation is owed a MarkRead
 	// for being opened, and for a message that arrived in it.
 	readOpen, readNew bool
@@ -127,7 +133,7 @@ func New(b Backend, opts Options) *Model {
 	return &Model{
 		opts: opts, st: newStyles(opts.Env("NO_COLOR") == ""),
 		ctx: ctx, cancel: cancel, b: b, procDown: b == nil, adopt: make(chan Backend, 1),
-		splashDone: !opts.Splash, drafts: map[string]*compose{}, termFocused: true,
+		splashDone: !opts.Splash, drafts: map[string]*compose{},
 		readBusy: map[string]bool{}, osc: notify.ResolveOSC(opts.NotifyOSC, opts.Env),
 	}
 }
@@ -174,6 +180,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) update(msg tea.Msg) tea.Cmd {
+	switch msg.(type) {
+	case tea.KeyPressMsg, tea.PasteMsg, tea.MouseClickMsg, tea.MouseWheelMsg:
+		m.inputSince = true
+	}
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = max(msg.Width, 0), max(msg.Height, 0)
@@ -189,9 +199,9 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 	case tea.MouseWheelMsg:
 		return m.onWheel(msg.Mouse())
 	case tea.FocusMsg:
-		m.termFocused = true
+		m.termFocus = focusIn
 	case tea.BlurMsg:
-		m.termFocused = false
+		m.termFocus = focusOut
 	case timerMsg:
 		return m.onTimer(msg)
 	case sentMsg:

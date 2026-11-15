@@ -10,12 +10,23 @@ what is checked by hand before a release is in
 |---|---|---|
 | Alternate screen | The full-window interface | Required. |
 | Mouse reporting | Clicking rows, the input and messages, wheel scrolling | The keyboard does everything the mouse does. |
-| Focus reporting | Knowing whether the terminal window is focused, so a message you are looking at is not notified and is marked read | The terminal counts as focused. |
+| Focus reporting | Knowing whether the terminal window is focused, so a message you are looking at is not notified and is marked read | The interface counts as not focused: messages in the open chat still notify, and new ones there are marked read on your next key or mouse input. See [how focus is detected](notifications.md#how-focus-is-detected). |
 | Bracketed paste | Pasting text without it being read as typing | See below. |
 | Notification sequences (OSC 9, 99, 777) | [Notifications](notifications.md) | The operating-system route is used. |
+| Clipboard writes (OSC 52) | `c`, or a second click, copies the selected message | Nothing is copied. The note still shows, because a terminal does not answer OSC 52. |
 
 `alt+enter` inserts a line break. Some terminals use `alt` for other things;
 `ctrl+j` does the same everywhere.
+
+## Copying
+
+termchat copies a message by asking the terminal to set the system clipboard
+(OSC 52). This reaches your own machine's clipboard even over SSH, because the
+terminal on your machine does the copying. Most current terminals allow it;
+some ship with clipboard writes off and need them turned on in their settings.
+Inside tmux, set `set -g set-clipboard on` in `~/.tmux.conf`. termchat does not
+fall back to `pbcopy` or `xclip`: over SSH they would fill the remote machine's
+clipboard instead.
 
 ## Bracketed paste
 

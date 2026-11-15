@@ -49,9 +49,8 @@ For each terminal, with the interface open on a different conversation, receive
 a direct message and a mention in a room, and confirm a system notification
 appears, and that closing the interface still produces an OS notification.
 
-- [ ] **Herdr.** This also settles whether Herdr accepts the kitty-style
-      sequence (OSC 99). If it does not, record which `notify.osc` value
-      works and update the notifications guide and `DetectOSC` for `HC_TERMINAL_ID`.
+- [ ] **Herdr.** It shows OSC 99 as an in-app notice only. With
+      `notify.os = "always"`, a system notification appears as well, once.
 - [ ] A second terminal that uses OSC 9 (iTerm2, WezTerm or Ghostty).
 - [ ] A third terminal of a different kind (kitty, a VTE terminal such as GNOME
       Terminal, or Terminal.app, which uses the OS route).
@@ -62,6 +61,9 @@ appears, and that closing the interface still produces an OS notification.
       device, the conversation on screen in a focused window, a room in `muted`
       mode. One notification per conversation after the background process
       reconnects. Nothing on a new device's first sync.
+- [ ] A terminal that never reports focus (a Herdr pane): with a room open
+      and another app focused, a message in that room notifies and stays
+      unread; a key press in the interface then marks it read.
 
 ## 4. Layouts
 
@@ -72,10 +74,17 @@ a draft in the input.
 - [ ] 90: list and thread; the room panel opens as an overlay.
 - [ ] 50: thread only; `esc` or a click on `‹ chats` shows the list.
 - [ ] 30: tiny, author on its own line, timestamps gone.
-- [ ] Very short window (under 12 rows): the footer, then the top bar, disappear.
+- [ ] Key hints follow focus: message keys under the input (blank with the
+      chat list focused), window keys on the bottom border; with the input
+      focused the border shows no `tab`, `/` or `?`.
+- [ ] Short window: the empty row under the hints goes first (under 16 rows),
+      then the border keys (under 12), then the hints (under 11), then the
+      top bar (under 8).
 - [ ] Resizing keeps the draft, the selection and the scroll position.
 - [ ] The mouse: click a conversation, click into the input, wheel scrolls the
       thread, click a failed message to retry it.
+- [ ] Copy another person's message with `c` and with a second click, in a
+      plain terminal and inside tmux, and paste it elsewhere: the text only.
 
 ### Overlays
 
@@ -91,7 +100,7 @@ widths 120, 90, 50 and 30:
 - [ ] Search opens a result scrolled to its message, which is marked briefly. A
       result in a room you have left is marked `(left)` and cannot be opened.
 - [ ] A non-creator, non-admin sees no invite, remove or rename in the room panel.
-- [ ] `?` lists every key, and it matches the footer of the focus you opened it from.
+- [ ] `?` lists every key, and it matches the key hints of the focus you opened it from.
 - [ ] Paste a line into each field (with and without bracketed paste): it fills
       the field and nothing opens, creates or joins.
 - [ ] A notification appears while the interface is open in a terminal that

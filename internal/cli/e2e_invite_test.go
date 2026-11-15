@@ -58,9 +58,16 @@ func TestAgentCreateAndAgentTag(t *testing.T) {
 	bot.ok("dm", "alice")
 	bot.ok("send", "@alice", "beep boop")
 	eventually(t, "alice to read the agent", func() bool { return a.hasText("@bot", "beep boop") })
-	m := a.messages("read", "@bot")[0]
-	if !m.Agent || m.Author != "bot" {
-		t.Fatalf("message = %+v, want agent true", m)
+	// The first message from a handle a device has not seen is stored before
+	// that device's people list learns the handle, so the agent flag can trail
+	// the text.
+	var m msgView
+	eventually(t, "the agent flag on bot's message", func() bool {
+		m = a.messages("read", "@bot")[0]
+		return m.Agent
+	})
+	if m.Author != "bot" {
+		t.Fatalf("message = %+v, want author bot", m)
 	}
 	if out := a.tableOK("read", "@bot"); !strings.Contains(out, "@bot [agent]") {
 		t.Fatalf("table lacks the agent tag:\n%s", out)

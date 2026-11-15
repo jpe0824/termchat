@@ -286,6 +286,7 @@ func TestEverySizeWithDraftsFits(t *testing.T) {
 func TestReconnectClearsStuckFocusAndReadCalls(t *testing.T) {
 	f := fixture()
 	h := opened(t, f, 90, 20, markReadOn)
+	h.send(tea.FocusMsg{}) // a terminal that reports focus
 	// A MarkRead and a SetFocus go out on the old connection and never
 	// come back.
 	h.hold = true

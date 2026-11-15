@@ -90,13 +90,13 @@ func TestFooterShowsKeysForFocus(t *testing.T) {
 	f := failedFixture()
 	h := opened(t, f, 120, 20)
 	foot := func() string { return h.lines()[19] }
-	mustContain(t, foot(), "⏎ send", "esc")
+	mustContain(t, hintRowOf(h), "⏎ send", "esc leave")
 	mustNotContain(t, foot(), "q quit", "⏎ open")
 	h.key("up")
-	mustContain(t, foot(), "r retry", "x discard")
+	mustContain(t, h.lines()[17], "r retry", "x discard")
 	h.key("up")
-	mustContain(t, foot(), "e edit", "d delete")
-	mustNotContain(t, foot(), "r retry")
+	mustContain(t, h.lines()[17], "e edit", "d delete")
+	mustNotContain(t, h.lines()[17], "r retry")
 	h.key("esc")
 	h.key("esc")
 	mustContain(t, foot(), "↑↓ move", "⏎ open", "q quit")
@@ -135,6 +135,7 @@ func TestInputDisabledWhileDown(t *testing.T) {
 func TestMarkReadOnOpenAndNewMessage(t *testing.T) {
 	f := fixture()
 	h := opened(t, f, 90, 20, markReadOn)
+	h.send(tea.FocusMsg{}) // a terminal that reports focus
 	if got := f.writes("markread "); !slices.Equal(got, []string{"markread r-platform"}) {
 		t.Fatalf("on open: %q", got)
 	}
@@ -201,6 +202,7 @@ func TestMarkReadOffNeverCalled(t *testing.T) {
 func TestMarkReadCoalesces(t *testing.T) {
 	f := fixture()
 	h := opened(t, f, 90, 20, markReadOn)
+	h.send(tea.FocusMsg{}) // a terminal that reports focus
 	f.resetCalls()
 	h.hold = true
 	for seq := int64(7); seq <= 9; seq++ {
@@ -224,6 +226,7 @@ func TestMarkReadCoalesces(t *testing.T) {
 func TestSetFocusReported(t *testing.T) {
 	f := fixture()
 	h := opened(t, f, 90, 20)
+	h.send(tea.FocusMsg{}) // a terminal that reports focus
 	h.click(4, 2)          // open dana
 	h.send(tea.BlurMsg{})  // terminal loses focus
 	h.send(tea.FocusMsg{}) // and gets it back
@@ -237,6 +240,7 @@ func TestSetFocusReported(t *testing.T) {
 		t.Errorf("setfocus on the new connection = %q", got)
 	}
 	want := []string{
+		"setfocus r-platform false",
 		"setfocus r-platform true",
 		"setfocus dm-dana true",
 		"setfocus dm-dana false",

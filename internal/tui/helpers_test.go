@@ -225,6 +225,8 @@ type tester struct {
 	step time.Duration
 	// raws is what the model wrote to the terminal outside the view.
 	raws []string
+	// clips is every text the model sent to the system clipboard.
+	clips []string
 	// settling guards the timers fired after each message: when the clock
 	// steps past the paste gap, a waiting enter or a deferred exit acts
 	// before anything else can arrive, as in real time.
@@ -290,6 +292,12 @@ func (h *tester) deliver(msg tea.Msg) {
 	case tea.RawMsg:
 		h.raws = append(h.raws, fmt.Sprint(msg.Msg))
 	default:
+		// Bubble Tea does not export its clipboard message type; its name is
+		// the only handle a test has on it.
+		if fmt.Sprintf("%T", msg) == "tea.setClipboardMsg" {
+			h.clips = append(h.clips, fmt.Sprint(msg))
+			return
+		}
 		h.send(msg)
 	}
 }

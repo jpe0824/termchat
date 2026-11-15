@@ -120,7 +120,7 @@ func (m *Model) onThread(msg threadMsg) tea.Cmd {
 	wasLoaded, newest := m.thread.loaded, m.thread.newestSeq()
 	m.thread.merge(msg.msgs, msg.limit)
 	if wasLoaded && m.thread.newestSeq() > newest {
-		m.readNew = true
+		m.readNew, m.inputSince = true, false
 	}
 	if _, ok := m.selected(); !ok {
 		m.thread.sel = ""

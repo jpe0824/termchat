@@ -10,6 +10,22 @@ import (
 // the conversation is no longer looked at.
 const quitWait = 500 * time.Millisecond
 
+// termFocus is the terminal's focus as its focus events report it.
+type termFocus uint8
+
+const (
+	focusUnknown termFocus = iota // no focus or blur event yet
+	focusIn
+	focusOut
+)
+
+// present reports whether the user is taken to be looking at the screen:
+// the terminal has focus, or its focus is unknown and a key or mouse input
+// arrived after the newest message.
+func (m *Model) present() bool {
+	return m.termFocus == focusIn || m.termFocus == focusUnknown && m.inputSince
+}
+
 // focusReport is what the background process is told the user looks at.
 type focusReport struct {
 	conv    string
@@ -36,7 +52,7 @@ func (m *Model) syncFocus() tea.Cmd {
 	if m.b == nil || m.procDown || m.focusBusy || m.quitting {
 		return nil
 	}
-	want := focusReport{m.shownConv(), m.termFocused}
+	want := focusReport{m.shownConv(), m.termFocus == focusIn}
 	if m.focusSent == nil && want.conv == "" || m.focusSent != nil && *m.focusSent == want {
 		return nil
 	}
@@ -49,8 +65,8 @@ func (m *Model) syncFocus() tea.Cmd {
 }
 
 // syncRead marks the open conversation read when it is owed and on screen:
-// an opened conversation at once, a new message only while the terminal
-// has focus and the thread is at its newest message. A mark owed while
+// an opened conversation at once, a new message only while the user is
+// present (see present) and the thread is at its newest message. A mark owed while
 // those do not hold waits until they do. One call per conversation is out
 // at a time; what is owed meanwhile becomes one more call.
 func (m *Model) syncRead() tea.Cmd {
@@ -58,7 +74,7 @@ func (m *Model) syncRead() tea.Cmd {
 	if !m.opts.MarkRead || conv == "" || m.preview || m.b == nil || m.procDown || m.shownConv() != conv {
 		return nil
 	}
-	newOK := m.readNew && m.termFocused && m.thread != nil && m.thread.atBottom
+	newOK := m.readNew && m.present() && m.thread != nil && m.thread.atBottom
 	if !m.readOpen && !newOK || m.readBusy[conv] {
 		return nil
 	}
