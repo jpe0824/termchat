@@ -123,6 +123,10 @@ func (m *Model) clickThread(g geom, x, y int) tea.Cmd {
 		}
 		return nil
 	}
+	// The rule, key hints and empty row under the input are not targets.
+	if l.bar && y >= l.inputY+l.inputH {
+		return nil
+	}
 	m.focus, m.thread.sel = focusThread, ""
 	it, ok := m.itemAt(g, y-l.msgY)
 	if !ok || !m.selectable(it.m) {

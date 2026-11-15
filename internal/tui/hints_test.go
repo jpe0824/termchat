@@ -62,12 +62,20 @@ func TestShortWindowDropsGapThenHints(t *testing.T) {
 
 func TestClickOnHintRowsDoesNothing(t *testing.T) {
 	h := opened(t, fixture(), 90, 20)
+	h.typeText("draft")
 	in := inputRow(h)
-	h.key("esc")
 	for _, y := range []int{in + 1, in + 2, in + 3} {
 		h.click(40, y)
-		if h.m.focus != focusThread || h.m.thread.sel != "" {
-			t.Errorf("click on row %d: focus %v sel %q", y, h.m.focus, h.m.thread.sel)
+		if h.m.focus != focusInput || h.draft() != "draft" {
+			t.Errorf("input focused, click on row %d: focus %v draft %q", y, h.m.focus, h.draft())
+		}
+	}
+	_, h = onOwnMessage(t, 90)
+	sel := h.m.thread.sel
+	for _, y := range []int{in + 1, in + 2, in + 3} {
+		h.click(40, y)
+		if h.m.focus != focusThread || h.m.thread.sel != sel {
+			t.Errorf("message selected, click on row %d: focus %v sel %q, want %q", y, h.m.focus, h.m.thread.sel, sel)
 		}
 	}
 }
