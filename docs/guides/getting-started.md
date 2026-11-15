@@ -135,7 +135,7 @@ input, because it types a tab there.
 
 Some keys act only as a deliberate single press: `ctrl+k`, `ctrl+n`, `ctrl+o`,
 `enter` on the chat list, `tab` outside the input, `/`, `r`, `q`, `i`, `e`, `d`,
-`x`, `y`, and the action keys in overlays. A key of this kind is ignored when
+`x`, `c`, `y`, and the action keys in overlays. A key of this kind is ignored when
 another key arrives within `paste_gap_ms` before or after it, so pasted text
 cannot trigger it; `enter`, `esc` and `↑` in the input, `ctrl+c`, and `esc` in
 overlays wait for the same gap before acting. Movement keys and `?` act at
@@ -192,7 +192,7 @@ A message that could not be delivered shows `failed (reason) — retry?`, for
 example `failed (expired) — retry?`. A message that waits more than ten minutes
 for the connection fails as expired instead of going out late. Select it:
 
-- `r` (or a click) retries it.
+- `r`, or a first click, retries it. A click on it while it is selected copies it.
 - `x` asks `discard this message? y/n` and removes it.
 
 Nothing is ever resent automatically after it has failed, and a message is

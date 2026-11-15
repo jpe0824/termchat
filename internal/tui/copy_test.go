@@ -127,3 +127,11 @@ func TestCopyDuringQuestionAnswersNo(t *testing.T) {
 		t.Errorf("question still shown: %q", h.m.note.text)
 	}
 }
+
+func TestFooterOffersCopyOnASelection(t *testing.T) {
+	h := opened(t, fixture(), 120, 20)
+	h.click(30, h.row("great. one row"))
+	mustContain(t, h.view(), "c copy")
+	h.click(30, h.row("on it"))
+	mustContain(t, h.view(), "c copy", "e edit")
+}

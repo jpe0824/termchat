@@ -135,7 +135,7 @@ func (m *Model) mainKeys(g geom, wide bool, tail []string) []string {
 		case m.delivered(sel.m):
 			keys = []string{"e edit", "d delete"}
 		}
-		return append(append(keys, "i type", "↑↓ select", "esc back"), tail...)
+		return append(append(keys, "i type", "c copy", "↑↓ select", "esc back"), tail...)
 	case g.mode == Tiny:
 		return []string{"esc chats", "i type", "? help"}
 	case wide:
