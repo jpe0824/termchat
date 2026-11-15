@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net"
 	"os"
@@ -57,7 +58,7 @@ type Options struct {
 	Logger      *slog.Logger
 	RuntimeDir  string
 	// Join registers with a server; the default is termchat.Join.
-	Join func(ctx context.Context, server, code string) (config.Account, error)
+	Join func(ctx context.Context, req ipc.JoinReq) (config.Account, error)
 }
 
 // daemon is the process-wide state; account holds what exists only once an
@@ -266,12 +267,18 @@ func (d *daemon) Stop() { d.stop() }
 // account and brings it up without a restart. A configured account is
 // replaced only when the join names its server and its connection is stuck in
 // not_authorised or host_key_changed, which only a new join can leave.
-func (d *daemon) Join(ctx context.Context, server, code string) error {
+//
+// A replaced account that was in host_key_changed talked to a server that is
+// gone: the new one numbers its events from 1 again under the same
+// conversation ids, so the old store's cursors would hide every new event and
+// its outbox would send old items to the new server. Its store is therefore
+// moved aside, never reused. A not_authorised account keeps its store.
+func (d *daemon) Join(ctx context.Context, req ipc.JoinReq) (ipc.JoinRes, error) {
 	d.mu.Lock()
-	old, err := d.replaceable(server)
+	old, err := d.replaceable(req.Server)
 	if err != nil {
 		d.mu.Unlock()
-		return err
+		return ipc.JoinRes{}, err
 	}
 	d.joining = true
 	d.mu.Unlock()
@@ -283,38 +290,74 @@ func (d *daemon) Join(ctx context.Context, server, code string) error {
 
 	join := d.opts.Join
 	if join == nil {
-		join = func(ctx context.Context, server, code string) (config.Account, error) {
+		join = func(ctx context.Context, req ipc.JoinReq) (config.Account, error) {
 			dataDir, err := paths.Data()
 			if err != nil {
 				return config.Account{}, err
 			}
-			return termchat.Join(ctx, server, code, dataDir)
+			return termchat.Join(ctx, req.Server, req.Code, req.ServerKey, dataDir)
 		}
 	}
-	acct, err := join(ctx, server, code)
+	acct, err := join(ctx, req)
 	if err != nil {
-		return err
+		return ipc.JoinRes{}, err
 	}
 	d.mu.Lock()
 	if d.closing {
 		d.mu.Unlock()
-		return fmt.Errorf("%w: shutting down", ipc.ErrNotConnected)
+		return ipc.JoinRes{}, fmt.Errorf("%w: shutting down", ipc.ErrNotConnected)
 	}
+	d.acct = nil
+	d.mu.Unlock()
+	var res ipc.JoinRes
+	if old != nil {
+		rebuilt := old.conn.State() == connector.StateHostKeyChanged
+		old.shutdown()
+		d.log.Info("replaced account", "account", old.name)
+		if rebuilt && old.ownStore {
+			if res.SetAside, err = d.setAside(old.name); err != nil {
+				return ipc.JoinRes{}, fmt.Errorf("set aside the earlier history: %w", err)
+			}
+			d.log.Info("set aside earlier history", "account", old.name, "dir", res.SetAside)
+		}
+	}
+	d.mu.Lock()
 	prev := d.cfg.Accounts
 	d.cfg.Accounts = []config.Account{acct}
 	if err := d.cfg.Save(); err != nil {
 		d.cfg.Accounts = prev
 		d.mu.Unlock()
-		return fmt.Errorf("save config: %w", err)
+		return res, fmt.Errorf("save config: %w", err)
 	}
-	d.acct = nil
 	d.mu.Unlock()
-	if old != nil {
-		old.shutdown()
-		d.log.Info("replaced account", "account", old.name)
-	}
 	d.log.Info("joined server", "account", acct.Name)
-	return d.bringUp(acct)
+	return res, d.bringUp(acct)
+}
+
+// setAside moves account's local store to <data>/set-aside/<account>-<UTC
+// time> and returns that directory, or "" when there was no store.
+func (d *daemon) setAside(account string) (string, error) {
+	dataDir, err := paths.Data()
+	if err != nil {
+		return "", err
+	}
+	src := filepath.Join(dataDir, "accounts", account)
+	if _, err := os.Stat(src); errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
+	parent := filepath.Join(dataDir, "set-aside")
+	if err := os.MkdirAll(parent, 0o700); err != nil {
+		return "", err
+	}
+	base := filepath.Join(parent, account+"-"+d.clock.Now().UTC().Format("20060102-150405"))
+	dst := base
+	for i := 2; ; i++ {
+		if _, err := os.Lstat(dst); errors.Is(err, fs.ErrNotExist) {
+			break
+		}
+		dst = fmt.Sprintf("%s-%d", base, i)
+	}
+	return dst, os.Rename(src, dst)
 }
 
 // replaceable reports whether a join to server may proceed, and returns the

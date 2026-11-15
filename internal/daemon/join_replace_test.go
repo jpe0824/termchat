@@ -20,9 +20,9 @@ func joinEnv(t *testing.T) (*env, *atomic.Int32) {
 	e.fake.AddConversation(room("r1", "platform", "me", "dana"), posted("dana", "m1", "hello"))
 	var calls atomic.Int32
 	e.adjust = func(o *Options) {
-		o.Join = func(_ context.Context, server, _ string) (config.Account, error) {
+		o.Join = func(_ context.Context, req ipc.JoinReq) (config.Account, error) {
 			calls.Add(1)
-			return config.Account{Name: "me", Server: server + ":7420", Handle: "me"}, nil
+			return config.Account{Name: "me", Server: req.Server + ":7420", Handle: "me"}, nil
 		}
 	}
 	e.start()
@@ -44,7 +44,7 @@ func TestJoinReplacesAccountStuckInTerminalState(t *testing.T) {
 		t.Run(string(s), func(t *testing.T) {
 			e, calls := joinEnv(t)
 			toState(t, e, s)
-			if err := e.c.Join("chat.test", "again"); err != nil {
+			if _, err := e.c.Join(ipc.JoinReq{Server: "chat.test", Code: "again"}); err != nil {
 				t.Fatalf("Join: %v", err)
 			}
 			if calls.Load() != 1 {
@@ -82,7 +82,7 @@ func TestJoinStillRefusedOtherwise(t *testing.T) {
 			if tc.state != connector.StateConnected {
 				toState(t, e, tc.state)
 			}
-			err := e.c.Join(tc.server, "again")
+			_, err := e.c.Join(ipc.JoinReq{Server: tc.server, Code: "again"})
 			if !errors.Is(err, ipc.ErrInvalid) || !strings.Contains(err.Error(), "an account is already configured") {
 				t.Fatalf("Join = %v, want ErrInvalid: an account is already configured", err)
 			}

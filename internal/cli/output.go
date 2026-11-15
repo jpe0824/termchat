@@ -95,6 +95,9 @@ type statusJSON struct {
 	Syncing bool   `json:"syncing"`
 	// ServerKey is the pinned server key's fingerprint, as serve prints it.
 	ServerKey string `json:"server_key"`
+	// SetAside is set by join only: where the replaced account's earlier
+	// history was moved.
+	SetAside string `json:"set_aside,omitempty"`
 }
 
 func statusOf(s ipc.Status) statusJSON {

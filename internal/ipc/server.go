@@ -50,7 +50,7 @@ type Backend interface {
 	DeviceInvite(ctx context.Context) (string, error)
 	CreateAgent(ctx context.Context, handle, name string) (string, error)
 	AdminInvite(ctx context.Context, handle, name string) (string, error)
-	Join(ctx context.Context, server, code string) error
+	Join(ctx context.Context, req JoinReq) (JoinRes, error)
 	// People returns every known identity, ordered by handle.
 	People(ctx context.Context) ([]model.Person, error)
 	// Stop asks the process to shut down. It must not block: the server
@@ -469,7 +469,7 @@ func dispatch(ctx context.Context, b Backend, op string, a args) (any, error) {
 	case opAdminInvite:
 		return b.AdminInvite(ctx, a.Handle, a.Name)
 	case opJoin:
-		return nil, b.Join(ctx, a.Server, a.Code)
+		return b.Join(ctx, JoinReq{Server: a.Server, Code: a.Code, ServerKey: a.ServerKey})
 	case opPeople:
 		return b.People(ctx)
 	}

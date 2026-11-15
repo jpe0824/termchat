@@ -55,7 +55,7 @@ func loadKey(dataDir, addr string) (ssh.Signer, error) {
 	}
 	signer, err := ssh.ParsePrivateKey(b)
 	if err != nil {
-		return nil, fmt.Errorf("termchat: parse device key: %w", err)
+		return nil, fmt.Errorf("parse device key: %w", err)
 	}
 	return signer, nil
 }
@@ -69,7 +69,7 @@ func loadOrCreateKey(dataDir, addr string) (ssh.Signer, error) {
 	}
 	path := keyPath(dataDir, addr)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, fmt.Errorf("termchat: key directory: %w", err)
+		return nil, fmt.Errorf("key directory: %w", err)
 	}
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -84,7 +84,7 @@ func loadOrCreateKey(dataDir, addr string) (ssh.Signer, error) {
 		return loadKey(dataDir, addr) // another Join created it first
 	}
 	if err != nil {
-		return nil, fmt.Errorf("termchat: create device key: %w", err)
+		return nil, fmt.Errorf("create device key: %w", err)
 	}
 	_, werr := f.Write(pem.EncodeToMemory(block))
 	if cerr := f.Close(); werr == nil {
@@ -92,7 +92,7 @@ func loadOrCreateKey(dataDir, addr string) (ssh.Signer, error) {
 	}
 	if werr != nil {
 		os.Remove(path)
-		return nil, fmt.Errorf("termchat: write device key: %w", werr)
+		return nil, fmt.Errorf("write device key: %w", werr)
 	}
 	return ssh.NewSignerFromKey(priv)
 }

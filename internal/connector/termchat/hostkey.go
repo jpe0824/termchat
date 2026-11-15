@@ -16,10 +16,10 @@ import (
 
 // ErrHostKeyChanged means the server presented a host key other than the one
 // pinned for it. The pin is never replaced automatically.
-var ErrHostKeyChanged = errors.New("termchat: server host key does not match the pinned key")
+var ErrHostKeyChanged = errors.New("server host key does not match the pinned key")
 
 // ErrHostKeyUnpinned means no host key is pinned for the server yet.
-var ErrHostKeyUnpinned = errors.New("termchat: server host key is not pinned")
+var ErrHostKeyUnpinned = errors.New("server host key is not pinned")
 
 const knownServersFile = "known_servers"
 
@@ -45,7 +45,7 @@ func pinnedKey(dataDir, addr string) (ssh.PublicKey, error) {
 		}
 		key, _, _, _, err := ssh.ParseAuthorizedKey([]byte(rest))
 		if err != nil {
-			return nil, fmt.Errorf("termchat: bad %s entry for %s: %w", knownServersFile, addr, err)
+			return nil, fmt.Errorf("bad %s entry for %s: %w", knownServersFile, addr, err)
 		}
 		return key, nil
 	}
@@ -99,11 +99,15 @@ type hostKeyCheck struct {
 }
 
 // callback accepts the key pinned for addr. With allowUnpinned it also
-// accepts any key when none is pinned, and the caller then pins it.
-func (h *hostKeyCheck) callback(dataDir, addr string, allowUnpinned bool) ssh.HostKeyCallback {
+// accepts any key when none is pinned, and the caller then pins it. A
+// non-empty want refuses every key whose fingerprint differs, pinned or not;
+// the SSH handshake ends there, before anything is sent on the connection.
+func (h *hostKeyCheck) callback(dataDir, addr string, allowUnpinned bool, want string) ssh.HostKeyCallback {
 	return func(_ string, _ net.Addr, key ssh.PublicKey) error {
 		pinned, err := pinnedKey(dataDir, addr)
 		switch {
+		case want != "" && ssh.FingerprintSHA256(key) != want:
+			err = ErrHostKeyChanged
 		case errors.Is(err, ErrHostKeyUnpinned) && allowUnpinned:
 			err = nil
 		case err == nil && !bytes.Equal(pinned.Marshal(), key.Marshal()):

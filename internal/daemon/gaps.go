@@ -12,18 +12,33 @@ import (
 // than is held, or the store failed to write an event. Each is recorded here
 // and repaired by the supervise goroutine with a sync, never by drain.
 
+// gap is a conversation's repair: the Seq it must be held up to, and whether
+// a newest-page fill of a conversation with nothing held may notify. Only a
+// gap every queuer called quiet stays quiet.
+type gap struct {
+	want  int64
+	quiet bool
+}
+
 // checkGap queues a repair when conv is not held contiguously up to seq. It
-// reads only the store and never blocks, so drain may call it.
-func (l *ledger) checkGap(conv string, seq int64) {
+// reads only the store and never blocks, so drain may call it. quiet marks a
+// gap whose first fill must not notify, as for a room the user just joined.
+func (l *ledger) checkGap(conv string, seq int64, quiet bool) {
 	if conv == "" || seq < 1 || l.st.Cursor(conv) >= seq {
 		return
 	}
 	l.mu.Lock()
-	if seq > l.gaps[conv] {
-		l.gaps[conv] = seq
-	}
+	l.queueGap(conv, gap{want: seq, quiet: quiet})
 	l.mu.Unlock()
 	signal(l.gapCh)
+}
+
+// queueGap merges g into the queue. Callers hold l.mu.
+func (l *ledger) queueGap(conv string, g gap) {
+	if have, ok := l.gaps[conv]; ok {
+		g = gap{want: max(have.want, g.want), quiet: have.quiet && g.quiet}
+	}
+	l.gaps[conv] = g
 }
 
 // repairGaps syncs every queued conversation. It reports true when some are
@@ -33,16 +48,16 @@ func (l *ledger) checkGap(conv string, seq int64) {
 func (a *account) repairGaps() (retry bool) {
 	a.mu.Lock()
 	gaps, online := a.gaps, a.online
-	a.gaps = map[string]int64{}
+	a.gaps = map[string]gap{}
 	a.mu.Unlock()
 	if !online {
 		return false
 	}
-	for conv, want := range gaps {
-		if a.st.Cursor(conv) >= want {
+	for conv, g := range gaps {
+		if a.st.Cursor(conv) >= g.want {
 			continue
 		}
-		done, err := a.repairConv(conv, want)
+		done, err := a.repairConv(conv, g)
 		if errors.Is(err, connector.ErrOffline) || a.ctx.Err() != nil {
 			return false
 		}
@@ -51,7 +66,7 @@ func (a *account) repairGaps() (retry bool) {
 		}
 		if !done {
 			a.mu.Lock()
-			a.gaps[conv] = max(a.gaps[conv], want)
+			a.queueGap(conv, g)
 			a.mu.Unlock()
 			retry = true
 		}
@@ -60,9 +75,9 @@ func (a *account) repairGaps() (retry bool) {
 }
 
 // repairConv fetches what conv is missing and reports whether it is now held
-// up to want, or no longer the user's. A conversation with nothing held gets
-// its newest page, as on first sync.
-func (a *account) repairConv(conv string, want int64) (bool, error) {
+// up to g.want, or no longer the user's. A conversation with nothing held gets
+// its newest page, as on first sync, silent when g is quiet.
+func (a *account) repairConv(conv string, g gap) (bool, error) {
 	if a.st.OldestSeq(conv) == 0 {
 		evs, err := a.conn.History(a.ctx, conv, 0, historyPage)
 		if errors.Is(err, connector.ErrNotFound) {
@@ -72,7 +87,7 @@ func (a *account) repairConv(conv string, want int64) (bool, error) {
 			return false, err
 		}
 		batch := newCatchUp()
-		a.nt.consider(a.storeHistory(conv, evs), mode{batch: batch})
+		a.nt.consider(a.storeHistory(conv, evs), mode{batch: batch, silent: g.quiet})
 		a.nt.endCatchUp(batch)
 		a.emitConv(conv)
 		signal(a.bfWake)
@@ -82,5 +97,5 @@ func (a *account) repairConv(conv string, want int64) (bool, error) {
 	if _, listed := a.view(conv); !listed {
 		return true, nil
 	}
-	return a.st.Cursor(conv) >= want, nil
+	return a.st.Cursor(conv) >= g.want, nil
 }

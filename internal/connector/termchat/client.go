@@ -179,7 +179,7 @@ func (c *Client) session(ctx context.Context) (terminal connector.ConnState, con
 	var check hostKeyCheck
 	cn, hello, err := connect(ctx, c.timeout, c.dial, c.addr, &ssh.ClientConfig{
 		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
-		HostKeyCallback: check.callback(c.dataDir, c.addr, false),
+		HostKeyCallback: check.callback(c.dataDir, c.addr, false, ""),
 	}, c.deliver)
 	switch {
 	case err == nil:
@@ -298,11 +298,15 @@ func (c *Client) deliver(ctx context.Context, f proto.Frame) bool {
 // creates the device key for the server if missing, pins the server's host
 // key on first contact and refuses a server whose key differs from the pin.
 // When the device key is already registered the invite is not spent.
-func Join(ctx context.Context, server, inviteCode, dataDir string) (config.Account, error) {
-	return join(ctx, server, inviteCode, dataDir, defaultDial, requestTimeout)
+//
+// A non-empty serverKey is the fingerprint (SHA256:...) the server must
+// present; any other key fails with ErrHostKeyChanged before the invite code
+// is sent, and nothing is pinned.
+func Join(ctx context.Context, server, inviteCode, serverKey, dataDir string) (config.Account, error) {
+	return join(ctx, server, inviteCode, serverKey, dataDir, defaultDial, requestTimeout)
 }
 
-func join(ctx context.Context, server, inviteCode, dataDir string, dial dialFunc, timeout time.Duration) (config.Account, error) {
+func join(ctx context.Context, server, inviteCode, serverKey, dataDir string, dial dialFunc, timeout time.Duration) (config.Account, error) {
 	addr := normalizeAddr(server)
 	signer, err := loadOrCreateKey(dataDir, addr)
 	if err != nil {
@@ -311,7 +315,7 @@ func join(ctx context.Context, server, inviteCode, dataDir string, dial dialFunc
 	var check hostKeyCheck
 	cn, hello, err := connect(ctx, timeout, dial, addr, &ssh.ClientConfig{
 		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
-		HostKeyCallback: check.callback(dataDir, addr, true),
+		HostKeyCallback: check.callback(dataDir, addr, true, serverKey),
 	}, nil)
 	if err != nil {
 		if _, herr := check.result(); errors.Is(herr, ErrHostKeyChanged) {
@@ -320,7 +324,7 @@ func join(ctx context.Context, server, inviteCode, dataDir string, dial dialFunc
 		if errors.Is(err, connector.ErrNotAuthorised) || errors.Is(err, connector.ErrVersionMismatch) {
 			return config.Account{}, err
 		}
-		return config.Account{}, fmt.Errorf("termchat: connect to %s: %w", addr, err)
+		return config.Account{}, fmt.Errorf("connect to %s: %w", addr, err)
 	}
 	defer cn.close()
 	if key, _ := check.result(); key != nil {

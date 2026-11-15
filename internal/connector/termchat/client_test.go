@@ -43,7 +43,7 @@ func TestJoinGeneratesKeyAndPinsHost(t *testing.T) {
 	code, _ := e.h.Store.CreateDeviceInvite("ann", server.InviteTTL)
 	dir := t.TempDir()
 
-	acct, err := Join(context.Background(), e.addr, code, dir)
+	acct, err := Join(context.Background(), e.addr, code, "", dir)
 	if err != nil {
 		t.Fatalf("Join: %v", err)
 	}
@@ -81,14 +81,14 @@ func TestJoinReusesKeyAndDoesNotSpendInviteWhenRegistered(t *testing.T) {
 	e.person(t, "ann", false)
 	first, _ := e.h.Store.CreateDeviceInvite("ann", server.InviteTTL)
 	dir := t.TempDir()
-	if _, err := Join(context.Background(), e.addr, first, dir); err != nil {
+	if _, err := Join(context.Background(), e.addr, first, "", dir); err != nil {
 		t.Fatal(err)
 	}
 	keyFile := keyPath(dir, e.addr)
 	before, _ := os.ReadFile(keyFile)
 
 	spare, _ := e.h.Store.CreateDeviceInvite("ann", server.InviteTTL)
-	acct, err := Join(context.Background(), e.addr, spare, dir)
+	acct, err := Join(context.Background(), e.addr, spare, "", dir)
 	if err != nil || acct.Handle != "ann" {
 		t.Fatalf("second Join = %+v, %v", acct, err)
 	}
@@ -97,7 +97,7 @@ func TestJoinReusesKeyAndDoesNotSpendInviteWhenRegistered(t *testing.T) {
 		t.Fatal("device key changed on the second Join")
 	}
 	// The spare invite is still redeemable from a different device.
-	if _, err := Join(context.Background(), e.addr, spare, t.TempDir()); err != nil {
+	if _, err := Join(context.Background(), e.addr, spare, "", t.TempDir()); err != nil {
 		t.Fatalf("spare invite was spent: %v", err)
 	}
 }
@@ -107,7 +107,7 @@ func TestJoinWithBadOrExpiredCode(t *testing.T) {
 	e.person(t, "ann", false)
 	expired, _ := e.h.Store.CreateDeviceInvite("ann", -time.Hour)
 	for name, code := range map[string]string{"unknown": "NOSUCHCODE", "expired": expired} {
-		_, err := Join(context.Background(), e.addr, code, t.TempDir())
+		_, err := Join(context.Background(), e.addr, code, "", t.TempDir())
 		if !errors.Is(err, connector.ErrNotAuthorised) {
 			t.Fatalf("%s: err = %v, want ErrNotAuthorised", name, err)
 		}
@@ -122,13 +122,13 @@ func TestJoinRefusesDifferentPinnedHostKey(t *testing.T) {
 	e.person(t, "ann", false)
 	code, _ := e.h.Store.CreateDeviceInvite("ann", server.InviteTTL)
 	dir := t.TempDir()
-	if _, err := Join(context.Background(), e.addr, code, dir); err != nil {
+	if _, err := Join(context.Background(), e.addr, code, "", dir); err != nil {
 		t.Fatal(err)
 	}
 	pinBefore, _ := os.ReadFile(filepath.Join(dir, "known_servers"))
 
 	e.restart(t, t.TempDir()) // new data directory, so a new host key
-	_, err := Join(context.Background(), e.addr, "ANYCODE", dir)
+	_, err := Join(context.Background(), e.addr, "ANYCODE", "", dir)
 	if !errors.Is(err, ErrHostKeyChanged) {
 		t.Fatalf("err = %v, want ErrHostKeyChanged", err)
 	}
@@ -794,12 +794,40 @@ func TestServerKeyIsThePinnedFingerprint(t *testing.T) {
 		t.Fatalf("ServerKey before join = %q, want empty", got)
 	}
 	code, _ := e.h.Store.CreateDeviceInvite("ann", server.InviteTTL)
-	acct, err := Join(context.Background(), e.addr, code, dir)
+	acct, err := Join(context.Background(), e.addr, code, "", dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := ssh.FingerprintSHA256(e.h.Server.HostKey())
 	if got := New(acct, dir).ServerKey(); got != want {
 		t.Fatalf("ServerKey = %q, want %q", got, want)
+	}
+}
+
+// With the fingerprint the admin gave, a server presenting any other key is
+// refused during the handshake: the invite code is never sent and nothing is
+// pinned.
+func TestJoinWithWrongServerKeySendsNothing(t *testing.T) {
+	e := newEnv(t)
+	code, err := e.h.Store.CreateInvite("ann", "Ann", server.InviteTTL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	_, err = Join(context.Background(), e.addr, code, "SHA256:not-this-server", dir)
+	if !errors.Is(err, ErrHostKeyChanged) {
+		t.Fatalf("Join = %v, want ErrHostKeyChanged", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, knownServersFile)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("known_servers after a refused key: %v", err)
+	}
+	if _, err := e.h.Store.Person("ann"); !errors.Is(err, server.ErrNotFound) {
+		t.Fatalf("the invite was redeemed: %v", err)
+	}
+	// The code is still unspent, so the right fingerprint joins with it.
+	want := ssh.FingerprintSHA256(e.h.Server.HostKey())
+	acct, err := Join(context.Background(), e.addr, code, want, dir)
+	if err != nil || acct.Handle != "ann" {
+		t.Fatalf("Join with the right key = %+v, %v", acct, err)
 	}
 }

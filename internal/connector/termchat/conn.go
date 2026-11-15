@@ -74,7 +74,7 @@ func connect(ctx context.Context, timeout time.Duration, dial dialFunc, addr str
 	cfg.Timeout = handshakeTimeout
 	wrap := func(err error) error {
 		if cerr := cctx.Err(); cerr != nil {
-			return fmt.Errorf("termchat: connect to %s: %w", addr, cerr)
+			return fmt.Errorf("connect to %s: %w", addr, cerr)
 		}
 		return err
 	}
@@ -158,7 +158,7 @@ func (cn *conn) request(ctx context.Context, typ string, req, res any) error {
 	if req != nil {
 		b, err := json.Marshal(req)
 		if err != nil {
-			return fmt.Errorf("termchat: encode %s: %w", typ, err)
+			return fmt.Errorf("encode %s: %w", typ, err)
 		}
 		f.Payload = b
 	}

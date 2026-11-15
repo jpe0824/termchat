@@ -1,9 +1,11 @@
 package daemon
 
 import (
+	"context"
 	"database/sql"
 	"path/filepath"
 	"slices"
+	"sync/atomic"
 	"testing"
 
 	"github.com/jpe0824/termchat/internal/connector"
@@ -111,5 +113,41 @@ func TestFailedLiveWriteIsSyncedAndRetried(t *testing.T) {
 	waitUntil(t, "the event stored on the retry", func() bool { return e.st.Cursor("r1") == 4 })
 	if m, err := e.st.ByMsgID("r1", "poison"); err != nil || m.Seq != 4 {
 		t.Fatalf("ByMsgID = %+v, %v", m, err)
+	}
+}
+
+// historyFailsOnce fails the first History call, as a join's own fill can.
+type historyFailsOnce struct {
+	connector.Connector
+	failed atomic.Bool
+}
+
+func (h *historyFailsOnce) History(ctx context.Context, conv string, before int64, limit int) ([]model.Event, error) {
+	if h.failed.CompareAndSwap(false, true) {
+		return nil, connector.ErrInternal
+	}
+	return h.Connector.History(ctx, conv, before, limit)
+}
+
+// A room's history fetched by the repair after joining it is as silent as the
+// join's own fill: an older message, even one mentioning the user, does not
+// notify.
+func TestJoinedRoomFillByRepairIsSilent(t *testing.T) {
+	e, rec := noteEnv(t)
+	e.conn = &historyFailsOnce{Connector: e.fake}
+	lobby := room("lobby", "lobby", "dana")
+	lobby.Open = true
+	old := posted("dana", "l1", "older message for @me")
+	old.Mentions = []string{"me"}
+	e.fake.AddConversation(lobby, old)
+	c := started(t, e)
+
+	if _, err := c.Room(connector.RoomOp{Kind: connector.RoomJoin, Conv: "lobby"}); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, "the repair's fill", func() bool { m, err := e.st.ByMsgID("lobby", "l1"); return err == nil && m.Seq == 1 })
+	sentinel(t, e, rec)
+	if got := dropSentinels(rec.osCalls()); len(got) != 0 {
+		t.Fatalf("notified %+v for a room's older history", texts(got))
 	}
 }

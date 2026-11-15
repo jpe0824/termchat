@@ -392,8 +392,8 @@ func (c *Client) AdminInvite(handle, name string) (string, error) {
 
 // Join registers this machine with a server using an invite code and brings
 // the account up.
-func (c *Client) Join(server, code string) error {
-	return c.call(opJoin, &args{Server: server, Code: code}, nil)
+func (c *Client) Join(req JoinReq) (JoinRes, error) {
+	return result[JoinRes](c, opJoin, &args{Server: req.Server, Code: req.Code, ServerKey: req.ServerKey})
 }
 
 // SetFocus reports which conversation this client shows and whether its

@@ -208,13 +208,13 @@ func TestJoinBringsDaemonUp(t *testing.T) {
 	e.fake.AddConversation(room("r1", "platform", "me", "dana"), posted("dana", "m1", "hello"))
 	var gotServer, gotCode string
 	e.adjust = func(o *Options) {
-		o.Join = func(_ context.Context, server, code string) (config.Account, error) {
-			gotServer, gotCode = server, code
-			return config.Account{Name: "me", Server: server, Handle: "me"}, nil
+		o.Join = func(_ context.Context, req ipc.JoinReq) (config.Account, error) {
+			gotServer, gotCode = req.Server, req.Code
+			return config.Account{Name: "me", Server: req.Server, Handle: "me"}, nil
 		}
 	}
 	c := e.start()
-	if err := c.Join("chat.test", "invite-1"); err != nil {
+	if _, err := c.Join(ipc.JoinReq{Server: "chat.test", Code: "invite-1"}); err != nil {
 		t.Fatalf("Join: %v", err)
 	}
 	if gotServer != "chat.test" || gotCode != "invite-1" {
@@ -236,7 +236,7 @@ func TestJoinBringsDaemonUp(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitUntil(t, "the message to be sent", func() bool { return len(e.fake.Sent()) == 1 })
-	if err := c.Join("chat.test", "invite-2"); !errors.Is(err, ipc.ErrInvalid) {
+	if _, err := c.Join(ipc.JoinReq{Server: "chat.test", Code: "invite-2"}); !errors.Is(err, ipc.ErrInvalid) {
 		t.Fatalf("second Join = %v, want ErrInvalid", err)
 	}
 }

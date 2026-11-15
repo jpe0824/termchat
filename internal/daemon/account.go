@@ -86,8 +86,8 @@ type ledger struct {
 	syncing  bool
 	backfill bool
 	known    map[string]bool
-	// gaps maps each conversation to repair to the Seq it must be held up to.
-	gaps map[string]int64
+	// gaps maps each conversation to repair to its gap.
+	gaps map[string]gap
 }
 
 func newAccount(d *daemon, name string, conn connector.Connector, st *store.Store, own bool) *account {
@@ -96,7 +96,7 @@ func newAccount(d *daemon, name string, conn connector.Connector, st *store.Stor
 		ledger: &ledger{
 			name: name, st: st, log: d.log.With("account", name), srv: d.srv,
 			stateCh: make(chan struct{}, 1), peopleCh: make(chan struct{}, 1), gapCh: make(chan struct{}, 1),
-			state: connector.StateOffline, me: conn.Me(), known: map[string]bool{}, gaps: map[string]int64{},
+			state: connector.StateOffline, me: conn.Me(), known: map[string]bool{}, gaps: map[string]gap{},
 		},
 		d: d, conn: conn, ownStore: own,
 		ctx: ctx, cancel: cancel,

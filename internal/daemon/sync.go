@@ -44,7 +44,7 @@ func (l *ledger) handleUpdate(u connector.Update) {
 	case u.Event != nil:
 		ev := *u.Event
 		l.nt.consider(l.ingest([]model.Event{ev}), livePush)
-		l.checkGap(ev.ConvID, ev.Seq)
+		l.checkGap(ev.ConvID, ev.Seq, false)
 		if l.unknown(ev.Actor, ev.Target) {
 			signal(l.peopleCh)
 		}

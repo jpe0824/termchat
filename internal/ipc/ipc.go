@@ -134,6 +134,18 @@ type request struct {
 	Args *args  `json:"args,omitempty"`
 }
 
+// JoinReq is a join: the server, the invite code and, when the person was
+// given one, the server key fingerprint the server must present.
+type JoinReq struct {
+	Server, Code, ServerKey string
+}
+
+// JoinRes is what a join did beyond registering. SetAside is the directory
+// the replaced account's earlier history was moved to, or "".
+type JoinRes struct {
+	SetAside string
+}
+
 type args struct {
 	Version   int               `json:",omitempty"`
 	Conv      string            `json:",omitempty"`
@@ -146,6 +158,7 @@ type args struct {
 	Name      string            `json:",omitempty"`
 	Server    string            `json:",omitempty"`
 	Code      string            `json:",omitempty"`
+	ServerKey string            `json:",omitempty"`
 	BeforeSeq int64             `json:",omitempty"`
 	Limit     int               `json:",omitempty"`
 	Focused   bool              `json:",omitempty"`

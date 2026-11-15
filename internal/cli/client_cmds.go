@@ -129,17 +129,29 @@ func newJoinCmd() *cobra.Command {
 			if code == "" {
 				return usagef("--invite is required")
 			}
+			key, _ := cmd.Flags().GetString("server-key")
+			if key != "" && !strings.HasPrefix(key, "SHA256:") {
+				return usagef("--server-key takes the fingerprint serve prints, SHA256:...")
+			}
 			return withClient(cmd, cmdContext(cmd), func(c *ipc.Client) error {
-				if err := c.Join(args[0], code); err != nil {
+				res, err := c.Join(ipc.JoinReq{Server: args[0], Code: code, ServerKey: key})
+				if err != nil {
 					return err
 				}
 				s, err := c.Status()
 				if err != nil {
 					return err
 				}
-				return emit(cmd, statusOf(s), func(w io.Writer) error {
+				out := statusOf(s)
+				out.SetAside = res.SetAside
+				return emit(cmd, out, func(w io.Writer) error {
 					if _, err := fmt.Fprintf(w, "joined %s as @%s\n", cell(args[0]), cell(s.Me.Handle)); err != nil {
 						return err
+					}
+					if res.SetAside != "" {
+						if _, err := fmt.Fprintf(w, "earlier history set aside in %s\n", cell(res.SetAside)); err != nil {
+							return err
+						}
 					}
 					if s.ServerKey == "" {
 						return nil
@@ -151,6 +163,7 @@ func newJoinCmd() *cobra.Command {
 		},
 	})
 	cmd.Flags().String("invite", "", "invite code")
+	cmd.Flags().String("server-key", "", "the server's key fingerprint (SHA256:...), checked before the invite is sent")
 	return cmd
 }
 

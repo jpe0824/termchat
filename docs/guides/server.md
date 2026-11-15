@@ -186,7 +186,10 @@ non-root user, keeps data in the `/data` volume and exposes port 7420. See
 1. Take a backup.
 2. Install the new binary and restart the server (`systemctl restart termchat`,
    or recreate the container). Database migrations run at start.
-3. Each person should run `termchat daemon stop` after upgrading their own
+3. If the first admin never redeemed the code `server init` printed, that code
+   no longer works after the upgrade: run `termchat server invite <handle>`
+   for a fresh one.
+4. Each person should run `termchat daemon stop` after upgrading their own
    client. Their background process keeps running the old version until it is
    stopped; the next client command starts one from the new binary. The
    interface shows "background process is a different version" with the
@@ -206,18 +209,27 @@ interface shows "server key changed".
 - If you rebuilt the server without the old `host_key` (a new data directory),
   every client sees a changed key. Confirm the change is yours, then on each
   client delete the line for that server from the `known_servers` file in the
-  client's data directory and run `termchat join <host:port> --invite <code>`
-  again; `join` records the new key and replaces the stuck account. A rebuilt
-  server has a new database, so each person needs a new invite. Compare the
-  fingerprint `join` prints with the server's before using the client.
+  client's data directory and run `termchat join <host:port> --invite <code>
+  --server-key SHA256:...` again, with the fingerprint the new server's `serve`
+  prints. `join` records the new key and replaces the stuck account. A rebuilt
+  server has a new database, so each person needs a new invite, and the
+  client's earlier history cannot continue on it: `join` moves the old local
+  history, with any messages still waiting to be sent, to
+  `set-aside/<handle>-<time>` in the client's data directory and says so. That
+  directory is kept for reference only; nothing reads it again.
 - If you did not change the server, treat it as a warning that something is
   answering in the server's place, and do not remove the line.
 
 Compare fingerprints: `termchat serve` prints `host key SHA256:...` at start.
-On a client, `termchat join` prints `server key SHA256:...` for the key it
-recorded, and `termchat status` shows the same value as `server key`
-(`server_key` in `--json`). They must match; check them on first join, before
-the invite code is trusted to that server.
+Send that fingerprint with the invite code, and have the person join with
+`termchat join <host:port> --invite <code> --server-key SHA256:...`. The client
+then checks the server's key before it sends the code, and refuses a server
+with any other key without spending the code or recording anything.
+
+Without `--server-key`, `join` records whatever key answers and prints it as
+`server key SHA256:...` afterwards; `termchat status` shows the same value as
+`server key` (`server_key` in `--json`). Comparing it with the server's then
+detects a wrong server, but only after the invite code was sent to it.
 
 ## A device that was revoked
 

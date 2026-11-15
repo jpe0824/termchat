@@ -51,7 +51,7 @@ func (e *env) joined(t *testing.T, handle string) (*Client, string) {
 		t.Fatalf("CreateDeviceInvite: %v", err)
 	}
 	dir := t.TempDir()
-	acct, err := Join(context.Background(), e.addr, code, dir)
+	acct, err := Join(context.Background(), e.addr, code, "", dir)
 	if err != nil {
 		t.Fatalf("Join: %v", err)
 	}

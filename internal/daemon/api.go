@@ -308,7 +308,7 @@ func (a *account) joined(ctx context.Context, c model.Conversation) {
 	}
 	// The server leaves this change's own events out of the pushes to this
 	// device, so they are fetched here.
-	a.checkGap(c.ID, c.LastSeq)
+	a.checkGap(c.ID, c.LastSeq, true)
 	signal(a.bfWake)
 }
 

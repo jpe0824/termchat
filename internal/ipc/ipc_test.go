@@ -75,7 +75,9 @@ func (b *stubBackend) CreateAgent(context.Context, string, string) (string, erro
 func (b *stubBackend) AdminInvite(context.Context, string, string) (string, error) {
 	return "code", b.err
 }
-func (b *stubBackend) Join(context.Context, string, string) error { return b.err }
+func (b *stubBackend) Join(context.Context, JoinReq) (JoinRes, error) {
+	return JoinRes{}, b.err
+}
 func (b *stubBackend) People(context.Context) ([]model.Person, error) {
 	return []model.Person{{Handle: "ann", DisplayName: "Ann A"}, {Handle: "bot", Agent: true}}, b.err
 }

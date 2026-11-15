@@ -15,9 +15,19 @@ termchat join chat.internal:7420 --invite 4N5FHFRB65
 
 In a terminal it prints `joined chat.internal:7420 as @bob` and the server's
 key fingerprint, `server key SHA256:...`; piped, it prints the status as JSON.
-Check the fingerprint against the one the server's operator sees (`termchat
-serve` prints it as `host key SHA256:...`). The address is `host:port`; with
-no port, 7420 is used.
+The address is `host:port`; with no port, 7420 is used.
+
+If the admin sent the server's fingerprint with the invite (`termchat serve`
+prints it as `host key SHA256:...`), pass it:
+
+```sh
+termchat join chat.internal:7420 --invite 4N5FHFRB65 --server-key SHA256:IAOOESd9...
+```
+
+`join` then refuses a server with any other key before it sends the invite
+code. Without `--server-key`, comparing the printed `server key` with the
+admin's afterwards still detects a wrong server, but only once the code has
+been sent to it.
 
 `join` creates a key for this device (in your data directory, mode 0600),
 records the server's host key so later changes are noticed, registers the key

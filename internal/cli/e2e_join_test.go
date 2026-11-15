@@ -2,6 +2,8 @@ package cli
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -153,6 +155,9 @@ func TestRevokedDeviceJoinsAgain(t *testing.T) {
 	a, b := newPerson(t), newPerson(t)
 	s.joinAs(t, a, "alice", "Alice")
 	s.joinAs(t, b, "bob", "Bob")
+	a.ok("dm", "bob")
+	a.send("", "@bob", "before the revocation")
+	eventually(t, "bob to hold it", func() bool { return len(b.messages("read", "@alice")) == 1 })
 	keys, err := s.Store.Keys("bob")
 	if err != nil || len(keys) != 1 {
 		t.Fatalf("Keys(bob) = %v, %v", keys, err)
@@ -170,9 +175,45 @@ func TestRevokedDeviceJoinsAgain(t *testing.T) {
 	if err != nil || !existing {
 		t.Fatalf("InviteHandle = %v, existing %v", err, existing)
 	}
-	b.ok("join", s.addr, "--invite", code)
+	if out := b.ok("join", s.addr, "--invite", code); strings.Contains(out, "set_aside") {
+		t.Fatalf("join output %q: a revoked device on the same server keeps its history", out)
+	}
 	eventually(t, "bob connected again", func() bool { return stateOf(b) == "connected" })
+	if got := b.messages("read", "@alice"); len(got) != 1 || got[0].Text != "before the revocation" {
+		t.Fatalf("bob reads %+v after rejoining, want his earlier history", got)
+	}
+	if _, err := os.Stat(filepath.Join(b.data, "set-aside")); !os.IsNotExist(err) {
+		t.Fatalf("set-aside directory exists: %v", err)
+	}
 	if keys, _ := s.Store.Keys("bob"); len(keys) != 1 {
 		t.Fatalf("bob has %d keys, want 1", len(keys))
+	}
+}
+
+// With --server-key, a server presenting another key is refused before the
+// invite code is sent: the code stays unspent and nothing is pinned. The error
+// carries the termchat prefix once.
+func TestJoinWithServerKeyChecksBeforeSendingTheCode(t *testing.T) {
+	s := startServer(t)
+	p := newPerson(t)
+	code, err := server.InitFirstAdmin(s.Store, "alice", "Alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.do("join", s.addr, "--invite", code, "--server-key", "SHA256:not-this-server").
+		fail(t, 1, "server host key does not match the pinned key ("+s.addr+")")
+	if _, err := os.Stat(filepath.Join(p.data, "known_servers")); !os.IsNotExist(err) {
+		t.Fatalf("known_servers after a refused key: %v", err)
+	}
+	if keys, _ := s.Store.Keys("alice"); len(keys) != 0 {
+		t.Fatalf("the invite was redeemed: alice has keys %v", keys)
+	}
+	p.do("join", s.addr, "--invite", code, "--server-key", "not-a-fingerprint").
+		fail(t, 2, "--server-key takes the fingerprint serve prints, SHA256:...")
+
+	fp := ssh.FingerprintSHA256(s.Server.HostKey())
+	out := p.ok("join", s.addr, "--invite", code, "--server-key", fp)
+	if !strings.Contains(out, `"handle":"alice"`) || !strings.Contains(out, `"server_key":"`+fp+`"`) {
+		t.Fatalf("join with the right key = %q", out)
 	}
 }

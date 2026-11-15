@@ -97,7 +97,7 @@ func TestJoinTimesOutWhenChannelOpenHangs(t *testing.T) {
 	r := newRelay(t, e.addr)
 	errc := make(chan error, 1)
 	go func() {
-		_, err := join(context.Background(), e.addr, code, t.TempDir(), silentAfterHandshake(r, nil), 300*time.Millisecond)
+		_, err := join(context.Background(), e.addr, code, "", t.TempDir(), silentAfterHandshake(r, nil), 300*time.Millisecond)
 		errc <- err
 	}()
 	select {

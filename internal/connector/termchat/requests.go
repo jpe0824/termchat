@@ -33,7 +33,7 @@ func do[Res any](ctx context.Context, c *Client, typ string, req any, changes bo
 	defer cancel()
 	err := cn.request(rctx, typ, req, &res)
 	if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
-		err = fmt.Errorf("termchat: %s timed out after %s: %w", typ, c.timeout, err)
+		err = fmt.Errorf("%s timed out after %s: %w", typ, c.timeout, err)
 	}
 	var sent *inFlight
 	if changes && errors.As(err, &sent) {
