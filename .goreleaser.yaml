@@ -1,0 +1,89 @@
+# GoReleaser v2 (written against 2.20). Run `goreleaser check` after editing.
+version: 2
+
+project_name: termchat
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: termchat
+    main: ./cmd/termchat
+    binary: termchat
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/jpe0824/termchat/internal/cli.Version=v{{ .Version }}
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    ignore:
+      - goos: windows
+        goarch: arm64
+
+archives:
+  - id: termchat
+    ids: [termchat]
+    formats: [tar.gz]
+    name_template: "termchat_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  use: github
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: Fixes
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: Other
+      order: 999
+  filters:
+    exclude:
+      - '^docs(\([[:word:]]+\))??:'
+      - '^test(\([[:word:]]+\))??:'
+      - '^chore(\([[:word:]]+\))??:'
+      - '^ci(\([[:word:]]+\))??:'
+
+# `brews` is deprecated since GoReleaser 2.10 in favour of `homebrew_casks`, but
+# casks are macOS-only, have no `test` block and no license field. A formula
+# installs on macOS and Linux and is tested with `brew test`.
+#
+# Publishing pushes Formula/termchat.rb to jpe0824/homebrew-tap over SSH with a
+# read-write deploy key. The private key (contents, not a path, and not
+# password-protected) comes from HOMEBREW_TAP_DEPLOY_KEY. With the variable
+# empty or unset the formula is still generated in dist/ but nothing is pushed.
+# GoReleaser's default ssh_command is `ssh -i <key> -o
+# StrictHostKeyChecking=accept-new -F /dev/null`, so GitHub's host key is
+# accepted on first connect; leave ssh_command unset to keep that default.
+brews:
+  - name: termchat
+    repository:
+      owner: jpe0824
+      name: homebrew-tap
+      branch: main
+      git:
+        url: '{{ if index .Env "HOMEBREW_TAP_DEPLOY_KEY" }}git@github.com:jpe0824/homebrew-tap.git{{ end }}'
+        private_key: '{{ index .Env "HOMEBREW_TAP_DEPLOY_KEY" }}'
+    directory: Formula
+    commit_author:
+      name: termchat release workflow
+      email: 41898282+github-actions[bot]@users.noreply.github.com
+    skip_upload: '{{ if index .Env "HOMEBREW_TAP_DEPLOY_KEY" }}false{{ else }}true{{ end }}'
+    homepage: https://github.com/jpe0824/termchat
+    description: Fast, reliable, chat-only TUI that runs in any terminal
+    license: MIT
+    test: |
+      system "#{bin}/termchat", "--version"

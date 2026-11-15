@@ -1,0 +1,9 @@
+.git
+.github
+dist/
+/termchat
+docs/
+.superpowers/
+.claude/
+*.md
+!README.md

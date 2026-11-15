@@ -1,0 +1,24 @@
+┌ termchat ──────────────────────────────────────────────────── team.example ● connected ┐
+│ Keys  ↑↓ scroll  ? close                                                               │
+│                                                                                        │
+│ Anywhere                                                                               │
+│ ?             help; ? or esc closes it, ↑ ↓ pgup pgdn scroll it (outside a text field) │
+│ ctrl+k        jump to a conversation or a person                                       │
+│ ctrl+n        new conversation: direct message, room, or join an open room             │
+│ ctrl+o        room panel: members, invite, remove, rename, leave                       │
+│ ctrl+c        quit; asked twice when drafts are unsent                                 │
+│ mouse         click a chat, a message, the input or an overlay row; a second click on  │
+│               a row acts; click outside an overlay to close it; the wheel scrolls      │
+│                                                                                        │
+│ Chat list                                                                              │
+│ ↑ ↓ k j       move                                                                     │
+│ enter         open the chat                                                            │
+│ tab           to the thread (standard and wide layouts)                                │
+│ /             search history                                                           │
+│ pgup pgdn     scroll the thread; home end: oldest, newest                              │
+│ r             start a stopped background process                                       │
+│ q             quit                                                                     │
+│                                                                                        │
+│ Thread                                                                                 │
+│ ↑ ↓ k j       step through your messages, or scroll                                    │
+└─ ↑↓ scroll  ? close  q quit ───────────────────────────────────────────────────────────┘
