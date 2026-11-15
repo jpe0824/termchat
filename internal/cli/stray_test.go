@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,7 +18,7 @@ func startFakeDaemon(t *testing.T, dir string) int {
 	if err := os.MkdirAll(filepath.Dir(bin), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\nwhile :; do sleep 1; done\n"), 0o700); err != nil {
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nwhile :; do sleep 60; done\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	cmd := exec.Command(bin, "daemon", "run")
@@ -49,8 +50,8 @@ func TestStrayCheckSeesOnlyThisRun(t *testing.T) {
 
 	foreign := []int{startFakeDaemon(t, filepath.Join(other, "p1")), startFakeDaemon(t, older)}
 	mine := startFakeDaemon(t, mineDir)
-	eventually(t, "own process listed", func() bool { return slices.Contains(strayDaemons(), mine) })
-	if got := strayDaemons(); !slices.Equal(got, []int{mine}) {
-		t.Fatalf("strayDaemons() = %v, want only %d (not the other runs' %v)", got, mine, foreign)
-	}
+	// The script's shell forks before each sleep, and the child carries the
+	// parent's command line until it execs, so a listing can briefly show it.
+	eventually(t, fmt.Sprintf("strayDaemons() to list only %d, not the other runs' %v", mine, foreign),
+		func() bool { return slices.Equal(strayDaemons(), []int{mine}) })
 }
