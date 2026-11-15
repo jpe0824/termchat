@@ -30,6 +30,15 @@ Tabs are kept and drawn as four spaces.
 A paste is inserted only when the input has focus. Anywhere else it is ignored
 and the line `paste ignored — press i to type` is shown.
 
+The same rules apply inside the jump, new-conversation, search and room-panel
+boxes. A bracketed paste into a text field puts its first line in the field,
+where it filters the list or fills the search; it never opens, creates, joins
+or invites anything, and a paste into a box with no field is ignored. The keys
+that open a box (`ctrl+k`, `ctrl+n`, `ctrl+o`, `/`) and the keys that act inside
+one (`enter`, `tab` in the new-room form, `a x n l` in the room panel, `y` to
+confirm) act only as a deliberate single press, so a paste without bracketed
+paste cannot trigger them either. `esc` closes a box after the same gap.
+
 ## Without bracketed paste
 
 A terminal without bracketed paste sends pasted text as if you had typed it, and

@@ -99,23 +99,39 @@ The `TERMCHAT` banner shows for 0.7 seconds or until a key or click. Set
 
 ### Focus: list, thread, input
 
-Keys depend on where focus is. The footer always lists the keys that work now.
+Keyboard focus is in one of three places, and the footer always lists the keys
+that work there. `?` opens the same table inside the program (outside the
+input, where letters type). Every key below comes from one key table in the
+code, so the help overlay and this guide agree.
 
-- **Chat list:** `↑↓` or `k j` move, `enter` opens, `tab` moves to the thread.
-- **Thread:** `↑↓` or `k j` scroll (or move among your own messages once one is
-  selected), `pgup pgdn home end` scroll, `i` or `enter` go to the input,
-  `esc` goes to the list.
-- **Input:** every printable key types, including `q`. `enter` sends, `esc`
-  leaves, `ctrl+c` quits.
+| Focus | Keys |
+|---|---|
+| **Chat list** | `↑ ↓` or `k j` move; `enter` opens the chat; `tab` goes to the thread (standard and wide layouts); `/` search; `pgup pgdn` scroll the thread, `home end` jump to its oldest and newest message; `r` starts a stopped background process; `q` quits. |
+| **Thread** | `↑ ↓` or `k j` step through your own messages once one is selected, otherwise scroll; `i` or `enter` go to the input; `e` edit and `d` delete your selected message (`d` asks y/n); `r` retry a failed message, or start a stopped background process; `x` discard a failed message (asks y/n); `esc` goes from a selection to the input, otherwise to the chat list; `tab` goes to the chat list; `/` search; `pgup pgdn home end` scroll; `q` quits. |
+| **Input** | Letters type, including `q` and `?`. `← →`, `home end`, `ctrl+a ctrl+e`, `backspace`, `delete`, `ctrl+w` and `ctrl+u` edit. `enter` sends (or saves an edit); `alt+enter` or `ctrl+j` inserts a line break; `esc` cancels an edit, otherwise leaves the input; `↑` in an empty input selects your newest message; `tab` types a tab; `pgup pgdn` scroll the thread. |
+| **A y/n question** | `y` answers yes, only as a lone key press. Any other key answers no. |
+| **Anywhere** | `ctrl+k` jump, `ctrl+n` new conversation, `ctrl+o` room panel, `/` search (not from the input), `ctrl+c` quits. |
+
+Outside the input only these commands act. A letter that is not a command
+shows a short hint instead of doing anything: `press i to type` on the thread,
+`press enter to open a chat` on the chat list. `i` or `enter` on the thread is
+the way to the input, `esc` the way out, and `tab` never moves focus out of the
+input, because it types a tab there.
+
+Some keys act only as a deliberate single press: `ctrl+k`, `ctrl+n`, `ctrl+o`,
+`enter` on the chat list, `tab` outside the input, `/`, `r`, `q`, `i`, `e`, `d`,
+`x`, `y`, and the action keys in overlays. A key of this kind is ignored when
+another key arrives within `paste_gap_ms` before or after it, so pasted text
+cannot trigger it; `enter`, `esc` and `↑` in the input, `ctrl+c`, and `esc` in
+overlays wait for the same gap before acting. Movement keys and `?` act at
+once. See [terminals and paste](terminals-and-paste.md).
 
 The conversation shown at launch is a preview: it is on screen but is not
-marked read and does not take the keyboard until you act on it (press
-`enter`, click, scroll, or press `i` on its thread). Opening a conversation
-from the list puts focus in the input. A letter pressed where it cannot type
-shows `press i to type` (or `press enter to open a chat` on the list) instead
-of doing anything. Under all of this, `?` opens a key map for the current
-focus, and the mouse works everywhere: click a row to open it, click the
-input to type, use the wheel to scroll.
+marked read and does not take the keyboard until you act on it (open it with
+`enter` or a click, press `i` or `enter` on its thread, click in it, or scroll
+it). Opening a conversation from the list puts focus in the input. The mouse
+works everywhere: click a row to open it, click the input to type, click your
+own message to select it, use the wheel to scroll.
 
 ### Sending
 
@@ -131,8 +147,9 @@ input to type, use the wheel to scroll.
 
 ### Editing and deleting your messages
 
-In the input, `↑` on an empty draft selects your newest message. Then `↑↓` or
-`k j` move among your own messages, `esc` returns to the input.
+In the input, `↑` on an empty draft selects your newest message; the focus is
+then the thread with a selection. `↑ ↓` or `k j` move among your own messages,
+and `esc` returns to the input.
 
 - `e` loads a delivered message into the input for editing. `enter` saves,
   `esc` cancels. Edited messages show `(edited)`.
@@ -151,23 +168,60 @@ for the connection fails as expired instead of going out late. Select it:
 Nothing is ever resent automatically after it has failed, and a message is
 never delivered twice.
 
-<!-- verify against the code after the overlay work lands -->
-### Search, jump, new conversation, room management
+### Jump, new conversation, search, room panel, help
 
-- **Jump:** `ctrl+k` opens a filter over conversation names and people; `enter`
-  opens the match.
-- **New conversation:** `ctrl+n` offers a direct message (type a handle), a new
-  room (a name, open or private), or joining an open room from a list. An
-  invalid name or unknown handle shows an inline error.
-- **Search:** `/` from the chat list or the thread searches the local history. Results show
-  conversation, author and a snippet; `enter` opens the conversation scrolled
-  to that message.
-- **Room panel:** `ctrl+o` in a room focuses the members panel in the wide
-  layout and opens it as an overlay otherwise. The room's creator and admins
-  can invite (`a`), remove the selected member (`x`) and rename (`n`); anyone
-  can leave (`l`). Removing and leaving ask `y/n` first.
-- **Help:** `?` shows the key map. Every overlay closes with `esc` and works
-  with the mouse: click a row, or click outside to close.
+These open as a box in the middle of the window, in every layout. Each needs
+the background process to be running, and closes with `esc` (or a click outside
+the box). In a box with a text field (jump, search, the pickers), letters type,
+`← →`, `home end`, `ctrl+a ctrl+e`, `backspace`, `delete`, `ctrl+w` and
+`ctrl+u` edit, `tab` does nothing (except where noted), `↑ ↓` move through the
+rows and `pgup pgdn` move a page. A pasted block fills the field with its first
+line and never acts. Click a row to select it and click it again to act.
+The footer of the box names what `enter` will do.
+
+**Jump (`ctrl+k`).** A filter over your conversations (rooms by name, people by
+handle or display name, in any case) and over people you have no direct chat
+with yet, which are marked `— new chat`. `enter` opens the selected
+conversation, or starts the direct message with the selected person.
+
+**New conversation (`ctrl+n`).** First choose `direct message`, `new room` or
+`join an open room` (`↑ ↓`, `enter`; `k j home end` also move here, as there
+is no field). `esc` goes back to the choices, and from the choices closes.
+- *Direct message:* type part of a handle. `enter` opens the direct message with
+  the selected person, and its footer says who (`⏎ message sam`). With an
+  empty field, or when nothing matches, `enter` does nothing.
+- *New room:* type a name (lowercase letters, digits, `-` and `_`, starting with
+  a letter or digit, at most 32 characters; a bad name is explained as you
+  type). `tab` switches between private (by invitation) and open (anyone on the
+  server can join). `enter` creates the room; with an empty field it does
+  nothing.
+- *Join an open room:* lists open rooms you are not in, with member counts.
+  `enter` joins the selected one. With none it says `no open rooms to join`.
+
+**Search (`/`).** From the chat list or the thread, not from the input. Type
+words; after a short pause it searches your local history for messages that
+contain every word, newest first, up to 50. Each result reads
+`conversation · author · text` with the first matching word marked. `enter`
+opens the conversation scrolled to that message, which is marked for two
+seconds. A result in a conversation you have left is marked `(left)`; its
+history is still searchable, but `enter` on it shows `you are no longer in this
+conversation` and opens nothing.
+
+**Room panel (`ctrl+o`).** In a room, shows its members (you marked `(you)`,
+agents `[agent]`), whether the room is open or private, and who created it. In
+a direct message it says `not a room`. `↑ ↓` or `k j home end` move.
+- `l` leaves the room, after y/n. Anyone can.
+- For the room's creator and for admins only: `a` invites someone (a picker of
+  people not in the room; `enter` invites the selected person, and its footer
+  names them), `x` removes the selected member after y/n, and `n` renames the
+  room (type a name, `enter` saves). The rows `invite someone`, `rename the
+  room` and `leave the room` at the end of the list do the same with `enter`;
+  `enter` on a member offers to remove them. Others do not see these keys.
+- `esc` goes back from the invite and rename forms to the members, and from
+  the members closes the panel.
+
+**Help (`?`).** The whole key table, grouped as above, from anywhere outside a
+text field. `↑ ↓ pgup pgdn` scroll it; `?` or `esc` closes it.
 
 ### Quitting
 

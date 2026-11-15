@@ -75,6 +75,27 @@ a draft in the input.
 - [ ] The mouse: click a conversation, click into the input, wheel scrolls the
       thread, click a failed message to retry it.
 
+### Overlays
+
+For each of jump (`ctrl+k`), new conversation (`ctrl+n`: direct message, new
+room open and private, join an open room), search (`/`) and the room panel
+(`ctrl+o`: members, leave, and as creator or admin invite, remove, rename), at
+widths 120, 90, 50 and 30:
+
+- [ ] It opens, shows its footer, acts on `enter` (or its action key), and
+      closes with `esc` and with a click outside.
+- [ ] A picker with an empty field does nothing on `enter`, and its footer
+      names who `enter` will act on once a row is selected.
+- [ ] Search opens a result scrolled to its message, which is marked briefly. A
+      result in a room you have left is marked `(left)` and cannot be opened.
+- [ ] A non-creator, non-admin sees no invite, remove or rename in the room panel.
+- [ ] `?` lists every key, and it matches the footer of the focus you opened it from.
+- [ ] Paste a line into each field (with and without bracketed paste): it fills
+      the field and nothing opens, creates or joins.
+- [ ] A notification appears while the interface is open in a terminal that
+      supports it, and falls back to the operating-system notification with
+      `notify.osc = "off"`.
+
 ## 5. Paste
 
 See [terminals and paste](terminals-and-paste.md).

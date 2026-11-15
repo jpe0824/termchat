@@ -16,7 +16,18 @@ closed.
 Routes 1 and 2 are alternatives: a notification is not shown twice. The hook is
 independent of both.
 
-<!-- verify against the code after the overlay work lands: route 1 depends on the interface raising the sequence -->
+How route 1 is chosen. When the interface starts, it works out which escape
+sequence your terminal understands (from `notify.osc` and the environment, see
+the table below). If it found one, it tells the background process that it can
+show notifications; if `notify.osc` is `off` or the terminal is unknown, it says
+it cannot. For each notification, the background process checks `notify.terminal`
+and whether an interface that can show it is attached. If so, it sends the
+notification to that interface, which writes the escape sequence followed by a
+bell to the terminal, and the operating-system route is not used. Otherwise,
+with `notify.os` on, the background process posts it through the operating
+system. The interface decides at start: changing `notify.osc` needs the
+interface restarted, and `notify.terminal`, `notify.os` and `notify.hook` need
+`termchat daemon stop`.
 
 Route 2 uses `osascript` on macOS and `notify-send` (or `gdbus` when
 `notify-send` is missing) on Linux. The `gdbus` path has not been tried on a

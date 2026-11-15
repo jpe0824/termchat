@@ -71,7 +71,7 @@ Concurrency in the background process:
 TUI and paste safety:
 - The update loop never blocks. Every backend call is a `tea.Cmd` returning a message tagged so stale results are dropped. Events from the background process are hints to re-read, not data.
 - Terminals without bracketed paste deliver a paste as individual key events. Keys are therefore classed as immediate (navigation only, so held-down repeat works), guarded (act only as a lone press, see `guarded` in `internal/tui/guard.go`) or deferred (exits from a text field, held for the paste gap). The gap is `paste_gap_ms` (default 25, capped at 200, negative or 0 disables).
-- With a text field focused, printable keys type and `tab` inserts a tab. Outside a text field only commands act, and other keys are dropped or leave a hint. Any new key handling must follow this, and the paste matrix test (`internal/tui/matrix_test.go`, plus `overlay_paste_test.go` for overlays) must cover it.
+- With a text field focused, printable keys type and `tab` inserts a tab. Outside a text field only commands act, and other keys are dropped or leave a hint. A new key is added to the one table in `internal/tui/keytable.go` (class, action, help text), which drives dispatch, the help overlay and footers. Any new key handling must follow this, and the paste matrix test (`internal/tui/matrix_test.go`, plus `overlay_paste_test.go` for overlays) must cover it.
 
 ## Testing
 
