@@ -3,7 +3,9 @@ package daemon
 import (
 	"slices"
 	"testing"
+	"time"
 
+	"github.com/jpe0824/termchat/internal/config"
 	"github.com/jpe0824/termchat/internal/connector"
 	"github.com/jpe0824/termchat/internal/ipc"
 	"github.com/jpe0824/termchat/internal/model"
@@ -13,7 +15,15 @@ import (
 // one held conversation, then takes it offline.
 func syncedOnce(t *testing.T) (*env, *noteRec, *ipc.Client) {
 	t.Helper()
+	return syncedOnceWith(t, func(*config.Config) {})
+}
+
+// syncedOnceWith is syncedOnce with the config adjusted before the daemon
+// starts, since the daemon reads it without a lock.
+func syncedOnceWith(t *testing.T, adjust func(*config.Config)) (*env, *noteRec, *ipc.Client) {
+	t.Helper()
 	e, rec := noteEnv(t)
+	adjust(e.cfg)
 	e.fake.AddConversation(dm("d1", "dana"), messages("x", 1)...)
 	c := startedWith(t, e, 1)
 	waitCaughtUp(t, c)
@@ -105,5 +115,25 @@ func TestFirstEverCatchUpAndRestartStaySilent(t *testing.T) {
 	sentinel(t, e, rec)
 	if got := dropSentinels(rec.osCalls()); len(got) != 0 {
 		t.Fatalf("restart announced old messages: %+v", got)
+	}
+}
+
+func TestOSAlwaysCatchUpNotifiesOncePerConversation(t *testing.T) {
+	e, rec, c := syncedOnceWith(t, func(c *config.Config) { c.Notify.OS = config.OSAlways })
+	events := uiClient(t, "sd", false)
+	reconnectWith(t, e, c, dm("d2", "dana"), messages("n", 3)...)
+	sentinel(t, e, rec)
+	want := ipc.NotifyPayload{ConvID: "d2", ConvName: "dana", Sender: "Dana", Text: "n message 3", DM: true}
+	if got := dropSentinels(rec.osCalls()); !slices.Equal(got, []ipc.NotifyPayload{want}) {
+		t.Fatalf("OS notified %+v, want only %+v", got, want)
+	}
+	var ui []ipc.NotifyPayload
+	for _, p := range drainNotifies(events, 100*time.Millisecond) {
+		if p.ConvID != "sd" {
+			ui = append(ui, p)
+		}
+	}
+	if !slices.Equal(ui, []ipc.NotifyPayload{want}) {
+		t.Errorf("UI notified %+v, want only %+v", ui, want)
 	}
 }

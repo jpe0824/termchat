@@ -159,7 +159,7 @@ func TestTerminalRouteOffFallsThroughToOS(t *testing.T) {
 
 func TestOSRouteOffAndNoUIRaisesNothingButTheHook(t *testing.T) {
 	e, rec := noteEnv(t)
-	e.cfg.Notify.OS = false
+	e.cfg.Notify.OS = config.OSOff
 	e.cfg.Notify.Hook = "hook-cmd"
 	started(t, e, dm("d1", "dana"))
 	push(e, "d1", "dana", "m1", "hi", 0)
@@ -238,5 +238,68 @@ func TestFocusedIncapableUIStillSuppresses(t *testing.T) {
 	sentinel(t, e, rec)
 	if got := dropSentinels(rec.osCalls()); len(got) != 0 {
 		t.Errorf("notified %+v although a focused UI shows the conversation", got)
+	}
+}
+
+func TestOSAlwaysPostsAlongsideAttachedUI(t *testing.T) {
+	e, rec := noteEnv(t)
+	e.cfg.Notify.OS = config.OSAlways
+	e.cfg.Notify.Hook = "hook-cmd"
+	started(t, e, dm("d1", "dana"))
+	events := uiClient(t, "sd", false)
+	push(e, "d1", "dana", "m1", "ping", 0)
+	want := ipc.NotifyPayload{ConvID: "d1", ConvName: "dana", Sender: "Dana", Text: "ping", DM: true}
+	ev := waitEvent(t, events, "notify event", func(ev ipc.Event) bool { return ev.Kind == ipc.KindNotify })
+	if *ev.Notify != want {
+		t.Fatalf("UI payload = %+v, want %+v", *ev.Notify, want)
+	}
+	waitUntil(t, "OS notification", func() bool { return len(rec.osCalls()) == 1 })
+	waitUntil(t, "hook", func() bool { return len(rec.hookCalls()) == 1 })
+	if got := drainNotifies(events, 100*time.Millisecond); len(got) != 0 {
+		t.Errorf("further UI notifications: %+v", got)
+	}
+	if got := rec.osCalls(); len(got) != 1 || got[0] != want {
+		t.Errorf("OS calls = %+v, want exactly %+v", got, want)
+	}
+}
+
+func TestOSAlwaysFocusedConversationRaisesNothing(t *testing.T) {
+	e, rec := noteEnv(t)
+	e.cfg.Notify.OS = config.OSAlways
+	e.cfg.Notify.Hook = "hook-cmd"
+	started(t, e, dm("d1", "dana"))
+	events := uiClient(t, "d1", true)
+	push(e, "d1", "dana", "m1", "you are looking at me", 0)
+	// A message in another conversation proves the first was decided.
+	push(e, "sd", "sam", "s1", "elsewhere", 0)
+	waitUntil(t, "OS notification", func() bool { return len(rec.osCalls()) == 1 })
+	ev := waitEvent(t, events, "notify event", func(ev ipc.Event) bool { return ev.Kind == ipc.KindNotify })
+	if ev.Notify.ConvID != "sd" {
+		t.Fatalf("UI got %+v, want only the other conversation", *ev.Notify)
+	}
+	if got := drainNotifies(events, 100*time.Millisecond); len(got) != 0 {
+		t.Errorf("further UI notifications: %+v", got)
+	}
+	if got := rec.osCalls(); len(got) != 1 || got[0].ConvID != "sd" {
+		t.Errorf("OS calls = %+v, want only the other conversation", got)
+	}
+	if got := rec.hookCalls(); len(got) != 1 || got[0].ConvID != "sd" {
+		t.Errorf("hook calls = %+v, want only the other conversation", got)
+	}
+}
+
+func TestOSAlwaysWithTerminalOffPostsOnce(t *testing.T) {
+	e, rec := noteEnv(t)
+	e.cfg.Notify.OS = config.OSAlways
+	e.cfg.Notify.Terminal = false
+	started(t, e, dm("d1", "dana"))
+	events := uiClient(t, "sd", false)
+	push(e, "d1", "dana", "m1", "hi", 0)
+	waitUntil(t, "OS notification", func() bool { return len(rec.osCalls()) == 1 })
+	if got := drainNotifies(events, 100*time.Millisecond); len(got) != 0 {
+		t.Errorf("UI got %+v with notify.terminal off", got)
+	}
+	if got := rec.osCalls(); len(got) != 1 {
+		t.Errorf("OS calls = %+v, want exactly one", got)
 	}
 }

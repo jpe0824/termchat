@@ -290,7 +290,7 @@ paste_gap_ms = 25       # milliseconds; 0 to 200; see terminals-and-paste.md
 
 [notify]
   terminal = true       # route 1: terminal escape sequences
-  os = true             # route 2: operating system notification
+  os = true             # route 2: true (when route 1 does not apply), "always" or false
   osc = "auto"          # "auto", "9", "99", "777" or "off"
   hook = ""             # route 3: a command to run for each notification
 
@@ -305,7 +305,7 @@ paste_gap_ms = 25       # milliseconds; 0 to 200; see terminals-and-paste.md
 | `paste_gap_ms` | `25` | Wait after `enter` for more pasted input. Values outside 0 to 200 are clamped. `0` sends at once. |
 | `cli.send` | `"allow"` | `"deny"` makes `termchat send` fail with exit code 6. |
 | `notify.terminal` | `true` | Let the interface raise notifications with terminal escape sequences. |
-| `notify.os` | `true` | Post through the operating system when the terminal route does not apply. |
+| `notify.os` | `true` | `true`: post through the operating system when the terminal route does not apply. `"always"`: post through it as well as the terminal route. `false`: never. |
 | `notify.osc` | `"auto"` | Which escape sequence to use; `"off"` disables. |
 | `notify.hook` | `""` | Command run for each notification. |
 | `rooms.<id>` | none, meaning `mentions` | Notification mode for one room. Find a room's id with `termchat chats --json`. |

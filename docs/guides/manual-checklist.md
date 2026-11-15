@@ -49,9 +49,8 @@ For each terminal, with the interface open on a different conversation, receive
 a direct message and a mention in a room, and confirm a system notification
 appears, and that closing the interface still produces an OS notification.
 
-- [ ] **Herdr.** This also settles whether Herdr accepts the kitty-style
-      sequence (OSC 99). If it does not, record which `notify.osc` value
-      works and update the notifications guide and `DetectOSC` for `HC_TERMINAL_ID`.
+- [ ] **Herdr.** It shows OSC 99 as an in-app notice only. With
+      `notify.os = "always"`, a system notification appears as well, once.
 - [ ] A second terminal that uses OSC 9 (iTerm2, WezTerm or Ghostty).
 - [ ] A third terminal of a different kind (kitty, a VTE terminal such as GNOME
       Terminal, or Terminal.app, which uses the OS route).
