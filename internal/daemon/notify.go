@@ -339,13 +339,14 @@ func (n *notifications) decide(ev model.Event, r *pass) (ipc.NotifyPayload, bool
 	return payload(m, v.Conversation, me), true, nil
 }
 
-// dispatch sends p to the attached UIs that can show it when it may,
-// otherwise to the operating system when it may, and independently runs the
-// hook.
+// dispatch sends p to the attached UIs that can show it when it may, to the
+// operating system when notify.os is "always" or no UI showed it, and
+// independently runs the hook. It runs once per notification, so the
+// operating system is asked at most once.
 func (n *notifications) dispatch(p ipc.NotifyPayload) {
 	cfg := n.cfg.Notify
 	shown := cfg.Terminal && n.srv.BroadcastNotify(ipc.Event{Kind: ipc.KindNotify, Notify: &p}) > 0
-	if !shown && cfg.OS != config.OSOff {
+	if cfg.OS == config.OSAlways || !shown && cfg.OS == config.OSFallback {
 		n.n.OS(p)
 	}
 	if cfg.Hook != "" {

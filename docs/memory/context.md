@@ -130,7 +130,8 @@ and wants chat there, reachable by AI agents through a command line.
   typed.
 - **The Linux `gdbus` notification route is untested** on real systems, and
   there are no notifications on Windows because the background process does not
-  run there. Whether Herdr honours OSC 99 is unconfirmed.
+  run there. Herdr shows OSC 99 only as an in-app notice, which is why
+  `notify.os = "always"` exists.
 - **No login item** starts the background process at boot; it starts on demand.
 
 ## Later projects
