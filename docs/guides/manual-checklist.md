@@ -76,6 +76,8 @@ a draft in the input.
 - [ ] Resizing keeps the draft, the selection and the scroll position.
 - [ ] The mouse: click a conversation, click into the input, wheel scrolls the
       thread, click a failed message to retry it.
+- [ ] Copy another person's message with `c` and with a second click, in a
+      plain terminal and inside tmux, and paste it elsewhere: the text only.
 
 ### Overlays
 

@@ -43,6 +43,13 @@ func TestStatusReportsAccountAndState(t *testing.T) {
 	p := newPerson(t)
 	s.joinAs(t, p, "alice", "Alice")
 
+	// "connected" is reported before the catch-up that follows it, so a slow
+	// machine can still be syncing when joinAs returns.
+	eventually(t, "alice to finish syncing", func() bool {
+		var st struct{ Syncing bool }
+		r := p.do("status", "--json")
+		return r.code == 0 && json.Unmarshal([]byte(r.out), &st) == nil && !st.Syncing
+	})
 	fp := ssh.FingerprintSHA256(s.Server.HostKey())
 	got := p.jsonOf("status")
 	want := map[string]any{"account": "alice", "handle": "alice", "state": "connected", "pending": float64(0), "syncing": false,
