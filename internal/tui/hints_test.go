@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -91,5 +92,85 @@ func TestFullInputKeepsHintRow(t *testing.T) {
 	}
 	if !isRule(col[16]) || col[18] != "" {
 		t.Errorf("bar %q, gap %q", col[16], col[18])
+	}
+}
+
+// hintRowOf is the hint row's text, for a one-row input.
+func hintRowOf(h *tester) string { return threadCol(h)[inputRow(h)+2] }
+
+func TestHintSplit(t *testing.T) {
+	h := opened(t, fixture(), 90, 20)
+	if got, want := hintRowOf(h), "⏎ send  alt+⏎ newline  ↑ select  esc leave"; got != want {
+		t.Errorf("input hints %q, want %q", got, want)
+	}
+	foot := footerOf(h)
+	mustContain(t, foot, "ctrl+k jump", "ctrl+n new", "ctrl+o room", "ctrl+c quit")
+	mustNotContain(t, foot, "⏎ send", "tab pane", "/ search", "? help")
+
+	h.key("esc") // leaves the input for the chat list
+	if got := hintRowOf(h); got != "" {
+		t.Errorf("list focused: hint row %q, want empty", got)
+	}
+	want := "└─ ↑↓ move  ⏎ open  tab pane  / search  ctrl+k jump  ctrl+n new  ? help  q quit ─────────┘"
+	if got := footerOf(h); got != want {
+		t.Errorf("list footer\n got %q\nwant %q", got, want)
+	}
+
+	h.key("tab")
+	if got, want := hintRowOf(h), "i type  ↑↓ scroll"; got != want {
+		t.Errorf("thread hints %q, want %q", got, want)
+	}
+	foot = footerOf(h)
+	mustContain(t, foot, "tab pane", "/ search", "? help", "q quit")
+	mustNotContain(t, foot, "i type")
+
+	_, h = onOwnMessage(t, 90)
+	if got, want := hintRowOf(h), "e edit  d delete  i type  ↑↓ select  esc back"; got != want {
+		t.Errorf("selection hints %q, want %q", got, want)
+	}
+
+	h = opened(t, fixture(), 50, 20)
+	if got, want := strings.Trim(strings.Split(h.lines()[inputRow(h)+2], "│")[1], " "), "⏎ send  alt+⏎ newline"; got != want {
+		t.Errorf("narrow input hints %q, want %q", got, want)
+	}
+	mustContain(t, footerOf(h), "esc chats", "ctrl+c quit")
+}
+
+func TestFitKeysDropsWholeLabels(t *testing.T) {
+	keys := []string{"⏎ send", "alt+⏎ newline", "↑ select", "esc leave"}
+	for _, c := range []struct {
+		w    int
+		want string
+	}{
+		{30, "⏎ send  alt+⏎ newline"},
+		{5, ""},
+		{100, "⏎ send  alt+⏎ newline  ↑ select  esc leave"},
+	} {
+		if got := fitKeys(keys, c.w); got != c.want {
+			t.Errorf("fitKeys(%d) = %q, want %q", c.w, got, c.want)
+		}
+	}
+}
+
+func TestHintRowWhileDown(t *testing.T) {
+	st := &starter{err: errors.New("boom")}
+	h := opened(t, fixture(), 90, 20, st.opt)
+	h.key("up")
+	h.key("up")
+	h.send(backendDownMsg{err: ipc.ErrClosed})
+	mustContain(t, hintRowOf(h), "↑↓ select")
+	mustNotContain(t, hintRowOf(h), "i type", "e edit", "d delete")
+	mustContain(t, footerOf(h), "r start")
+}
+
+func TestBannerStaysOnBorder(t *testing.T) {
+	h := opened(t, fixture(), 90, 20)
+	h.typeText("x")
+	h.key("ctrl+c")
+	if foot := footerOf(h); !strings.HasPrefix(foot, "└─ ") || !strings.Contains(foot, "ctrl+c again to quit") {
+		t.Errorf("border row %q, want the quit warning", foot)
+	}
+	if got, want := hintRowOf(h), "⏎ send  alt+⏎ newline  ↑ select  esc leave"; got != want {
+		t.Errorf("hint row %q, want %q", got, want)
 	}
 }

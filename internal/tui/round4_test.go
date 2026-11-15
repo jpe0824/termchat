@@ -286,14 +286,14 @@ func TestQuestionCancelledWhenItsMessageGoes(t *testing.T) {
 func TestFootersOfferIOnTheThread(t *testing.T) {
 	for _, w := range pasteWidths {
 		_, h := onOwnMessage(t, w)
-		mustContain(t, footerOf(h), "i type")
+		mustContain(t, h.view(), "i type")
 		h = started(t, fixture(), w, 20)
 		if w < 70 { // the previewed thread has the keyboard
-			mustContain(t, footerOf(h), "i type")
+			mustContain(t, h.view(), "i type")
 		}
 		h.key("tab")
-		if w >= 70 && !strings.Contains(footerOf(h), "i type") {
-			t.Errorf("width %d: thread footer %q", w, footerOf(h))
+		if w >= 70 && !strings.Contains(hintRowOf(h), "i type") {
+			t.Errorf("width %d: thread hints %q", w, hintRowOf(h))
 		}
 	}
 	h := started(t, fixture(), 90, 30)
