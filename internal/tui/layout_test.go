@@ -156,8 +156,8 @@ func TestShortWindowDropsFooterThenTopBar(t *testing.T) {
 	if len(lines) != 11 || !strings.Contains(lines[0], "termchat") || strings.HasPrefix(lines[10], "└─") {
 		t.Errorf("11 rows: want top bar, no footer:\n%s", h.view())
 	}
-	if !strings.Contains(lines[10], "> ") {
-		t.Errorf("11 rows: input should be the last line, got %q", lines[10])
+	if !strings.Contains(lines[8], "> ") || !strings.HasPrefix(lines[10], "│") {
+		t.Errorf("11 rows: input should sit above the bar and hint row:\n%s", h.view())
 	}
 	h.size(90, 7)
 	lines = h.lines()
