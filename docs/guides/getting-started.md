@@ -300,7 +300,7 @@ paste_gap_ms = 25       # milliseconds; 0 to 200; see terminals-and-paste.md
 
 | Key | Default | Meaning |
 |---|---|---|
-| `mark_read` | `true` | The interface marks a conversation read when you open it or read new messages at the bottom. Off: it never does. |
+| `mark_read` | `true` | The interface marks a conversation read when you open it, or when new messages arrive at the bottom while the terminal is focused (where the terminal never reports focus, on your next key or mouse input). Off: it never does. |
 | `splash` | `true` | Show the opening screen. |
 | `paste_gap_ms` | `25` | Wait after `enter` for more pasted input. Values outside 0 to 200 are clamped. `0` sends at once. |
 | `cli.send` | `"allow"` | `"deny"` makes `termchat send` fail with exit code 6. |

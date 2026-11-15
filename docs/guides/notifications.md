@@ -54,6 +54,7 @@ A message notifies when all of these hold:
   have moved. Reading it on your phone or laptop first silences it here.
 - It is **not in the conversation on screen**: an interface with that
   conversation open in a focused terminal window counts as watching it.
+  See [how focus is detected](#how-focus-is-detected).
 
 Not notified, ever: edits, deletions, membership changes, and history that is
 being filled in.
@@ -75,6 +76,26 @@ Set a room's mode in `config.toml` under `[rooms]`, keyed by the room's id
 
 The mode does not apply to direct messages. The background process reads the
 config at start: run `termchat daemon stop` after editing.
+
+## How focus is detected
+
+The interface turns on the terminal's focus reporting, so the terminal says
+when its window gains or loses focus. Until the first such report arrives,
+focus is **unknown**, and the interface counts as **not focused**: messages in
+the conversation on screen notify like any other. Some terminals and
+multiplexers never report focus (Herdr panes, and tmux without
+`set -g focus-events on`), so focus stays unknown for the whole session there.
+
+Focus also decides when a new message in the open conversation is marked read
+(with `mark_read` on, and the thread at its newest message):
+
+- **Focused:** at once.
+- **Not focused:** when the window gets focus back.
+- **Unknown:** on your next key press, paste, click or scroll in the
+  interface. Input from before the message arrived does not count, so a
+  message that arrives while you are away stays unread.
+
+Opening a conversation marks it read in all three cases.
 
 ## Config keys
 

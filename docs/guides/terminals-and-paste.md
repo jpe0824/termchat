@@ -10,7 +10,7 @@ what is checked by hand before a release is in
 |---|---|---|
 | Alternate screen | The full-window interface | Required. |
 | Mouse reporting | Clicking rows, the input and messages, wheel scrolling | The keyboard does everything the mouse does. |
-| Focus reporting | Knowing whether the terminal window is focused, so a message you are looking at is not notified and is marked read | The terminal counts as focused. |
+| Focus reporting | Knowing whether the terminal window is focused, so a message you are looking at is not notified and is marked read | The interface counts as not focused: messages in the open chat still notify, and new ones there are marked read on your next key or mouse input. See [how focus is detected](notifications.md#how-focus-is-detected). |
 | Bracketed paste | Pasting text without it being read as typing | See below. |
 | Notification sequences (OSC 9, 99, 777) | [Notifications](notifications.md) | The operating-system route is used. |
 | Clipboard writes (OSC 52) | `c`, or a second click, copies the selected message | Nothing is copied. The note still shows, because a terminal does not answer OSC 52. |
