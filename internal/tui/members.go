@@ -10,34 +10,17 @@ import (
 // membersLines is the wide layout's panel for the open room: its members,
 // whether it is open, and who created it. A member is tagged [agent] when
 // the people list says so or one of their loaded messages is.
-func (m *Model) membersLines() []string {
+func (m *Model) membersLines(g geom) []string {
 	c, ok := m.openConv()
 	if !ok {
 		return nil
-	}
-	agents := map[string]bool{}
-	for _, h := range c.Members {
-		agents[h] = m.isAgent(h)
-	}
-	if m.thread != nil {
-		for _, msg := range m.thread.stored {
-			if msg.Agent {
-				agents[msg.Author] = true
-			}
-		}
 	}
 	members := slices.Clone(c.Members)
 	slices.Sort(members)
 	var names []string
 	for _, h := range members {
-		n := sanitize.Line(h)
-		if h == m.me() {
-			n += " (you)"
-		}
-		if agents[h] {
-			n += " [agent]"
-		}
-		names = append(names, n)
+		agent := m.isAgent(h) || m.thread != nil && m.thread.agents[h]
+		names = append(names, tagged(sanitize.Line(h), h == m.me(), agent))
 	}
 	kind := "Private room"
 	if c.Open {
@@ -47,7 +30,7 @@ func (m *Model) membersLines() []string {
 	if c.Creator != "" {
 		tail = append(tail, "created by "+sanitize.Line(c.Creator))
 	}
-	room := m.geom().bodyH - 1 - len(tail)
+	room := g.bodyH - 1 - len(tail)
 	if len(names) > room {
 		keep := max(room-1, 0)
 		names = append(names[:keep], "+"+strconv.Itoa(len(names)-keep)+" more")

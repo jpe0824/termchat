@@ -184,7 +184,7 @@ func TestQuitWarningFitsShortWindows(t *testing.T) {
 
 func bannerDelays(h *tester) (delays []time.Duration) {
 	for _, tk := range h.ticks {
-		if _, ok := tk.msg.(bannerExpiredMsg); ok {
+		if t, ok := tk.msg.(timerMsg); ok && t.id == timerBanner {
 			delays = append(delays, tk.d)
 		}
 	}

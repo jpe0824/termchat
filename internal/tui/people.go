@@ -35,18 +35,24 @@ func (m *Model) onPeople(msg peopleMsg) {
 	switch {
 	case msg.b != m.b:
 	case msg.err == nil:
-		m.people = msg.people
+		m.setPeople(msg.people)
 	case m.ov != nil && m.ov.gen == msg.gen:
 		m.ov.info = "people list not refreshed: " + sanitize.Line(msg.err.Error())
 	}
 }
 
-func (m *Model) person(handle string) (model.Person, bool) {
-	i := slices.IndexFunc(m.people, func(p model.Person) bool { return p.Handle == handle })
-	if i < 0 {
-		return model.Person{}, false
+func (m *Model) setPeople(people []model.Person) {
+	m.people, m.byHandle = people, make(map[string]model.Person, len(people))
+	for _, p := range people {
+		if _, ok := m.byHandle[p.Handle]; !ok {
+			m.byHandle[p.Handle] = p
+		}
 	}
-	return m.people[i], true
+}
+
+func (m *Model) person(handle string) (model.Person, bool) {
+	p, ok := m.byHandle[handle]
+	return p, ok
 }
 
 func (m *Model) isAgent(handle string) bool {
@@ -60,10 +66,19 @@ func (m *Model) personLabel(handle string) string {
 	if p, ok := m.person(handle); ok && p.DisplayName != "" && p.DisplayName != handle {
 		s += "  " + sanitize.Line(p.DisplayName)
 	}
-	if m.isAgent(handle) {
-		s += " [agent]"
+	return tagged(s, false, m.isAgent(handle))
+}
+
+// tagged is a person's label with the tags that apply: "(you)" for the
+// user, "[agent]" for an agent.
+func tagged(label string, you, agent bool) string {
+	if you {
+		label += " (you)"
 	}
-	return s
+	if agent {
+		label += " [agent]"
+	}
+	return label
 }
 
 // query is the field's text as a filter: lower case, without a leading @

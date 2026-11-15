@@ -22,6 +22,14 @@ type input struct {
 	// follow keeps the cursor's row in view; scrolling the input with the
 	// wheel turns it off until the cursor next moves.
 	follow bool
+	// laid is the last layout rows made, for the text and width in it.
+	laid inputLayout
+}
+
+type inputLayout struct {
+	text string
+	w    int
+	rows []span
 }
 
 // cleanInput is typed or pasted text as it may enter a draft: carriage
@@ -62,6 +70,15 @@ func cluster(s string, w int) (string, int) {
 // rows lays the text out in rows of w cells. One cell is kept free so the
 // cursor fits after a full row.
 func (in *input) rows(w int) []span {
+	if l := in.laid; l.rows != nil && l.w == w && l.text == in.text {
+		return l.rows
+	}
+	rows := in.layRows(w)
+	in.laid = inputLayout{in.text, w, rows}
+	return rows
+}
+
+func (in *input) layRows(w int) []span {
 	w = max(w-1, 1)
 	var out []span
 	start, cells := 0, 0

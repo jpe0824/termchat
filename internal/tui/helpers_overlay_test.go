@@ -123,7 +123,7 @@ func (h *tester) fireSearch() {
 	h.t.Helper()
 	var keep, due []tick
 	for _, tk := range h.ticks {
-		if _, ok := tk.msg.(searchTickMsg); ok {
+		if t, ok := tk.msg.(timerMsg); ok && t.id == timerSearch {
 			due = append(due, tk)
 		} else {
 			keep = append(keep, tk)

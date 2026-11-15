@@ -59,19 +59,16 @@ func (m *Model) jumpGo() tea.Cmd {
 }
 
 // ovTitle is the overlay's heading.
-func (m *Model) ovTitle() string {
-	ov := m.ov
-	switch ov.kind {
-	case ovJump:
-		return "Jump to"
-	case ovSearch:
-		return "Search"
-	case ovNew:
-		return [...]string{stepChoose: "New conversation", stepDM: "Direct message", stepRoom: "New room",
-			stepJoin: "Join an open room"}[ov.step]
-	}
+func (m *Model) ovTitle() string { return m.ov.spec().title(m) }
+
+func (m *Model) newTitle() string {
+	return [...]string{stepChoose: "New conversation", stepDM: "Direct message", stepRoom: "New room",
+		stepJoin: "Join an open room"}[m.ov.step]
+}
+
+func (m *Model) roomTitle() string {
 	name := m.roomName()
-	switch ov.step {
+	switch m.ov.step {
 	case stepInvite:
 		return "Invite to " + name
 	case stepRename:

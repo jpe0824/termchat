@@ -138,16 +138,15 @@ func (m *Model) clickThread(g geom, x, y int) tea.Cmd {
 	return nil
 }
 
-// commandKey handles a key when the input does not have it. Only the
-// commands of keyTable's main groups act here.
-func (m *Model) commandKey(k tea.KeyPressMsg, g geom) tea.Cmd {
+// commandKey handles a key when the input does not have it: b is its
+// binding, if ok. Only the commands of keyTable's main groups act here.
+func (m *Model) commandKey(k tea.KeyPressMsg, g geom, b binding, ok bool) tea.Cmd {
 	s := k.String()
 	list := m.listActive(g)
 	sel, hasSel := m.selected()
 	if list {
 		hasSel = false
 	}
-	b, ok := mainBinding(s)
 	if !ok {
 		// Only the input takes text: here a key that would type does nothing.
 		if keyText(k) != "" {
@@ -155,68 +154,91 @@ func (m *Model) commandKey(k tea.KeyPressMsg, g geom) tea.Cmd {
 		}
 		return nil
 	}
-	switch b.act {
-	case actQuit:
-		return m.confirmQuit("q")
-	case actHelp:
-		m.help = true
-	case actTab:
-		m.cycleFocus(g)
-	case actEsc:
-		m.escape(g, list)
-	case actMove:
-		d := 1
-		if s == "up" || s == "k" {
-			d = -1
-		}
-		switch {
-		case list:
-			m.move(d)
-		case hasSel:
-			m.moveSel(d)
-		default:
-			return m.scrollKey(d)
-		}
-	case actEnter:
-		if list && s == "enter" {
-			if id := m.cursorID(); id != "" {
-				return m.open(id)
-			}
-		} else if !list && m.inputUsable(g) {
-			m.promote()
-			m.toInput()
-		}
-	case actPage:
-		return m.held(func() tea.Cmd { return m.pageKey(s, g) })
-	case actJump:
-		return m.openOverlay(ovJump)
-	case actNew:
-		return m.openOverlay(ovNew)
-	case actPanel:
-		return m.openOverlay(ovRoom)
-	case actSearch:
-		if m.focus != focusInput {
-			return m.openOverlay(ovSearch)
-		}
-	case actR:
-		if m.procDown {
-			return m.startProcess()
-		}
-		if hasSel && sel.m.Status == ipc.MsgFailed {
-			return m.retry(sel.m.MsgID)
-		}
-	case actEdit, actDelete:
-		if hasSel && m.delivered(sel.m) && m.b != nil && !m.procDown {
-			if b.act == actEdit {
-				m.startEdit(sel)
-			} else {
-				m.askDelete(sel)
-			}
-		}
-	case actDiscard:
-		if hasSel && sel.m.Status == ipc.MsgFailed {
-			m.askDiscard(sel)
-		}
+	return b.run(m, keyCtx{key: s, g: g, list: list, sel: sel, hasSel: hasSel})
+}
+
+func (m *Model) keyHelp(keyCtx) tea.Cmd  { m.help = true; return nil }
+func (m *Model) keyQuit(keyCtx) tea.Cmd  { return m.confirmQuit("q") }
+func (m *Model) keyTab(c keyCtx) tea.Cmd { m.cycleFocus(c.g); return nil }
+func (m *Model) keyEsc(c keyCtx) tea.Cmd { m.escape(c.g, c.list); return nil }
+
+func (m *Model) keyMove(c keyCtx) tea.Cmd {
+	d := 1
+	if c.key == "up" || c.key == "k" {
+		d = -1
+	}
+	switch {
+	case c.list:
+		m.move(d)
+	case c.hasSel:
+		m.moveSel(d)
+	default:
+		return m.scrollKey(d)
+	}
+	return nil
+}
+
+// keyListEnter opens the chat at the cursor.
+func (m *Model) keyListEnter(keyCtx) tea.Cmd {
+	if id := m.cursorID(); id != "" {
+		return m.open(id)
+	}
+	return nil
+}
+
+// keyThreadEnter goes from the thread to its input.
+func (m *Model) keyThreadEnter(c keyCtx) tea.Cmd {
+	if m.inputUsable(c.g) {
+		m.promote()
+		m.toInput()
+	}
+	return nil
+}
+
+func (m *Model) keyPage(c keyCtx) tea.Cmd {
+	return m.held(func() tea.Cmd { return m.pageKey(c.key, c.g) })
+}
+
+func (m *Model) keySearch(keyCtx) tea.Cmd {
+	if m.focus != focusInput {
+		return m.openOverlay(ovSearch)
+	}
+	return nil
+}
+
+func (m *Model) keyR(c keyCtx) tea.Cmd {
+	if m.procDown {
+		return m.startProcess()
+	}
+	if c.hasSel && c.sel.m.Status == ipc.MsgFailed {
+		return m.retry(c.sel.m.MsgID)
+	}
+	return nil
+}
+
+// ownSel is the selected message when it is the user's own delivered one
+// and the background process is there to change it.
+func (m *Model) ownSel(c keyCtx) bool {
+	return c.hasSel && m.delivered(c.sel.m) && m.b != nil && !m.procDown
+}
+
+func (m *Model) keyEdit(c keyCtx) tea.Cmd {
+	if m.ownSel(c) {
+		m.startEdit(c.sel)
+	}
+	return nil
+}
+
+func (m *Model) keyDelete(c keyCtx) tea.Cmd {
+	if m.ownSel(c) {
+		m.askDelete(c.sel)
+	}
+	return nil
+}
+
+func (m *Model) keyDiscard(c keyCtx) tea.Cmd {
+	if c.hasSel && c.sel.m.Status == ipc.MsgFailed {
+		m.askDiscard(c.sel)
 	}
 	return nil
 }

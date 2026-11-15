@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"strings"
+
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/jpe0824/termchat/internal/ipc"
@@ -28,11 +30,9 @@ func (m *Model) requestChats() tea.Cmd {
 	if m.b == nil {
 		return nil
 	}
-	if m.chatsBusy {
-		m.chatsAgain = true
+	if !m.chatsRead.begin() {
 		return nil
 	}
-	m.chatsBusy = true
 	b := m.b
 	return func() tea.Msg {
 		mine, open, err := b.Chats()
@@ -41,10 +41,8 @@ func (m *Model) requestChats() tea.Cmd {
 }
 
 func (m *Model) onChats(msg chatsMsg) tea.Cmd {
-	m.chatsBusy = false
 	var cmds []tea.Cmd
-	if m.chatsAgain {
-		m.chatsAgain = false
+	if m.chatsRead.end() {
 		cmds = append(cmds, m.requestChats())
 	}
 	if msg.b != m.b {
@@ -74,32 +72,50 @@ func (m *Model) requestThread() tea.Cmd {
 	if m.b == nil || m.thread == nil {
 		return nil
 	}
-	if m.threadBusy {
-		m.threadAgain = true
+	m.thread.owe(0)
+	return m.readThread()
+}
+
+// readThread sends the re-read the thread is owed, unless one is out. One
+// owed for events about messages reaches back only to the oldest of them,
+// or to the oldest message held if that is newer; any other re-read covers
+// the whole held window.
+func (m *Model) readThread() tea.Cmd {
+	t := m.thread
+	if m.b == nil || t == nil || !m.threadRead.begin() {
 		return nil
 	}
-	m.threadBusy = true
-	b, conv := m.b, m.thread.conv
-	limit := min(max(len(m.thread.stored), pageSize, m.thread.want), maxReread)
+	b, conv := m.b, t.conv
+	limit := min(max(len(t.stored), pageSize, t.want), maxReread)
+	var reach int64
+	if t.owed && t.need > 0 && t.loaded && t.want == 0 && len(t.stored) > 0 {
+		newest := t.newestSeq()
+		reach = min(max(t.need, t.stored[0].Seq), newest)
+		limit = int(min(int64(limit), max(t.need, newest)-reach+1))
+	}
+	t.owed, t.need = false, 0
 	return func() tea.Msg {
 		msgs, err := b.Messages(conv, 0, limit)
-		return threadMsg{b: b, conv: conv, limit: limit, msgs: msgs, err: err}
+		return threadMsg{b: b, conv: conv, limit: limit, reach: reach, msgs: msgs, err: err}
 	}
 }
 
 func (m *Model) onThread(msg threadMsg) tea.Cmd {
-	m.threadBusy = false
 	var cmds []tea.Cmd
-	if m.threadAgain {
-		m.threadAgain = false
-		cmds = append(cmds, m.requestThread())
+	if m.threadRead.end() {
+		cmds = append(cmds, m.readThread())
 	}
-	if msg.b != m.b || m.thread == nil || msg.conv != m.thread.conv {
+	if m.stale(msg.b, msg.conv) {
 		return tea.Batch(cmds...)
 	}
 	if msg.err != nil {
 		m.thread.err = sanitize.Line(msg.err.Error())
 		return tea.Batch(append(cmds, m.failed(msg.err))...)
+	}
+	if gap(msg) {
+		// More arrived than the read was sized for: what lies between it and
+		// what is held is unknown, so the whole window is read instead.
+		return tea.Batch(append(cmds, m.requestThread())...)
 	}
 	wasLoaded, newest := m.thread.loaded, m.thread.newestSeq()
 	m.thread.merge(msg.msgs, msg.limit)
@@ -109,14 +125,32 @@ func (m *Model) onThread(msg threadMsg) tea.Cmd {
 	if _, ok := m.selected(); !ok {
 		m.thread.sel = ""
 	}
-	if n := m.note; n != nil && n.ask != nil && n.conv == msg.conv && !m.holds(n) {
-		cmds = append(cmds, m.dropQuestion(n))
+	if n := m.note; n != nil && n.ask != nil && n.conv == msg.conv && !n.ask.holds() {
+		cmds = append(cmds, n.ask.no())
 	}
 	if m.thread.hasFailed() {
 		cmds = append(cmds, m.requestOutbox())
 	}
 	m.thread.want = 0
 	return tea.Batch(append(cmds, m.seekJump())...)
+}
+
+// gap reports whether a read sized to reach a message came back full
+// without reaching it.
+func gap(msg threadMsg) bool {
+	if msg.reach == 0 {
+		return false
+	}
+	n, oldest := 0, int64(0)
+	for _, mg := range msg.msgs {
+		if mg.Status == "" {
+			if n == 0 {
+				oldest = mg.Seq
+			}
+			n++
+		}
+	}
+	return n >= msg.limit && oldest > msg.reach
 }
 
 // requestOlder loads the page before the oldest held message.
@@ -135,7 +169,7 @@ func (m *Model) requestOlder() tea.Cmd {
 
 func (m *Model) onOlder(msg olderMsg) tea.Cmd {
 	m.olderBusy = false
-	if msg.b != m.b || m.thread == nil || msg.conv != m.thread.conv {
+	if m.stale(msg.b, msg.conv) {
 		return nil
 	}
 	if msg.err != nil {
@@ -145,37 +179,58 @@ func (m *Model) onOlder(msg olderMsg) tea.Cmd {
 	return m.seekJump()
 }
 
-// onEvent treats an event as a hint: it re-reads what the event touches.
-func (m *Model) onEvent(ev ipc.Event) tea.Cmd {
-	var conv string
-	switch ev.Kind {
-	case ipc.KindStatus:
-		if ev.Status != nil {
-			return m.setStatus(*ev.Status)
+// onEvents treats events as hints: it re-reads what they touch, each
+// read once for the lot, and writes their notifications in order.
+func (m *Model) onEvents(evs []ipc.Event) tea.Cmd {
+	var cmds []tea.Cmd
+	var notes []string
+	chats, thread := false, false
+	for _, ev := range evs {
+		var conv string
+		var seq int64
+		switch ev.Kind {
+		case ipc.KindStatus:
+			if ev.Status != nil {
+				cmds = append(cmds, m.setStatus(*ev.Status))
+			}
+			continue
+		case ipc.KindMessage:
+			if ev.Message != nil {
+				conv, seq = ev.Message.ConvID, ev.Message.Seq
+			}
+		case ipc.KindOutbox:
+			if ev.Message != nil {
+				conv = ev.Message.ConvID
+			} else if ev.Outbox != nil {
+				conv = ev.Outbox.ConvID
+			}
+		case ipc.KindConv:
+			if ev.Conv != nil {
+				conv = ev.Conv.ID
+			}
+		case ipc.KindNotify:
+			if s := m.notification(ev.Notify); s != "" {
+				notes = append(notes, s)
+			}
+			continue
+		default:
+			continue
 		}
-		return nil
-	case ipc.KindMessage:
-		if ev.Message != nil {
-			conv = ev.Message.ConvID
+		chats = true
+		if conv != "" && conv == m.openID && m.thread != nil {
+			m.thread.owe(seq)
+			thread = true
 		}
-	case ipc.KindOutbox:
-		if ev.Message != nil {
-			conv = ev.Message.ConvID
-		} else if ev.Outbox != nil {
-			conv = ev.Outbox.ConvID
-		}
-	case ipc.KindConv:
-		if ev.Conv != nil {
-			conv = ev.Conv.ID
-		}
-	case ipc.KindNotify:
-		return m.onNotify(ev.Notify)
-	default:
-		return nil
 	}
-	cmds := []tea.Cmd{m.requestChats()}
-	if conv != "" && conv == m.openID {
-		cmds = append(cmds, m.requestThread())
+	if chats {
+		cmds = append(cmds, m.requestChats())
+	}
+	if thread {
+		cmds = append(cmds, m.readThread())
+	}
+	if len(notes) > 0 {
+		// One write keeps the notifications in the order they came.
+		cmds = append(cmds, tea.Raw(strings.Join(notes, "")))
 	}
 	return tea.Batch(cmds...)
 }

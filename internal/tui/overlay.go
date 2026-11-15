@@ -7,7 +7,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/jpe0824/termchat/internal/ipc"
-	"github.com/jpe0824/termchat/internal/model"
 )
 
 // ovKind is an overlay: one is open at a time, and while open it takes
@@ -53,23 +52,15 @@ type overlay struct {
 	err      string
 	info     string
 	busy     bool
-	ask      *ovAsk
+	ask      *question
 	// open is the new room's visibility; conv the room the panel is about.
 	open bool
 	conv string
 	// seq numbers the search queries; results are shown only for the
 	// newest, and searched says they came back.
-	seq      int
+	seq      timer
 	results  []ipc.Message
 	searched bool
-}
-
-// ovAsk is a y/n question in an overlay; holds says the question still
-// applies when the answer comes.
-type ovAsk struct {
-	text  string
-	holds func() bool
-	yes   func() tea.Cmd
 }
 
 // ovRow is one row of an overlay's list. text[hlAt:hlEnd] is a part to
@@ -80,15 +71,61 @@ type ovRow struct {
 	hlAt, hlEnd, from int
 }
 
-func (o *overlay) hasField() bool {
-	switch o.kind {
-	case ovJump, ovSearch:
-		return true
-	case ovNew:
-		return o.step == stepDM || o.step == stepRoom
-	}
-	return o.step == stepInvite || o.step == stepRename
+// ovSpec is what one kind of overlay is made of; the shared frame draws
+// and drives every kind through it.
+type ovSpec struct {
+	title func(*Model) string
+	// field reports whether a step has a text field.
+	field func(ovStep) bool
+	// start fits a new overlay to the view, or says why it cannot open;
+	// nil when it needs nothing. load reads what it lists.
+	start func(*Model, *overlay) (refused string)
+	load  func(*Model) tea.Cmd
+	// edited reacts to the field's text changing; nil for nothing.
+	edited func(*Model) tea.Cmd
+	rows   func(*Model) []ovRow
+	// body is the lines above and below the rows, and what shows in their
+	// place when there are none, for content w cells wide.
+	body func(m *Model, w int) (head []string, empty string, tail []string)
+	// act acts on the selected row, or on the field.
+	act func(*Model) tea.Cmd
+	// first is the step it opens on, from which esc closes it.
+	first ovStep
 }
+
+// ovSpecs are the overlay kinds. They are set in init because their
+// functions reach back to the table through the shared frame.
+var ovSpecs map[ovKind]ovSpec
+
+func init() {
+	always := func(ovStep) bool { return true }
+	ovSpecs = map[ovKind]ovSpec{
+		ovJump: {
+			title: func(*Model) string { return "Jump to" }, field: always, load: (*Model).requestPeople,
+			rows: (*Model).jumpRows, act: (*Model).jumpGo,
+			body: func(*Model, int) ([]string, string, []string) { return nil, "no matches", nil },
+		},
+		ovSearch: {
+			title: func(*Model) string { return "Search" }, field: always, load: (*Model).requestChats,
+			edited: (*Model).searchChanged, rows: (*Model).searchRows, act: (*Model).searchGo,
+			body: func(m *Model, _ int) ([]string, string, []string) { return nil, m.searchEmpty(), nil },
+		},
+		ovNew: {
+			title: (*Model).newTitle, field: func(s ovStep) bool { return s == stepDM || s == stepRoom },
+			load: (*Model).requestChats, rows: (*Model).newRows, act: (*Model).newGo,
+			body: func(m *Model, _ int) ([]string, string, []string) { return nil, m.newEmpty(), nil },
+		},
+		ovRoom: {
+			title: (*Model).roomTitle, field: func(s ovStep) bool { return s == stepInvite || s == stepRename },
+			start: (*Model).roomStartPanel, load: (*Model).requestPeople, rows: (*Model).roomRows,
+			act: (*Model).roomGo, body: (*Model).roomBody, first: stepMembers,
+		},
+	}
+}
+
+func (o *overlay) spec() ovSpec { return ovSpecs[o.kind] }
+
+func (o *overlay) hasField() bool { return o.spec().field(o.step) }
 
 // openOverlay opens kind over the current view. Every overlay needs the
 // background process.
@@ -97,40 +134,37 @@ func (m *Model) openOverlay(kind ovKind) tea.Cmd {
 		return m.setBanner(downBanner)
 	}
 	ov := &overlay{kind: kind}
-	if kind == ovRoom {
-		c, ok := m.openConv()
-		if !ok || c.Kind != model.ConvRoom {
-			return m.setBanner("not a room")
+	spec := ov.spec()
+	ov.step = spec.first
+	if spec.start != nil {
+		if why := spec.start(m, ov); why != "" {
+			return m.setBanner(why)
 		}
-		ov.conv, ov.step = c.ID, stepMembers
 	}
 	m.ovGen++
 	ov.gen = m.ovGen
 	m.ov = ov
 	m.clearBanner()
-	switch kind {
-	case ovSearch, ovNew:
-		return m.requestChats()
-	}
-	return m.requestPeople()
+	return spec.load(m)
 }
 
-// closeOverlay closes it; focus is where it was before it opened.
+// closeOverlay closes the open overlay.
 func (m *Model) closeOverlay() { m.ov = nil }
 
 // overlayKey handles a key while an overlay is open. Typing and moving act
 // at once; a key that acts waits out the paste gap as a lone press.
-func (m *Model) overlayKey(k tea.KeyPressMsg, recent bool) tea.Cmd {
+func (m *Model) overlayKey(k tea.KeyPressMsg) tea.Cmd {
 	ov, s := m.ov, k.String()
-	if ov.ask != nil {
-		return m.ovAnswer(s, recent)
+	if q := ov.ask; q != nil {
+		ov.ask = nil
+		return m.answer(q, s, keyGuarded)
 	}
 	if ov.hasField() {
 		if t := keyText(k); t != "" {
 			return m.ovEdit(func(in *input) { in.insert(cleanField(t)) })
 		}
-		if editKey(nil, s) {
-			return m.ovEdit(func(in *input) { editKey(in, s) })
+		if edit, ok := editKeys[s]; ok {
+			return m.ovEdit(edit)
 		}
 	}
 	b, ok := m.ovBinding(s)
@@ -140,30 +174,20 @@ func (m *Model) overlayKey(k tea.KeyPressMsg, recent bool) tea.Cmd {
 		}
 		return nil
 	}
-	if b.kind == keyImmediate || m.opts.PasteGap < 0 {
-		return m.ovDo(b.act)
-	}
-	if recent {
-		return nil
-	}
-	m.tm.exitAct, m.tm.exitOn = b.act, m.target(m.geom())
-	return m.deferExit(exitOverlay)
+	return m.press(b.kind, hold{run: func() tea.Cmd {
+		if m.ov == nil {
+			return nil
+		}
+		return b.run(m, keyCtx{key: s})
+	}})
 }
 
-// editKey applies an editing key to in, or with in nil reports whether s
-// is one.
-func editKey(in *input, s string) bool {
-	edits := map[string]func(*input){
-		"left": (*input).left, "right": (*input).right, "home": (*input).home, "end": (*input).end,
-		"ctrl+a": (*input).home, "ctrl+e": (*input).end, "backspace": (*input).backspace,
-		"ctrl+h": (*input).backspace, "delete": (*input).del, "ctrl+w": (*input).killWord,
-		"ctrl+u": (*input).killLine,
-	}
-	f, ok := edits[s]
-	if ok && in != nil {
-		f(in)
-	}
-	return ok
+// editKeys are the keys that edit an overlay's text field.
+var editKeys = map[string]func(*input){
+	"left": (*input).left, "right": (*input).right, "home": (*input).home, "end": (*input).end,
+	"ctrl+a": (*input).home, "ctrl+e": (*input).end, "backspace": (*input).backspace,
+	"ctrl+h": (*input).backspace, "delete": (*input).del, "ctrl+w": (*input).killWord,
+	"ctrl+u": (*input).killLine,
 }
 
 // cleanField is typed or pasted text as a one-line field takes it.
@@ -180,40 +204,51 @@ func (m *Model) ovEdit(f func(*input)) tea.Cmd {
 		return nil
 	}
 	ov.sel, ov.top, ov.err, ov.info, ov.clicked = 0, 0, "", "", ""
-	if ov.kind == ovSearch {
-		return m.searchChanged()
+	if edited := ov.spec().edited; edited != nil {
+		return edited(m)
 	}
 	return nil
 }
 
-// ovDo runs an overlay action.
-func (m *Model) ovDo(a action) tea.Cmd {
+// ovSelect runs f on the overlay, given its row count and page size as
+// they were before, then keeps the selection among those rows.
+func (m *Model) ovSelect(f func(ov *overlay, n, page int)) {
 	ov := m.ov
 	n := len(m.ovRows())
-	page := max(m.ovListRows()-1, 1)
-	switch a {
-	case actUp:
-		ov.sel--
-	case actDown:
-		ov.sel++
-	case actPgUp:
-		ov.sel -= page
-	case actPgDown:
-		ov.sel += page
-	case actFirst:
-		ov.sel = 0
-	case actLast:
-		ov.sel = n - 1
-	case actGo:
-		return m.ovGo()
-	case actBack:
-		m.ovBack()
-	case actToggle:
-		ov.open = !ov.open
-	case actInvite, actRemove, actRename, actLeave:
-		return m.roomAction(a)
-	}
+	f(ov, n, max(m.ovListRows()-1, 1))
 	ov.sel = max(min(ov.sel, n-1), 0)
+}
+
+// ovMoveKey moves the selection for a key of moveKeys or listKeys.
+func (m *Model) ovMoveKey(c keyCtx) tea.Cmd {
+	m.ovSelect(func(ov *overlay, n, page int) {
+		switch c.key {
+		case "up", "k":
+			ov.sel--
+		case "down", "j":
+			ov.sel++
+		case "pgup":
+			ov.sel -= page
+		case "pgdown":
+			ov.sel += page
+		case "home":
+			ov.sel = 0
+		case "end":
+			ov.sel = n - 1
+		}
+	})
+	return nil
+}
+
+func (m *Model) ovGoKey(keyCtx) tea.Cmd { return m.ovGo() }
+
+func (m *Model) ovBackKey(keyCtx) tea.Cmd {
+	m.ovSelect(func(*overlay, int, int) { m.ovBack() })
+	return nil
+}
+
+func (m *Model) ovToggleKey(keyCtx) tea.Cmd {
+	m.ovSelect(func(ov *overlay, _, _ int) { ov.open = !ov.open })
 	return nil
 }
 
@@ -223,15 +258,7 @@ func (m *Model) ovGo() tea.Cmd {
 	if ov.busy {
 		return nil
 	}
-	switch ov.kind {
-	case ovJump:
-		return m.jumpGo()
-	case ovNew:
-		return m.newGo()
-	case ovSearch:
-		return m.searchGo()
-	}
-	return m.roomGo()
+	return ov.spec().act(m)
 }
 
 // ovBack leaves a form for its list, or closes the overlay.
@@ -274,18 +301,7 @@ func (m *Model) ovSel() ovRow {
 }
 
 // ovRows are the overlay's rows as they stand.
-func (m *Model) ovRows() []ovRow {
-	ov := m.ov
-	switch ov.kind {
-	case ovJump:
-		return m.jumpRows()
-	case ovSearch:
-		return m.searchRows()
-	case ovNew:
-		return m.newRows()
-	}
-	return m.roomRows()
-}
+func (m *Model) ovRows() []ovRow { return m.ov.spec().rows(m) }
 
 // ovPaste takes a bracketed paste: a field takes its first line.
 func (m *Model) ovPaste(s string) tea.Cmd {
@@ -323,13 +339,4 @@ func (m *Model) ovClick(x, y int) tea.Cmd {
 	}
 	ov.clicked = row.id
 	return nil
-}
-
-// ovWheel moves the selection with the wheel.
-func (m *Model) ovWheel(up bool) {
-	if up {
-		m.ovDo(actUp)
-	} else {
-		m.ovDo(actDown)
-	}
 }

@@ -55,8 +55,7 @@ func (m *Model) threadHeader(g geom, width int) string {
 }
 
 // threadView draws the thread pane: header, messages, and the input.
-func (m *Model) threadView(g geom) []string {
-	l := m.tlayout(g)
+func (m *Model) threadView(g geom, l tlayout) []string {
 	out := []string{m.threadHeader(g, l.width)}
 	if g.mode != Tiny {
 		out = append(out, m.st.faint.Render(strings.Repeat("─", l.width)))

@@ -11,15 +11,18 @@ import (
 func (m *Model) onKey(k tea.KeyPressMsg) tea.Cmd {
 	s := k.String()
 	recent := m.stamp()
+	// A key is part of a burst, as an unbracketed paste is, when it follows
+	// another within the paste gap or an enter is still waiting.
+	m.tm.recent, m.tm.burst = recent, recent || m.enterConv != ""
 	pending := m.cancelExit()
-	if !recent || !m.tm.hint {
+	if !recent || !m.tm.banner.hint {
 		m.clearBanner()
 	}
 	if s == "ctrl+c" {
 		if pending {
 			return nil
 		}
-		return m.ctrlC(recent)
+		return m.ctrlC()
 	}
 	if m.splashShown() {
 		switch {
@@ -30,9 +33,8 @@ func (m *Model) onKey(k tea.KeyPressMsg) tea.Cmd {
 		}
 		return nil
 	}
-	burst := m.inBurst() || recent
 	m.flushEnter()
-	if cmd, done := m.noticeKey(s, recent); done {
+	if cmd, done := m.noticeKey(s); done {
 		return cmd
 	}
 	if m.help {
@@ -40,14 +42,18 @@ func (m *Model) onKey(k tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 	if m.ov != nil {
-		return m.overlayKey(k, recent)
+		return m.overlayKey(k)
 	}
 	g := m.geom()
 	if m.inputActive(g) {
-		return m.inputKey(k, g, burst)
+		return m.inputKey(k, g)
 	}
 	if m.focus == focusInput && m.threadShown(g) {
-		return m.disabledKey(k, g, burst)
+		if !m.fits() {
+			// The input is not drawn: nothing may type into it unseen.
+			return nil
+		}
+		return m.disabledKey(k, g)
 	}
 	if m.focus == focusInput || m.tm.swallow && recent {
 		// No input to type into: the key, and the rest of its burst, are
@@ -56,7 +62,7 @@ func (m *Model) onKey(k tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 	m.tm.swallow = false
-	return m.guardKey(k, g, recent)
+	return m.guardKey(k, g)
 }
 
 func (m *Model) onClick(p tea.Mouse) tea.Cmd {
@@ -71,7 +77,7 @@ func (m *Model) onClick(p tea.Mouse) tea.Cmd {
 	}
 	// A command key waiting out the paste gap was pressed for what was
 	// selected then, which a click is about to change.
-	if k := m.tm.exitKind; k == exitGuarded || k == exitOverlay || k == exitOvConfirm {
+	if p := m.tm.pending; p != nil && p.bound {
 		m.cancelExit()
 	}
 	// A click moves on from a question, so a later y cannot act on a
@@ -129,7 +135,11 @@ func (m *Model) onWheel(p tea.Mouse) tea.Cmd {
 		m.clampHelp(g)
 		return nil
 	case m.ov != nil:
-		m.ovWheel(d < 0)
+		key := "down"
+		if d < 0 {
+			key = "up"
+		}
+		m.ovMoveKey(keyCtx{key: key})
 		return nil
 	}
 	switch {
@@ -152,17 +162,17 @@ const downNote = "background process not running — r to start, esc to leave th
 // disabledKey handles a key for the input while the background process is
 // down: nothing typed may run as a command. A lone r starts the process, a
 // lone esc leaves the input, and every other key leaves a note saying so.
-func (m *Model) disabledKey(k tea.KeyPressMsg, g geom, burst bool) tea.Cmd {
+func (m *Model) disabledKey(k tea.KeyPressMsg, g geom) tea.Cmd {
 	switch s := k.String(); s {
 	case "r":
-		if !burst || m.opts.PasteGap < 0 {
-			return m.guardKey(k, g, false)
+		if !m.tm.burst || m.opts.PasteGap < 0 {
+			return m.guardKey(k, g)
 		}
 	case "esc":
-		if burst {
+		if m.tm.burst {
 			return nil
 		}
-		return m.deferExit(exitEsc)
+		return m.press(keyDeferred, m.escHold())
 	case "pgup", "pgdown":
 		return m.pageKey(s, g)
 	}

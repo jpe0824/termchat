@@ -135,10 +135,9 @@ func (h *tester) settle() {
 	for {
 		var keep, due []tick
 		for _, tk := range h.ticks {
-			switch tk.msg.(type) {
-			case enterMsg, exitMsg:
+			if t, ok := tk.msg.(timerMsg); ok && (t.id == timerEnter || t.id == timerExit) {
 				due = append(due, tk)
-			default:
+			} else {
 				keep = append(keep, tk)
 			}
 		}
@@ -162,7 +161,7 @@ func (h *tester) fireNoticeTicks() (delays []time.Duration) {
 	ticks := h.ticks
 	h.ticks = nil
 	for _, tk := range ticks {
-		if _, ok := tk.msg.(noticeExpiredMsg); ok {
+		if t, ok := tk.msg.(timerMsg); ok && t.id == timerNote {
 			delays = append(delays, tk.d)
 			h.send(tk.msg)
 		} else {

@@ -57,10 +57,11 @@ func (m *Model) ovRect() rect { return m.ovPlace().r }
 
 func (m *Model) ovListRows() int { return m.ovPlace().listN }
 
-// ovPlace lays the overlay out for the window and keeps the selected row
+func (m *Model) ovPlace() ovPlace { return m.ovPlaceIn(m.geom()) }
+
+// ovPlaceIn lays the overlay out for the window and keeps the selected row
 // in view.
-func (m *Model) ovPlace() ovPlace {
-	g := m.geom()
+func (m *Model) ovPlaceIn(g geom) ovPlace {
 	p := ovPlace{mode: m.ovModeFor(g), fieldRow: -1}
 	switch p.mode {
 	case dockMode:
@@ -104,13 +105,7 @@ func (m *Model) ovPlace() ovPlace {
 	}
 	ov := m.ov
 	ov.sel = max(min(ov.sel, len(rows)-1), 0)
-	if ov.sel < ov.top {
-		ov.top = ov.sel
-	}
-	if ov.sel >= ov.top+p.listN {
-		ov.top = ov.sel - p.listN + 1
-	}
-	ov.top = max(min(ov.top, len(rows)-p.listN), 0)
+	ov.top = window(ov.top, ov.sel, len(rows), p.listN)
 	p.top = ov.top
 	lines := append([]string{}, head[:headN]...)
 	switch {
@@ -162,9 +157,8 @@ func (m *Model) ovRowAt(y int) (int, bool) {
 	return p.top + i, true
 }
 
-// ovFrame draws the overlay over frame, the main view.
-func (m *Model) ovFrame(g geom, frame string) string {
-	p := m.ovPlace()
+// ovFrame draws the overlay, placed at p, over frame, the main view.
+func (m *Model) ovFrame(g geom, p ovPlace, frame string) string {
 	switch p.mode {
 	case dockMode:
 		return frame
@@ -204,12 +198,12 @@ func (m *Model) ovFrame(g geom, frame string) string {
 	return strings.Join(rows, "\n")
 }
 
-// ovCursor puts the terminal's cursor in the overlay's text field.
-func (m *Model) ovCursor() *tea.Cursor {
-	if !m.ov.hasField() || m.ov.ask != nil || m.help {
+// ovCursor puts the terminal's cursor in the overlay's text field, placed
+// at p, nil while the overlay is not shown.
+func (m *Model) ovCursor(p *ovPlace) *tea.Cursor {
+	if !m.ov.hasField() || m.ov.ask != nil || m.help || p == nil {
 		return nil
 	}
-	p := m.ovPlace()
 	if p.fieldRow < 0 {
 		return nil
 	}
@@ -258,19 +252,8 @@ func (m *Model) ovBody(w int) (head []string, rows []ovRow, empty string, tail [
 	}
 	head = append(head, m.ovStatus(w)...)
 	rows = m.ovRows()
-	switch ov.kind {
-	case ovJump:
-		empty = "no matches"
-	case ovSearch:
-		empty = m.searchEmpty()
-	case ovNew:
-		empty = m.newEmpty()
-	case ovRoom:
-		var h []string
-		h, empty, tail = m.roomBody(w)
-		head = append(head, h...)
-	}
-	return head, rows, empty, tail
+	h, empty, tail := ov.spec().body(m, w)
+	return append(head, h...), rows, empty, tail
 }
 
 // borderKeys is a bottom border w cells wide carrying keys, as many as fit.

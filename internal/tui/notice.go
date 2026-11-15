@@ -19,18 +19,46 @@ const noticeFor = 5 * time.Second
 type notice struct {
 	conv string
 	text string
-	ask  func() tea.Cmd
+	ask  *question
 	info bool
-	// op and msgID are the action a question asks about, and its message.
-	op, msgID string
+}
+
+// question is a y/n question. holds says it still applies as asked; yes is
+// what y does then, and no, if set, what y does once it no longer holds.
+type question struct {
+	text  string
+	holds func() bool
+	yes   func() tea.Cmd
+	no    func() tea.Cmd
+}
+
+func (q *question) confirm() tea.Cmd {
+	switch {
+	case q.holds():
+		return q.yes()
+	case q.no != nil:
+		return q.no()
+	}
+	return nil
+}
+
+// answer takes key s while question q is shown. Any key ends the question;
+// y confirms only as a lone press that did not follow the question within
+// the paste gap, held as a key of kind, and anything else is the safe
+// answer, no.
+func (m *Model) answer(q *question, s string, kind keyKind) tea.Cmd {
+	if gap := m.opts.PasteGap; s != "y" || gap >= 0 && m.opts.Now().Sub(m.tm.askedAt) < gap {
+		return nil
+	}
+	return m.press(kind, hold{run: q.confirm})
 }
 
 // setNotice shows an error; a timed one also clears after noticeFor.
 func (m *Model) setNotice(conv, text string, timed bool) tea.Cmd {
-	m.noteGen++
+	msg := m.noteT.arm(timerNote)
 	m.note = &notice{conv: conv, text: sanitize.Line(text)}
 	if timed {
-		return m.opts.Tick(noticeFor, noticeExpiredMsg{gen: m.noteGen})
+		return m.opts.Tick(noticeFor, msg)
 	}
 	return nil
 }
@@ -44,51 +72,38 @@ func (m *Model) setInfo(conv, text string) tea.Cmd {
 
 // ask puts a yes/no question about doing op to message msgID in the notice
 // line; y runs yes.
-func (m *Model) ask(question, op, msgID string, yes func() tea.Cmd) {
-	m.noteGen++
-	m.note = &notice{conv: m.openID, text: question, ask: yes, op: op, msgID: msgID}
+func (m *Model) ask(text, op, msgID string, yes func() tea.Cmd) {
+	conv := m.openID
+	m.noteT.arm(timerNote)
+	m.note = &notice{conv: conv, text: text, ask: &question{
+		text: text, yes: yes,
+		holds: func() bool { return m.holdsMsg(conv, op, msgID) },
+		no:    func() tea.Cmd { return m.setInfo(conv, "message changed — "+op+" cancelled") },
+	}}
 	m.tm.askedAt = m.opts.Now()
 }
 
-// holds reports whether the message question n is about is still held and
-// can still be acted on as asked: its ID alone would act on whatever it has
-// become.
-func (m *Model) holds(n *notice) bool {
-	if m.thread == nil || m.thread.conv != n.conv {
+// holdsMsg reports whether message msgID of conv is still held and can
+// still have op done to it as asked: its ID alone would act on whatever it
+// has become.
+func (m *Model) holdsMsg(conv, op, msgID string) bool {
+	if m.thread == nil || m.thread.conv != conv {
 		return false
 	}
 	for _, it := range m.thread.items() {
-		if it.m.MsgID != n.msgID {
+		if it.m.MsgID != msgID {
 			continue
 		}
-		if n.op == opDiscard && it.m.Status == ipc.MsgFailed || n.op == opDelete && m.delivered(it.m) {
+		if op == opDiscard && it.m.Status == ipc.MsgFailed || op == opDelete && m.delivered(it.m) {
 			return true
 		}
 	}
 	return false
 }
 
-// confirm runs the action of question n, answered yes, if it still holds.
-func (m *Model) confirm(n *notice) tea.Cmd {
-	if !m.holds(n) {
-		return m.dropQuestion(n)
-	}
-	return n.ask()
-}
-
-func (m *Model) dropQuestion(n *notice) tea.Cmd {
-	return m.setInfo(n.conv, "message changed — "+n.op+" cancelled")
-}
-
-func (m *Model) onNoticeExpired(msg noticeExpiredMsg) {
-	if msg.gen == m.noteGen {
-		m.note = nil
-	}
-}
-
 // noticeKey lets a key press clear the notice shown, or answer its
 // question; done reports that the key was the answer and is used up.
-func (m *Model) noticeKey(s string, recent bool) (cmd tea.Cmd, done bool) {
+func (m *Model) noticeKey(s string) (cmd tea.Cmd, done bool) {
 	n := m.note
 	if n == nil {
 		return nil, false
@@ -103,7 +118,9 @@ func (m *Model) noticeKey(s string, recent bool) (cmd tea.Cmd, done bool) {
 	if n.ask == nil {
 		return nil, false
 	}
-	return m.answer(n, s, recent), true
+	// The question checks for itself that its message is still as asked,
+	// so its y is not bound to the selection.
+	return m.answer(n.ask, s, keyDeferred), true
 }
 
 // noteLine is what the line above the input says, if anything.

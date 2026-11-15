@@ -86,24 +86,47 @@ func wrapLine(p string, width int) []string {
 }
 
 // truncate cuts s to at most width cells, ending in "…" when cut.
-func truncate(s string, width int) string {
-	if width <= 0 {
-		return ""
+func truncate(s string, width int) string { return clip(width, s)[0] }
+
+// clip is truncate applied to the parts joined, kept in their parts: whole
+// characters while they fit in w-1 cells, then "…" after the last part.
+func clip(w int, parts ...string) []string {
+	if lipgloss.Width(strings.Join(parts, "")) <= w {
+		return parts
 	}
-	if lipgloss.Width(s) <= width {
-		return s
+	out := make([]string, len(parts))
+	if w <= 0 {
+		return out
 	}
-	var b strings.Builder
-	used := 0
-	graphemes(s, func(g string, w int) bool {
-		if used+w > width-1 {
-			return false
+	used, full := 0, false
+	for i, part := range parts {
+		var b strings.Builder
+		graphemes(part, func(g string, gw int) bool {
+			if used+gw > w-1 {
+				full = true
+				return false
+			}
+			b.WriteString(g)
+			used += gw
+			return true
+		})
+		out[i] = b.String()
+		if full {
+			break
 		}
-		b.WriteString(g)
-		used += w
-		return true
-	})
-	return b.String() + "…"
+	}
+	out[len(out)-1] += "…"
+	return out
+}
+
+// window is the first of n rows to show in h, moved from top as little as
+// keeps row sel in view, and kept in range.
+func window(top, sel, n, h int) int {
+	top = min(top, sel)
+	if sel >= top+h {
+		top = sel - h + 1
+	}
+	return max(min(top, n-h), 0)
 }
 
 // fit truncates s to width cells and pads it with spaces to exactly width.

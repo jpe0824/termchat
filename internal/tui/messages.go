@@ -11,6 +11,7 @@ type (
 	splashDoneMsg  struct{}
 	statusPollMsg  struct{}
 	eventMsg       struct{ ev ipc.Event }
+	eventsMsg      struct{ evs []ipc.Event }
 	subscribedMsg  struct{ b Backend }
 	backendDownMsg struct{ err error }
 	// launchMsg is the first connection attempt's result; startedMsg is
@@ -36,10 +37,13 @@ type (
 		open  []model.Conversation
 		err   error
 	}
+	// threadMsg is a re-read of the newest limit messages; reach, when not
+	// 0, is the seq it was sized to reach.
 	threadMsg struct {
 		b     Backend
 		conv  string
 		limit int
+		reach int64
 		msgs  []ipc.Message
 		err   error
 	}
@@ -50,12 +54,13 @@ type (
 		msgs   []ipc.Message
 		err    error
 	}
-	// enterMsg lets an enter act once no input followed it.
-	enterMsg struct{ gen int }
-	// exitMsg lets a deferred esc, ↑ or ctrl+c act once no input followed it.
-	exitMsg          struct{ gen int }
-	bannerExpiredMsg struct{ gen int }
-	noticeExpiredMsg struct{ gen int }
+	// timerMsg is a tick of timer id's arming gen; for the search timer,
+	// of overlay ov.
+	timerMsg struct {
+		id  timerID
+		gen timer
+		ov  int
+	}
 	// sentMsg is not tied to a connection: a message queued on one that
 	// has since gone is still queued, and its draft is still done.
 	sentMsg struct {
@@ -91,14 +96,12 @@ type (
 		op, done, conv string
 		err            error
 	}
-	// searchTickMsg lets query seq of overlay gen run once typing paused.
-	searchTickMsg struct{ gen, seq int }
-	searchMsg     struct {
-		b        Backend
-		gen, seq int
-		q        string
-		msgs     []ipc.Message
-		err      error
+	searchMsg struct {
+		b    Backend
+		gen  int
+		seq  timer
+		q    string
+		msgs []ipc.Message
+		err  error
 	}
-	flashMsg struct{ gen int }
 )

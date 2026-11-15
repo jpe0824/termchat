@@ -263,7 +263,7 @@ func TestSearchOpensOlderThanLoaded(t *testing.T) {
 	mustContain(t, h.view(), "the needle is here")
 	// The flash goes after a while.
 	for _, tk := range h.ticks {
-		if fm, ok := tk.msg.(flashMsg); ok {
+		if fm, ok := tk.msg.(timerMsg); ok && fm.id == timerFlash {
 			h.send(fm)
 		}
 	}

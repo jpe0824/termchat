@@ -12,6 +12,17 @@ import (
 	"github.com/jpe0824/termchat/internal/sanitize"
 )
 
+// roomStartPanel opens the room panel on the open conversation, which
+// must be a room.
+func (m *Model) roomStartPanel(ov *overlay) string {
+	c, ok := m.openConv()
+	if !ok || c.Kind != model.ConvRoom {
+		return "not a room"
+	}
+	ov.conv = c.ID
+	return ""
+}
+
 // roomConv is the room the panel is about, while the user is in it.
 func (m *Model) roomConv() (model.Conversation, bool) {
 	if i := m.indexOf(m.ov.conv); i >= 0 && m.convs[i].Kind == model.ConvRoom {
@@ -40,14 +51,7 @@ func (m *Model) canManage() bool {
 
 // memberLabel is a member as the panels list them.
 func (m *Model) memberLabel(h string) string {
-	n := sanitize.Line(h)
-	if h == m.me() {
-		n += " (you)"
-	}
-	if m.isAgent(h) {
-		n += " [agent]"
-	}
-	return n
+	return tagged(sanitize.Line(h), h == m.me(), m.isAgent(h))
 }
 
 // roomRows are the members, then what the user may do: invite and rename
@@ -129,52 +133,68 @@ func (m *Model) roomGo() tea.Cmd {
 	}
 	switch id := m.ovSel().id; {
 	case id == "a:invite":
-		return m.roomAction(actInvite)
+		return m.roomInvite()
 	case id == "a:rename":
-		return m.roomAction(actRename)
+		return m.roomRename()
 	case id == "a:leave":
-		return m.roomAction(actLeave)
+		return m.roomLeave()
 	case strings.HasPrefix(id, "m:"):
-		return m.roomAction(actRemove)
+		return m.roomRemove()
 	}
 	return nil
 }
 
-// roomAction starts one of the panel's actions. Invite, remove and rename
-// do nothing for those who cannot manage the room.
-func (m *Model) roomAction(a action) tea.Cmd {
-	ov := m.ov
-	if ov.step != stepMembers || a != actLeave && !m.canManage() {
+// roomStart is the panel's room when one of its actions may start: from
+// the member list, and, unless anyone may, for those who manage the room.
+func (m *Model) roomStart(anyone bool) (model.Conversation, bool) {
+	if m.ov.step != stepMembers || !anyone && !m.canManage() {
+		return model.Conversation{}, false
+	}
+	return m.roomConv()
+}
+
+func (m *Model) roomInvite() tea.Cmd {
+	if _, ok := m.roomStart(false); !ok {
 		return nil
 	}
-	c, ok := m.roomConv()
+	m.ovStepTo(stepInvite, "")
+	return m.requestPeople()
+}
+
+func (m *Model) roomRename() tea.Cmd {
+	if c, ok := m.roomStart(false); ok {
+		m.ovStepTo(stepRename, c.Name)
+	}
+	return nil
+}
+
+func (m *Model) roomRemove() tea.Cmd {
+	c, ok := m.roomStart(false)
 	if !ok {
 		return nil
 	}
-	name := m.convName(c)
-	switch a {
-	case actInvite:
-		m.ovStepTo(stepInvite, "")
-		return m.requestPeople()
-	case actRename:
-		m.ovStepTo(stepRename, c.Name)
-	case actRemove:
-		h, ok := strings.CutPrefix(m.ovSel().id, "m:")
-		if !ok || h == m.me() {
-			return nil
-		}
-		m.ovAsk("remove "+sanitize.Line(h)+" from "+name+"? y/n", func() bool {
-			c, ok := m.roomConv()
-			return ok && slices.Contains(c.Members, h) && m.canManage()
-		}, func() tea.Cmd {
-			return m.roomOp(ipc.RoomOp{Kind: ipc.RoomRemove, Handle: h}, "removed "+h)
-		})
-	case actLeave:
-		m.ovAsk("leave "+name+"? y/n", func() bool {
-			_, ok := m.roomConv()
-			return ok
-		}, func() tea.Cmd { return m.roomOp(ipc.RoomOp{Kind: ipc.RoomLeave}, "") })
+	h, ok := strings.CutPrefix(m.ovSel().id, "m:")
+	if !ok || h == m.me() {
+		return nil
 	}
+	m.ovAsk("remove "+sanitize.Line(h)+" from "+m.convName(c)+"? y/n", func() bool {
+		c, ok := m.roomConv()
+		return ok && slices.Contains(c.Members, h) && m.canManage()
+	}, func() tea.Cmd {
+		return m.roomOp(ipc.RoomOp{Kind: ipc.RoomRemove, Handle: h}, "removed "+h)
+	})
+	return nil
+}
+
+func (m *Model) roomLeave() tea.Cmd {
+	c, ok := m.roomStart(true)
+	if !ok {
+		return nil
+	}
+	m.ovAsk("leave "+m.convName(c)+"? y/n", func() bool {
+		_, ok := m.roomConv()
+		return ok
+	}, func() tea.Cmd { return m.roomOp(ipc.RoomOp{Kind: ipc.RoomLeave}, "") })
 	return nil
 }
 

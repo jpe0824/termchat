@@ -7,34 +7,10 @@ import (
 	"github.com/jpe0824/termchat/internal/sanitize"
 )
 
-// ovAnswer takes a key while the overlay asks a question: any key ends it,
-// and only a lone y, not right after the question appeared, says yes.
-func (m *Model) ovAnswer(s string, recent bool) tea.Cmd {
-	a := m.ov.ask
-	m.ov.ask = nil
-	if s != "y" {
-		return nil
-	}
-	gap := m.opts.PasteGap
-	if gap < 0 {
-		return m.ovConfirm(a)
-	}
-	if recent || m.opts.Now().Sub(m.tm.askedAt) < gap {
-		return nil
-	}
-	m.tm.ovAsk, m.tm.exitOn = a, m.target(m.geom())
-	return m.deferExit(exitOvConfirm)
-}
-
-func (m *Model) ovConfirm(a *ovAsk) tea.Cmd {
-	if m.ov == nil || !a.holds() {
-		return nil
-	}
-	return a.yes()
-}
-
+// ovAsk puts a question in the overlay; y runs yes while holds, and only
+// while the overlay is still open.
 func (m *Model) ovAsk(text string, holds func() bool, yes func() tea.Cmd) {
-	m.ov.ask = &ovAsk{text: text, holds: holds, yes: yes}
+	m.ov.ask = &question{text: text, yes: yes, holds: func() bool { return m.ov != nil && holds() }}
 	m.tm.askedAt = m.opts.Now()
 }
 

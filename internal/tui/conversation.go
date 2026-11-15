@@ -40,6 +40,16 @@ type thread struct {
 	flash string
 	jump  int64
 	want  int
+	// owed says a re-read is owed, and need what it must reach: the oldest
+	// message an event touched, 0 for the whole held window.
+	owed bool
+	need int64
+	// agents are the authors of stored messages sent as agents.
+	agents map[string]bool
+	// rev counts changes to what the thread holds, for lines, its drawn
+	// lines kept between frames.
+	rev   int
+	lines lineCache
 }
 
 func newThread(conv string) *thread { return &thread{conv: conv, atBottom: true} }
@@ -73,6 +83,9 @@ func (t *thread) merge(msgs []ipc.Message, limit int) {
 		}
 	}
 	t.stored, t.outbox, t.loaded, t.err = stored, outbox, true, ""
+	t.agents = map[string]bool{}
+	t.addAgents(stored)
+	t.rev++
 	t.anchor = t.remap(t.anchor)
 	if t.sel = t.remap(t.sel); !t.has(t.sel) {
 		t.sel = ""
@@ -134,7 +147,30 @@ func (t *thread) prepend(before int64, msgs []ipc.Message) {
 		return
 	}
 	t.stored = append(older, t.stored...)
+	t.addAgents(older)
 	t.atBottom = false
+	t.rev++
+}
+
+func (t *thread) addAgents(msgs []ipc.Message) {
+	for _, m := range msgs {
+		if m.Agent {
+			if t.agents == nil {
+				t.agents = map[string]bool{}
+			}
+			t.agents[m.Author] = true
+		}
+	}
+}
+
+// owe records a re-read owed back to message seq, 0 for the whole window.
+func (t *thread) owe(seq int64) {
+	switch {
+	case !t.owed:
+		t.owed, t.need = true, seq
+	case t.need != 0 && (seq == 0 || seq < t.need):
+		t.need = seq
+	}
 }
 
 func (t *thread) hasOlder() bool {
@@ -216,16 +252,6 @@ func (m *Model) body(msg ipc.Message, reason string, selected bool) string {
 	return text
 }
 
-// itemBody is an item's text and style, marked when selected.
-func (m *Model) itemBody(it item) (string, lipgloss.Style, bool) {
-	sel := it.key == m.thread.sel
-	st := m.bodyStyle(it.m)
-	if sel || it.key == m.thread.flash {
-		st = st.Reverse(true)
-	}
-	return m.body(it.m, m.thread.reasons[it.m.MsgID], sel), st, sel
-}
-
 func (m *Model) bodyStyle(msg ipc.Message) lipgloss.Style {
 	switch {
 	case msg.Deleted, msg.Status == ipc.MsgSending:
@@ -244,68 +270,4 @@ func (m *Model) day(msg ipc.Message) string {
 
 func (m *Model) daySep(msg ipc.Message, width int) string {
 	return m.st.faint.Render(spread("── "+m.day(msg)+" ", "", width, "─"))
-}
-
-// threadLines lays the thread out for a pane width cells wide.
-func (m *Model) threadLines(width int, mode Mode) []tline {
-	if m.thread == nil {
-		return nil
-	}
-	items := m.thread.items()
-	if mode == Tiny {
-		return m.tinyLines(items, width)
-	}
-	authorW, gap, capW := 0, "  ", 12
-	if mode == Narrow {
-		gap, capW = " ", 8
-	}
-	for _, it := range items {
-		authorW = max(authorW, min(lipgloss.Width(m.author(it.m)), capW))
-	}
-	prefix := 5 + len(gap) + authorW + 2
-	textW := max(width-prefix, 1)
-	var out []tline
-	for i, it := range items {
-		if i > 0 && m.day(it.m) != m.day(items[i-1].m) {
-			out = append(out, tline{it.key, m.daySep(it.m, width), true})
-		}
-		text, st, sel := m.itemBody(it)
-		g := gap
-		if sel {
-			g = "›" + gap[1:]
-		}
-		for j, l := range wrap(text, textW) {
-			lead := strings.Repeat(" ", prefix)
-			if j == 0 {
-				lead = m.st.faint.Render(it.m.At.In(m.opts.Location).Format("15:04")) + g +
-					fit(truncate(m.author(it.m), authorW), authorW) + "  "
-			}
-			out = append(out, tline{it.key, lead + st.Render(l), false})
-		}
-	}
-	return out
-}
-
-// tinyLines puts each author on their own line with the text indented one
-// space beneath; consecutive messages by one author share the author line.
-func (m *Model) tinyLines(items []item, width int) []tline {
-	var out []tline
-	for i, it := range items {
-		newDay := i > 0 && m.day(it.m) != m.day(items[i-1].m)
-		if newDay {
-			out = append(out, tline{it.key, m.daySep(it.m, width), true})
-		}
-		if i == 0 || newDay || items[i-1].m.Author != it.m.Author {
-			out = append(out, tline{it.key, m.st.heading.Render(truncate(m.author(it.m), width)), false})
-		}
-		text, st, sel := m.itemBody(it)
-		lead := " "
-		if sel {
-			lead = "›"
-		}
-		for _, l := range wrap(text, width-1) {
-			out = append(out, tline{it.key, lead + st.Render(l), false})
-		}
-	}
-	return out
 }

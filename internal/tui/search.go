@@ -22,40 +22,35 @@ const (
 	jumpContext = 10
 )
 
-// jumpReq is a message to show once its conversation is open.
-type jumpReq struct {
-	conv string
-	seq  int64
-}
-
 // searchChanged starts the wait for a new query; a query typed over it
 // makes the earlier one stale.
 func (m *Model) searchChanged() tea.Cmd {
 	ov := m.ov
-	ov.seq++
+	tick := ov.seq.arm(timerSearch)
+	tick.ov = ov.gen
 	if strings.TrimSpace(ov.field.text) == "" {
 		ov.results, ov.searched = nil, false
 		return nil
 	}
-	return m.opts.Tick(searchWait, searchTickMsg{gen: ov.gen, seq: ov.seq})
+	return m.opts.Tick(searchWait, tick)
 }
 
-func (m *Model) onSearchTick(msg searchTickMsg) tea.Cmd {
+func (m *Model) onSearchTick(msg timerMsg) tea.Cmd {
 	ov := m.ov
-	if ov == nil || ov.gen != msg.gen || ov.seq != msg.seq || m.b == nil {
+	if ov == nil || ov.gen != msg.ov || !ov.seq.live(msg) || m.b == nil {
 		return nil
 	}
 	q, b := strings.TrimSpace(ov.field.text), m.b
 	return func() tea.Msg {
 		msgs, err := b.Search(q, searchLimit)
-		return searchMsg{b: b, gen: msg.gen, seq: msg.seq, q: q, msgs: msgs, err: err}
+		return searchMsg{b: b, gen: msg.ov, seq: msg.gen, q: q, msgs: msgs, err: err}
 	}
 }
 
 // onSearch shows results only for the newest query of the open overlay.
 func (m *Model) onSearch(msg searchMsg) {
 	ov := m.ov
-	if ov == nil || ov.gen != msg.gen || ov.seq != msg.seq || msg.b != m.b {
+	if ov == nil || ov.gen != msg.gen || ov.seq != msg.seq || m.stale(msg.b, "") {
 		return
 	}
 	ov.searched, ov.sel, ov.top, ov.clicked = true, 0, 0, ""
@@ -78,10 +73,11 @@ func (m *Model) searchRows() []ovRow {
 			conv += " (left)"
 		}
 		if i := m.indexOf(r.ConvID); i >= 0 {
-			c := m.convs[i]
-			conv = m.convName(c.Conversation)
-			if c.Kind == model.ConvDM {
-				conv = "@" + conv
+			// A room keeps the chat list's "# room".
+			if c := m.convs[i].Conversation; c.Kind == model.ConvDM {
+				conv = m.convRef(c)
+			} else {
+				conv = m.convName(c)
 			}
 		}
 		text := sanitize.Line(r.Text)
@@ -130,14 +126,11 @@ func (m *Model) left(conv string) bool { return m.haveList && m.indexOf(conv) < 
 // openAt opens conv with message seq in view and marked for a while,
 // reading history back to it first when it is older than what is held.
 func (m *Model) openAt(conv string, seq int64) tea.Cmd {
-	m.jumpTo = &jumpReq{conv: conv, seq: seq}
-	cmd := m.open(conv)
-	m.jumpTo = nil
+	cmd := m.openSeek(conv, seq)
 	t := m.thread
 	t.jump = seq
 	t.flash = "s" + strconv.FormatInt(seq, 10)
-	m.flashGen++
-	flash := m.opts.Tick(flashFor, flashMsg{gen: m.flashGen})
+	flash := m.opts.Tick(flashFor, m.flashT.arm(timerFlash))
 	if cmd == nil {
 		cmd = m.seekJump()
 	}
@@ -178,10 +171,4 @@ func (m *Model) seekJump() tea.Cmd {
 		}
 	}
 	return nil
-}
-
-func (m *Model) onFlash(msg flashMsg) {
-	if msg.gen == m.flashGen && m.thread != nil {
-		m.thread.flash = ""
-	}
 }

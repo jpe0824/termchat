@@ -116,12 +116,30 @@ func pad(lines []string, r region, h int) []string {
 	return out
 }
 
-// frame draws the main screen.
-func (m *Model) frame() string {
-	if m.w < minW || m.h < minH {
-		return tooSmall[:min(len(tooSmall), max(m.w, 0))]
+// fits reports whether the window is big enough to draw the main screen.
+func (m *Model) fits() bool { return m.w >= minW && m.h >= minH }
+
+// frameLayout is where one frame's parts go, worked out once for it: the
+// window's, the thread pane's and the open overlay's, nil for none shown.
+type frameLayout struct {
+	g  geom
+	l  tlayout
+	ov *ovPlace
+}
+
+func (m *Model) layFrame() frameLayout {
+	f := frameLayout{g: m.geom()}
+	f.l = m.tlayout(f.g)
+	if m.ov != nil && !m.help {
+		p := m.ovPlaceIn(f.g)
+		f.ov = &p
 	}
-	g := m.geom()
+	return f
+}
+
+// frame draws the main screen, in a window that fits it.
+func (m *Model) frame(f frameLayout) string {
+	g := f.g
 	var cols [][]string
 	if m.help {
 		cols = append(cols, pad(m.helpView(g), region{1, m.w - 2}, g.bodyH))
@@ -130,12 +148,14 @@ func (m *Model) frame() string {
 			cols = append(cols, pad(m.sidebarLines(g), g.side, g.bodyH))
 		}
 		if g.thr.w > 0 {
-			cols = append(cols, pad(m.threadView(g), g.thr, g.bodyH))
+			cols = append(cols, pad(m.threadView(g, f.l), g.thr, g.bodyH))
 		}
 		if g.memb.w > 0 {
-			panel := m.membersLines()
+			var panel []string
 			if m.docked(g) {
-				panel = m.ovPlace().lines
+				panel = f.ov.lines
+			} else {
+				panel = m.membersLines(g)
 			}
 			cols = append(cols, pad(panel, g.memb, g.bodyH))
 		}
@@ -156,8 +176,8 @@ func (m *Model) frame() string {
 	if g.foot {
 		rows = append(rows, m.footer(g))
 	}
-	if m.ov != nil && !m.help {
-		return m.ovFrame(g, strings.Join(rows, "\n"))
+	if f.ov != nil {
+		return m.ovFrame(g, *f.ov, strings.Join(rows, "\n"))
 	}
 	return strings.Join(rows, "\n")
 }

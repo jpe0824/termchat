@@ -60,7 +60,8 @@ func (s *supervisor) run(ctx context.Context) {
 }
 
 // forward passes events on until the channel closes, and reports false
-// when ctx ended first.
+// when ctx ended first. Events already waiting behind one go with it as
+// one batch, so a busy conversation costs one update, not one per event.
 func (s *supervisor) forward(ctx context.Context, ch <-chan ipc.Event) bool {
 	for {
 		select {
@@ -73,7 +74,32 @@ func (s *supervisor) forward(ctx context.Context, ch <-chan ipc.Event) bool {
 			if !ok {
 				return ctx.Err() == nil
 			}
-			s.send(ctx, eventMsg{ev: ev})
+			evs, open := drain(ch, ev)
+			if len(evs) == 1 {
+				s.send(ctx, eventMsg{ev: ev})
+			} else {
+				s.send(ctx, eventsMsg{evs: evs})
+			}
+			if !open {
+				return ctx.Err() == nil
+			}
+		}
+	}
+}
+
+// drain is first and the events waiting behind it on ch, without waiting
+// for more; open is false when ch turned out closed.
+func drain(ch <-chan ipc.Event, first ipc.Event) (evs []ipc.Event, open bool) {
+	evs = []ipc.Event{first}
+	for {
+		select {
+		case ev, ok := <-ch:
+			if !ok {
+				return evs, false
+			}
+			evs = append(evs, ev)
+		default:
+			return evs, true
 		}
 	}
 }

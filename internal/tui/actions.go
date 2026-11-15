@@ -128,11 +128,9 @@ func (m *Model) requestOutbox() tea.Cmd {
 	if m.b == nil || m.thread == nil {
 		return nil
 	}
-	if m.outboxBusy {
-		m.outboxAgain = true
+	if !m.outboxRead.begin() {
 		return nil
 	}
-	m.outboxBusy = true
 	b, conv := m.b, m.thread.conv
 	return func() tea.Msg {
 		items, err := b.Outbox(conv)
@@ -141,18 +139,17 @@ func (m *Model) requestOutbox() tea.Cmd {
 }
 
 func (m *Model) onOutbox(msg outboxMsg) tea.Cmd {
-	m.outboxBusy = false
 	var cmd tea.Cmd
-	if m.outboxAgain {
-		m.outboxAgain = false
+	if m.outboxRead.end() {
 		cmd = m.requestOutbox()
 	}
-	if msg.b != m.b || m.thread == nil || msg.conv != m.thread.conv || msg.err != nil {
+	if m.stale(msg.b, msg.conv) || msg.err != nil {
 		return cmd
 	}
 	m.thread.reasons = map[string]string{}
 	for _, it := range msg.items {
 		m.thread.reasons[it.MsgID] = it.Err
 	}
+	m.thread.rev++
 	return cmd
 }

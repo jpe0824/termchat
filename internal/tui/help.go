@@ -25,51 +25,15 @@ const (
 	keyDeferred
 )
 
-// action is what an overlay binding does.
-type action int
-
-const (
-	actNone action = iota
-	actUp
-	actDown
-	actPgUp
-	actPgDown
-	actFirst
-	actLast
-	actGo
-	actBack
-	actToggle
-	actInvite
-	actRemove
-	actRename
-	actLeave
-	// The main view's actions, for the chat list and the thread.
-	actHelp
-	actJump
-	actNew
-	actPanel
-	actSearch
-	actMove
-	actEnter
-	actTab
-	actEsc
-	actPage
-	actR
-	actEdit
-	actDelete
-	actDiscard
-	actQuit
-)
-
 // binding is one line of the key map: shown by help, offered by footers,
-// and, in the overlays, the key handling itself.
+// and the key handling itself.
 type binding struct {
 	keys, desc string
 	kind       keyKind
-	// match are the key names that trigger it; none for a line that only
-	// describes.
+	// match are the key names that trigger it, and run what they do; none
+	// for a line that only describes.
 	match []string
-	act   action
+	run   func(*Model, keyCtx) tea.Cmd
 	// foot is the footer label, "" for none; steps limits the binding to
 	// some steps of its overlay; manage to people who can manage the room.
 	foot   string
@@ -80,15 +44,47 @@ type binding struct {
 type keyGroup struct {
 	name  string
 	binds []binding
-	// kind is the overlay the group drives, 0 for the main view.
+	// kind is the overlay the group drives, 0 for the main view; main is
+	// the part of the main view it drives, 0 for none.
 	kind ovKind
+	main mainPart
 }
 
-// mainBinding is the chat-list and thread binding key s triggers. The
-// first three groups of keyTable are the main view's; a key in none of them
-// is no command there.
-func mainBinding(s string) (binding, bool) {
-	for _, g := range keyTable[:3] {
+// mainPart is where in the main view a group's keys work.
+type mainPart int
+
+const (
+	mainAnywhere mainPart = iota + 1
+	mainList
+	mainThread
+)
+
+// mainBinding is the binding key s triggers in the main view: from the
+// chat list's group when list is set, else the thread's, then from
+// Anywhere. A key of the other group is held as it would be there and then
+// does nothing, so a key the thread takes neither acts in the chat list
+// nor reads as text there. A key in none of them is no command.
+func mainBinding(list bool, s string) (binding, bool) {
+	active, other := mainThread, mainList
+	if list {
+		active, other = mainList, mainThread
+	}
+	if b, ok := groupBinding(active, s); ok {
+		return b, true
+	}
+	if b, ok := groupBinding(mainAnywhere, s); ok {
+		return b, true
+	}
+	b, ok := groupBinding(other, s)
+	b.run = func(*Model, keyCtx) tea.Cmd { return nil }
+	return b, ok
+}
+
+func groupBinding(part mainPart, s string) (binding, bool) {
+	for _, g := range keyTable {
+		if g.main != part {
+			continue
+		}
 		for _, b := range g.binds {
 			if slices.Contains(b.match, s) {
 				return b, true
@@ -98,41 +94,21 @@ func mainBinding(s string) (binding, bool) {
 	return binding{}, false
 }
 
-// guarded are the command keys of the chat list and the thread that change
-// something; they act only as a lone press. Movement keys stay immediate so
-// held-down auto-repeat works.
-var guarded = func() map[string]bool {
-	out := map[string]bool{}
-	for _, g := range keyTable[:3] {
-		for _, b := range g.binds {
-			if b.kind == keyGuarded {
-				for _, k := range b.match {
-					out[k] = true
-				}
-			}
-		}
-	}
-	return out
-}()
-
 // ovBinding is the binding key s triggers in the open overlay, if any.
 func (m *Model) ovBinding(s string) (binding, bool) {
 	for _, b := range m.ovBindings() {
 		if slices.Contains(b.match, s) {
-			if b.act == actNone {
-				b.act = listAct(s)
-			}
 			return b, true
 		}
 	}
 	return binding{}, false
 }
 
-// listAct is the movement a key of moveKeys or listKeys makes.
-func listAct(s string) action {
-	return map[string]action{"up": actUp, "k": actUp, "down": actDown, "j": actDown, "pgup": actPgUp,
-		"pgdown": actPgDown, "home": actFirst, "end": actLast}[s]
-}
+// backKey reports whether b is the way back out of an overlay step, and
+// moveKey whether it moves the selection.
+func backKey(b binding) bool { return slices.Contains(b.match, "esc") }
+
+func moveKey(b binding) bool { return slices.Contains(b.match, "up") }
 
 // ovBindings are the bindings that apply in the overlay's current step.
 func (m *Model) ovBindings() []binding {
@@ -145,8 +121,7 @@ func (m *Model) ovBindings() []binding {
 			if len(b.steps) > 0 && !slices.Contains(b.steps, m.ov.step) || b.manage && !m.canManage() {
 				continue
 			}
-			if b.act == actBack && m.ov.kind == ovNew && m.ov.step == stepChoose ||
-				b.act == actBack && m.ov.kind == ovRoom && m.ov.step == stepMembers {
+			if backKey(b) && m.ov.step == m.ov.spec().first {
 				b.foot = "esc close"
 			}
 			out = append(out, b)
@@ -166,9 +141,9 @@ func (m *Model) ovFooterKeys() []string {
 	for _, b := range m.ovBindings() {
 		switch {
 		case b.foot == "" || m.ov.hasField() && len(b.match) > 0 && keyText(keyMsgFor(b.match[0])) != "":
-		case b.act == actBack:
+		case backKey(b):
 			back = append(back, b.foot)
-		case b.act == actNone:
+		case moveKey(b):
 			move = append(move, b.foot)
 		default:
 			acts = append(acts, b.foot)
@@ -186,10 +161,14 @@ func (m *Model) pickerKeys(acts []string) []string {
 	}
 	out := slices.DeleteFunc(slices.Clone(acts), func(k string) bool { return strings.HasPrefix(k, "⏎ ") })
 	if h, _ := m.pickedHandle(); h != "" {
-		out = append([]string{"⏎ " + verb + " " + sanitize.Line(h)}, out...)
+		out = append([]string{"⏎ " + verb + " " + truncate(sanitize.Line(h), pickerHandleW)}, out...)
 	}
 	return out
 }
+
+// pickerHandleW caps the handle in a picker's footer label, so the label
+// and the way out fit beside it in a narrow window.
+const pickerHandleW = 12
 
 // keyMsgFor is the key press a key name stands for, enough to tell
 // whether it types.
@@ -200,8 +179,17 @@ func keyMsgFor(s string) tea.KeyPressMsg {
 	return tea.KeyPressMsg{}
 }
 
-// helpLines is the key map, generated from keyTable.
+// helpLines is the key map, generated from keyTable, laid out width cells
+// wide. The last layout is kept: the table never changes.
 func (m *Model) helpLines(width int) []string {
+	if h := m.helpLaid; h.lines != nil && h.width == width {
+		return h.lines
+	}
+	m.helpLaid.width, m.helpLaid.lines = width, m.layHelp(width)
+	return m.helpLaid.lines
+}
+
+func (m *Model) layHelp(width int) []string {
 	out := []string{m.st.heading.Render("Keys") + m.st.faint.Render("  ↑↓ scroll  ? close"), ""}
 	keyW := 0
 	for _, g := range keyTable {

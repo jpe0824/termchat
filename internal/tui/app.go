@@ -68,17 +68,15 @@ type Model struct {
 	showList bool
 	help     bool
 
-	chatsBusy, chatsAgain   bool
-	threadBusy, threadAgain bool
-	olderBusy               bool
-	outboxBusy, outboxAgain bool
+	chatsRead, threadRead, outboxRead flight
+	olderBusy                         bool
 
-	drafts  map[string]*compose
-	note    *notice
-	noteGen int
+	drafts map[string]*compose
+	note   *notice
+	noteT  timer
 	// enterConv is the conversation an enter waits to act in, "" for none.
 	enterConv string
-	enterGen  int
+	enterT    timer
 
 	// termFocused is the terminal's focus: assumed until a blur says not.
 	termFocused bool
@@ -99,8 +97,10 @@ type Model struct {
 	// ov is the open overlay, nil for none; ovGen numbers them.
 	ov    *overlay
 	ovGen int
-	// people is the people list of the current connection.
+	// people is the people list of the current connection, and byHandle
+	// the same people by handle.
 	people     []model.Person
+	byHandle   map[string]model.Person
 	peopleBusy bool
 	// openRooms are the open rooms the user has not joined.
 	openRooms []model.Conversation
@@ -108,10 +108,13 @@ type Model struct {
 	// the list holds it.
 	pendingCursor string
 	helpTop       int
+	helpLaid      struct {
+		width int
+		lines []string
+	}
 	// osc is the notification escape sequence variant, "" for none.
-	osc      string
-	flashGen int
-	jumpTo   *jumpReq
+	osc    string
+	flashT timer
 }
 
 // New returns the interface's root model. With b nil and Options.Start set,
@@ -189,14 +192,8 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		m.termFocused = true
 	case tea.BlurMsg:
 		m.termFocused = false
-	case enterMsg:
-		return m.onEnterTimer(msg)
-	case exitMsg:
-		return m.onExitTimer(msg)
-	case bannerExpiredMsg:
-		m.onBannerExpired(msg)
-	case noticeExpiredMsg:
-		m.onNoticeExpired(msg)
+	case timerMsg:
+		return m.onTimer(msg)
 	case sentMsg:
 		return m.onSent(msg)
 	case actionMsg:
@@ -233,7 +230,8 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 			// same connection keeps both: it still knows the focus.
 			m.focusSent, m.focusBusy = nil, false
 			m.readBusy = map[string]bool{}
-			m.people, m.peopleBusy = nil, false
+			m.setPeople(nil)
+			m.peopleBusy = false
 		}
 		m.b, m.procDown, m.downErr, m.startErr = msg.b, false, nil, ""
 		return m.rereadAll()
@@ -244,17 +242,15 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 	case serverMsg:
 		m.server = msg.name
 	case eventMsg:
-		return m.onEvent(msg.ev)
+		return m.onEvents([]ipc.Event{msg.ev})
+	case eventsMsg:
+		return m.onEvents(msg.evs)
 	case peopleMsg:
 		m.onPeople(msg)
 	case ovDoneMsg:
 		return m.onOvDone(msg)
-	case searchTickMsg:
-		return m.onSearchTick(msg)
 	case searchMsg:
 		m.onSearch(msg)
-	case flashMsg:
-		m.onFlash(msg)
 	case statusMsg:
 		if msg.b != m.b {
 			return nil
@@ -275,24 +271,33 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 
 func (m *Model) View() tea.View {
 	var content string
-	if m.splashShown() {
+	var cursor *tea.Cursor
+	switch {
+	case m.splashShown():
 		content = m.splash()
-	} else {
-		content = m.frame()
+	case !m.fits():
+		content = tooSmall[:min(len(tooSmall), max(m.w, 0))]
+	default:
+		f := m.layFrame()
+		content, cursor = m.frame(f), m.inputCursor(f)
 	}
 	v := tea.NewView(m.withBanner(content))
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
 	v.ReportFocus = true
 	v.WindowTitle = "termchat"
-	v.Cursor = m.inputCursor()
+	v.Cursor = cursor
 	return v
 }
 
 func (m *Model) splashShown() bool { return m.noAccount || !m.splashDone }
 
 // open shows conv in the thread pane, scrolled to its newest message.
-func (m *Model) open(conv string) tea.Cmd {
+func (m *Model) open(conv string) tea.Cmd { return m.openSeek(conv, 0) }
+
+// openSeek is open; a seq other than 0 is a message the first read of a
+// newly opened thread must reach.
+func (m *Model) openSeek(conv string, seq int64) tea.Cmd {
 	if i := m.indexOf(conv); i >= 0 {
 		m.cursor = i
 	}
@@ -304,8 +309,8 @@ func (m *Model) open(conv string) tea.Cmd {
 	}
 	m.openID, m.readNew = conv, false
 	m.thread = newThread(conv)
-	if j := m.jumpTo; j != nil && j.conv == conv {
-		m.thread.jump, m.thread.want = j.seq, m.jumpWant(conv, j.seq)
+	if seq != 0 {
+		m.thread.jump, m.thread.want = seq, m.jumpWant(conv, seq)
 	}
 	return m.requestThread()
 }
@@ -335,10 +340,46 @@ func (m *Model) cursorID() string {
 
 func (m *Model) me() string { return m.status.Me.Handle }
 
+// flight is a read of which one is out at a time; a request meanwhile
+// queues exactly one more.
+type flight struct{ busy, again bool }
+
+// begin reports whether the read may go out now; otherwise it is queued.
+func (f *flight) begin() bool {
+	if f.busy {
+		f.again = true
+		return false
+	}
+	f.busy = true
+	return true
+}
+
+// end marks the read back and reports whether another was queued.
+func (f *flight) end() (again bool) {
+	again = f.again
+	f.busy, f.again = false, false
+	return again
+}
+
+// stale reports whether a result came from a connection since replaced,
+// or, for conv not "", for a thread no longer open.
+func (m *Model) stale(b Backend, conv string) bool {
+	return b != m.b || conv != "" && (m.thread == nil || m.thread.conv != conv)
+}
+
 // convName is how a conversation is labelled: "# room" or the DM's peer.
 func (m *Model) convName(c model.Conversation) string {
 	if c.Kind == model.ConvRoom {
 		return "# " + sanitize.Line(c.Name)
 	}
 	return sanitize.Line(c.Peer(m.me()))
+}
+
+// convRef is how a conversation is named inside a sentence: "#room", or
+// "@peer" for a DM.
+func (m *Model) convRef(c model.Conversation) string {
+	if c.Kind == model.ConvRoom {
+		return "#" + sanitize.Line(c.Name)
+	}
+	return "@" + sanitize.Line(c.Peer(m.me()))
 }

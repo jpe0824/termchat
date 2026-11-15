@@ -23,40 +23,13 @@ func clipRow(r ovRow, w int) (pre, mark, post string) {
 		lead := text[:cut] + "…"
 		text, at, end = lead+text[from:], at-from+len(lead), end-from+len(lead)
 	}
-	pre, mark, post = clip3(text[:at], text[at:end], text[end:], w)
+	p := clip(w, text[:at], text[at:end], text[end:])
+	pre, mark, post = p[0], p[1], p[2]
 	if mark != text[at:end] {
 		// Only a whole match is marked; a cut one reads as plain text.
 		return pre + mark, "", post
 	}
 	return pre, mark, post
-}
-
-// clip3 is truncate applied to a+b+c, kept in its three parts: whole
-// characters while they fit in w-1 cells, then "…".
-func clip3(a, b, c string, w int) (string, string, string) {
-	if lipgloss.Width(a+b+c) <= w {
-		return a, b, c
-	}
-	if w <= 0 {
-		return "", "", ""
-	}
-	var out [3]strings.Builder
-	used, full := 0, false
-	for i, part := range []string{a, b, c} {
-		graphemes(part, func(g string, gw int) bool {
-			if used+gw > w-1 {
-				full = true
-				return false
-			}
-			out[i].WriteString(g)
-			used += gw
-			return true
-		})
-		if full {
-			break
-		}
-	}
-	return out[0].String(), out[1].String(), out[2].String() + "…"
 }
 
 // foldMatch is where word first appears in s, ignoring case rune by rune,

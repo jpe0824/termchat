@@ -58,8 +58,11 @@ func (m *Model) threadShown(g geom) bool {
 	return g.thr.w > 0 && m.openID != "" && m.thread != nil && !m.help
 }
 
-// inputUsable reports whether the open conversation's input takes text.
-func (m *Model) inputUsable(g geom) bool { return m.threadShown(g) && !m.procDown && m.b != nil }
+// inputUsable reports whether the open conversation's input takes text:
+// it is drawn, and the background process is there to send it.
+func (m *Model) inputUsable(g geom) bool {
+	return m.fits() && m.threadShown(g) && !m.procDown && m.b != nil
+}
 
 func (m *Model) inputActive(g geom) bool { return m.focus == focusInput && m.inputUsable(g) }
 
@@ -92,32 +95,23 @@ func keyText(k tea.KeyPressMsg) string {
 // inputKey handles a key for the focused input. No key that pasted text
 // can carry moves focus or acts as a command here: tab types a tab, and
 // esc and ↑ inside a burst are dropped.
-func (m *Model) inputKey(k tea.KeyPressMsg, g geom, burst bool) tea.Cmd {
+func (m *Model) inputKey(k tea.KeyPressMsg, g geom) tea.Cmd {
 	c := m.composeFor(m.openID)
 	in, w := &c.in, m.inputWidth(g)
-	typed := true
-	defer func() {
-		if typed {
-			m.tm.lastTyped = m.opts.Now()
-		}
-	}()
 	switch s := k.String(); s {
 	case "enter":
 		if m.opts.PasteGap < 0 {
-			typed = false
 			return m.submit()
 		}
-		m.enterGen++
 		m.enterConv = m.openID
-		return m.opts.Tick(m.opts.PasteGap, enterMsg{gen: m.enterGen})
+		return m.opts.Tick(m.opts.PasteGap, m.enterT.arm(timerEnter))
 	case "alt+enter", "ctrl+j":
 		in.insert("\n")
 	case "tab":
 		in.insert("\t")
 	case "esc":
-		typed = false
-		if !burst {
-			return m.deferExit(exitEsc)
+		if !m.tm.burst {
+			return m.press(keyDeferred, m.escHold())
 		}
 	case "left":
 		in.left()
@@ -136,10 +130,9 @@ func (m *Model) inputKey(k tea.KeyPressMsg, g geom, burst bool) tea.Cmd {
 	case "ctrl+u":
 		in.killLine()
 	case "up":
-		typed = false
 		if in.text == "" && c.edit == nil {
-			if !burst {
-				return m.deferExit(exitUp)
+			if !m.tm.burst {
+				return m.press(keyDeferred, hold{run: m.selectLastHeld})
 			}
 			return nil
 		}
@@ -147,22 +140,37 @@ func (m *Model) inputKey(k tea.KeyPressMsg, g geom, burst bool) tea.Cmd {
 	case "down":
 		in.down(w)
 	case "pgup", "pgdown":
-		typed = false
 		return m.pageKey(s, g)
 	case "ctrl+k", "ctrl+n", "ctrl+o":
 		// Pasted text can carry these control bytes: they open an overlay
 		// only as a lone press.
-		typed = false
-		if burst {
+		if m.tm.burst {
 			return nil
 		}
-		return m.guardKey(k, g, false)
+		return m.guardKey(k, g)
 	default:
 		if t := keyText(k); t != "" {
 			in.insert(cleanInput(t))
-		} else {
-			typed = false
 		}
+	}
+	return nil
+}
+
+// escHold leaves the input, if it still has the keyboard.
+func (m *Model) escHold() hold {
+	return hold{run: func() tea.Cmd {
+		if g := m.geom(); m.focus == focusInput && m.threadShown(g) {
+			m.leaveInput(g, m.composeFor(m.openID))
+		}
+		return nil
+	}}
+}
+
+// selectLastHeld selects the user's newest message, if the input still has
+// the keyboard and nothing in it.
+func (m *Model) selectLastHeld() tea.Cmd {
+	if c := m.drafts[m.openID]; m.inputActive(m.geom()) && (c == nil || c.in.text == "" && c.edit == nil) {
+		m.selectLast()
 	}
 	return nil
 }
@@ -187,8 +195,8 @@ func (m *Model) flushEnter() {
 	}
 }
 
-func (m *Model) onEnterTimer(msg enterMsg) tea.Cmd {
-	if msg.gen != m.enterGen || m.enterConv == "" {
+func (m *Model) onEnterTimer(msg timerMsg) tea.Cmd {
+	if !m.enterT.live(msg) || m.enterConv == "" {
 		return nil
 	}
 	conv := m.enterConv
@@ -334,20 +342,16 @@ func (m *Model) inputArea(g geom, l tlayout) []string {
 	return out
 }
 
-// inputCursor is where the terminal's cursor goes: in the input when it has
-// focus, hidden otherwise.
-func (m *Model) inputCursor() *tea.Cursor {
-	if m.splashShown() || m.w < minW || m.h < minH {
-		return nil
-	}
+// inputCursor is where the terminal's cursor goes in frame f: in the input
+// when it has focus, hidden otherwise.
+func (m *Model) inputCursor(f frameLayout) *tea.Cursor {
 	if m.ov != nil {
-		return m.ovCursor()
+		return m.ovCursor(f.ov)
 	}
-	g := m.geom()
+	g, l := f.g, f.l
 	if !m.inputActive(g) {
 		return nil
 	}
-	l := m.tlayout(g)
 	r, col := 0, 0
 	if c := m.drafts[m.openID]; c != nil {
 		_, r, col = c.in.render(m.inputWidth(g), l.inputH)

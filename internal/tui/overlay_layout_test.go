@@ -136,13 +136,8 @@ func TestHelpListsEveryKeyFromTheTable(t *testing.T) {
 	// The keys the chat list and thread hold to a lone press are the ones
 	// the table marks guarded.
 	for _, k := range []string{"d", "e", "x", "r", "q", "i", "enter", "tab", "ctrl+k", "ctrl+n", "ctrl+o", "/"} {
-		if !guarded[k] {
-			t.Errorf("%s is not guarded", k)
-		}
-	}
-	for k := range guarded {
 		if !tableGuards(k) {
-			t.Errorf("%s is guarded but the key table does not say so", k)
+			t.Errorf("%s is not guarded", k)
 		}
 	}
 }

@@ -67,7 +67,7 @@ func (m *Model) sidebarRows() []sbRow {
 func (m *Model) sidebarOffset(rows []sbRow, h int) int {
 	for i, r := range rows {
 		if r.conv == m.cursor {
-			return max(i-h+1, 0)
+			return window(0, i, len(rows), h)
 		}
 	}
 	return 0
@@ -88,13 +88,14 @@ func (m *Model) sidebarLines(g geom) []string {
 	}
 	rows := m.sidebarRows()
 	off := m.sidebarOffset(rows, g.bodyH)
+	active := m.listActive(g)
 	var out []string
-	for _, r := range rows[off:] {
+	for _, r := range rows[off:min(off+max(g.bodyH, 0), len(rows))] {
 		if r.conv < 0 {
 			out = append(out, m.st.heading.Render(r.heading))
 			continue
 		}
-		out = append(out, m.sidebarRow(m.convs[r.conv], r.conv == m.cursor, m.listActive(g), width))
+		out = append(out, m.sidebarRow(m.convs[r.conv], r.conv == m.cursor, active, width))
 	}
 	return out
 }
