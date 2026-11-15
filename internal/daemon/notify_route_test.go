@@ -159,7 +159,7 @@ func TestTerminalRouteOffFallsThroughToOS(t *testing.T) {
 
 func TestOSRouteOffAndNoUIRaisesNothingButTheHook(t *testing.T) {
 	e, rec := noteEnv(t)
-	e.cfg.Notify.OS = false
+	e.cfg.Notify.OS = config.OSOff
 	e.cfg.Notify.Hook = "hook-cmd"
 	started(t, e, dm("d1", "dana"))
 	push(e, "d1", "dana", "m1", "hi", 0)

@@ -26,7 +26,7 @@ type Config struct {
 	} `toml:"cli"`
 	Notify struct {
 		Terminal bool   `toml:"terminal"`
-		OS       bool   `toml:"os"`
+		OS       OSMode `toml:"os"`
 		OSC      string `toml:"osc"` // "auto" | "9" | "99" | "777" | "off"
 		Hook     string `toml:"hook"`
 	} `toml:"notify"`
@@ -46,7 +46,7 @@ func defaults() *Config {
 	c := &Config{MarkRead: true, Splash: true, PasteGapMS: 25}
 	c.CLI.Send = "allow"
 	c.Notify.Terminal = true
-	c.Notify.OS = true
+	c.Notify.OS = OSFallback
 	c.Notify.OSC = "auto"
 	return c
 }

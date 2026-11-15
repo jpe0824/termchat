@@ -109,7 +109,7 @@ func (n *notifications) view(r *pass, conv string) (store.ConvView, error) {
 // none can, nothing is read from the store on its behalf.
 func (n *notifications) anyRoute(r *pass) bool {
 	c := n.cfg.Notify
-	return c.OS || c.Hook != "" || c.Terminal && slices.ContainsFunc(r.subs, func(s ipc.Subscriber) bool { return s.CanNotify })
+	return c.OS != config.OSOff || c.Hook != "" || c.Terminal && slices.ContainsFunc(r.subs, func(s ipc.Subscriber) bool { return s.CanNotify })
 }
 
 // focused reports whether an attached UI shows conv in a focused window.
@@ -345,7 +345,7 @@ func (n *notifications) decide(ev model.Event, r *pass) (ipc.NotifyPayload, bool
 func (n *notifications) dispatch(p ipc.NotifyPayload) {
 	cfg := n.cfg.Notify
 	shown := cfg.Terminal && n.srv.BroadcastNotify(ipc.Event{Kind: ipc.KindNotify, Notify: &p}) > 0
-	if !shown && cfg.OS {
+	if !shown && cfg.OS != config.OSOff {
 		n.n.OS(p)
 	}
 	if cfg.Hook != "" {

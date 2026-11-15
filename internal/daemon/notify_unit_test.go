@@ -129,7 +129,7 @@ func (l *lockedWriter) Write(p []byte) (int, error) {
 
 var unitEvent = model.Event{ConvID: "d1", Seq: 3, Kind: model.MessagePosted, Actor: "dana", MsgID: "m1"}
 
-func osOnly(c *config.Config) { c.Notify.OS = true }
+func osOnly(c *config.Config) { c.Notify.OS = config.OSFallback }
 
 func TestConcurrentConsiderationsNotifyOnce(t *testing.T) {
 	n, _, rec, _, _ := unitNotifications(t, osOnly)
@@ -267,7 +267,7 @@ func TestMessageIsNotQueuedTwice(t *testing.T) {
 }
 
 func TestUIThatDetachesBeforeTheSendFallsBackToOS(t *testing.T) {
-	n, _, rec, srv, _ := unitNotifications(t, func(c *config.Config) { c.Notify.Terminal, c.Notify.OS = true, true })
+	n, _, rec, srv, _ := unitNotifications(t, func(c *config.Config) { c.Notify.Terminal, c.Notify.OS = true, config.OSFallback })
 	srv.subs = []ipc.Subscriber{{UI: true, CanNotify: true}}
 	srv.gone = true
 	n.consider([]model.Event{unitEvent}, livePush)
@@ -278,7 +278,7 @@ func TestUIThatDetachesBeforeTheSendFallsBackToOS(t *testing.T) {
 
 func TestOneCallReadsEachConversationOnceAndRuledOutMessagesNever(t *testing.T) {
 	n, st, rec, _, _ := unitNotifications(t, func(c *config.Config) {
-		c.Notify.OS = true
+		c.Notify.OS = config.OSFallback
 		c.Rooms = map[string]string{"d1": "muted"}
 	})
 	st.conv.Kind = model.ConvRoom
