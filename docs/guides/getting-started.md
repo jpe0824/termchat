@@ -89,8 +89,9 @@ directory. See [architecture](../termchat.md#where-state-lives).
 
 The sample frame in the [README](../../README.md) shows the wide layout: chat
 list on the left, the open conversation in the middle, members on the right,
-the input at the bottom of the thread, and the keys that work right now in the
-footer. The top bar shows the server and the connection state.
+the input at the bottom of the thread, and the keys that work right now: keys
+for the messages on a line under the input, keys for the whole window on the
+bottom border. The top bar shows the server and the connection state.
 
 ### Layouts by width
 
@@ -103,8 +104,10 @@ The layout follows the window size and redraws on every resize.
 | 36 to 69 (narrow) | The thread only. A `‹ chats ●7` marker in its header shows unread messages elsewhere; `esc` or a click on it shows the chat list full-width. |
 | under 36 (tiny) | The thread with timestamps dropped and each author on their own line, for a side pane. |
 
-In short windows the footer goes first, then the top bar, so the thread and
-input stay visible. Below 20 columns by 5 rows the screen only says the window
+In short windows the empty row under the key hints goes first (under 16 rows),
+then the keys on the bottom border (under 12), then the hints and the rule
+above them (under 11), then the top bar (under 8), so the thread and input stay
+visible. Below 20 columns by 5 rows the screen only says the window
 is too small.
 
 ### Opening screen
@@ -114,8 +117,10 @@ The `TERMCHAT` banner shows for 0.7 seconds or until a key or click. Set
 
 ### Focus: list, thread, input
 
-Keyboard focus is in one of three places, and the footer always lists the keys
-that work there. `?` opens the same table inside the program (outside the
+Keyboard focus is in one of three places, and the key hints always list the
+keys that work there: under the input for the thread and input, on the bottom
+border for the chat list and the whole window. While the input has focus the
+border offers no key that would type into it. `?` opens the same table inside the program (outside the
 input, where letters type). Every key below comes from one key table in the
 code, so the help overlay and this guide agree.
 

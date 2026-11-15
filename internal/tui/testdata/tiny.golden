@@ -1,7 +1,5 @@
 ┌ termchat ─────────────── ● ┐
 │ ‹ ●2  # platform           │
-│ ci-bot                     │
-│  [agent] build 812 passed  │
 │ sam                        │
 │  @jason can you look?      │
 │  (edited)                  │
@@ -11,4 +9,6 @@
 │  sending…                  │
 │ ────────────────────────── │
 │ >                          │
-└─ esc chats  i type  ? help ┘
+│ ────────────────────────── │
+│ i type                     │
+└─ esc chats  ? help ────────┘

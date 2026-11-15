@@ -26,7 +26,10 @@ their terminal.
 │                    │ 10:45  you     pushing a fix now  sending…                         │                    │
 │                    │ ────────────────────────────────────────────────────────────────── │                    │
 │                    │ >                                                                  │                    │
-└─ ↑↓ move  ⏎ open  tab pane  / search  ctrl+k jump  ctrl+n new  ? help  q quit ───────────────────────────────┘
+│                    │ ────────────────────────────────────────────────────────────────── │                    │
+│                    │ ⏎ send  alt+⏎ newline  ↑ select  esc leave                         │                    │
+│                    │                                                                    │                    │
+└─ ctrl+k jump  ctrl+n new  ctrl+o room  ctrl+c quit ──────────────────────────────────────────────────────────┘
 ```
 
 ## Goals

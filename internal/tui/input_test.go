@@ -252,11 +252,11 @@ func TestInputGrowsToFiveRowsThenScrolls(t *testing.T) {
 	}
 	lines := h.lines()
 	first := inputRow(h)
-	if want := 18 - 4; first != want {
-		t.Fatalf("input starts at row %d, want %d (five rows above the footer)", first, want)
+	if want := 11; first != want {
+		t.Fatalf("input starts at row %d, want %d (five rows above the bar)", first, want)
 	}
 	var got []string
-	for _, l := range lines[first:19] {
+	for _, l := range lines[first:16] {
 		got = append(got, strings.TrimSpace(strings.Split(l, "│")[2]))
 	}
 	if want := []string{"> line3", "line4", "line5", "line6", "line7"}; !slices.Equal(got, want) {
@@ -266,8 +266,8 @@ func TestInputGrowsToFiveRowsThenScrolls(t *testing.T) {
 	if !strings.Contains(lines[first-2], "sending…") {
 		t.Errorf("row above the rule = %q, want the newest message", lines[first-2])
 	}
-	if c := h.m.View().Cursor; c == nil || c.Y != 18 || c.X != 23+2+5 {
-		t.Errorf("cursor = %+v, want after line7 on row 18", c)
+	if c := h.m.View().Cursor; c == nil || c.Y != 15 || c.X != 23+2+5 {
+		t.Errorf("cursor = %+v, want after line7 on row 15", c)
 	}
 }
 

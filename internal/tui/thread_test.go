@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -54,8 +55,9 @@ func TestThreadRendering(t *testing.T) {
 	if j != i+1 {
 		t.Errorf("the unsent item should come last, right after the newest message")
 	}
-	if strings.TrimRight(rows[len(rows)-1], " ") != " >" {
-		t.Errorf("last thread row = %q, want the input line", rows[len(rows)-1])
+	k := slices.IndexFunc(rows, func(r string) bool { return strings.TrimRight(r, " ") == " >" })
+	if k < 0 || k+1 >= len(rows) || strings.Trim(rows[k+1], " ─") != "" {
+		t.Errorf("want the input line with a rule under it:\n%s", body)
 	}
 }
 

@@ -19,7 +19,11 @@ const (
 	// counterFrom is the draft size, in bytes, past which its size shows.
 	counterFrom  = 7000
 	maxInputRows = 5
-	sendSource   = "tui"
+	// hintMinBody and gapMinBody are the body heights from which the thread
+	// pane shows the key hint row and the empty row under it.
+	hintMinBody = 10
+	gapMinBody  = 14
+	sendSource  = "tui"
 )
 
 // compose is one conversation's input: its draft, an edit in progress with
@@ -274,6 +278,10 @@ type tlayout struct {
 	width, vh            int
 	msgY, inputY, inputH int
 	note                 bool
+	// bar, hints and gap are the rows under the input: a rule, the message
+	// key hints and an empty row. Short windows drop gap, then bar and hints.
+	bar, hints, gap bool
+	hintY           int
 }
 
 func (m *Model) tlayout(g geom) tlayout {
@@ -286,6 +294,16 @@ func (m *Model) tlayout(g geom) tlayout {
 		l.note = true
 		fixed++
 	}
+	// The bar only frames the hints; without them it would cost a short
+	// window a message row for nothing.
+	l.hints = g.bodyH >= hintMinBody
+	l.bar = l.hints
+	l.gap = l.hints && g.bodyH >= gapMinBody
+	for _, on := range []bool{l.bar, l.hints, l.gap} {
+		if on {
+			fixed++
+		}
+	}
 	n := 1
 	if c := m.drafts[m.openID]; c != nil {
 		n = len(c.in.rows(m.inputWidth(g)))
@@ -297,6 +315,7 @@ func (m *Model) tlayout(g geom) tlayout {
 	if l.note {
 		l.inputY++
 	}
+	l.hintY = l.inputY + l.inputH + 1
 	return l
 }
 
@@ -338,6 +357,15 @@ func (m *Model) inputArea(g geom, l tlayout) []string {
 			r = text.Render(rows[i])
 		}
 		out = append(out, lead+r)
+	}
+	if l.bar {
+		out = append(out, m.st.faint.Render(strings.Repeat("─", max(l.width, 0))))
+	}
+	if l.hints {
+		out = append(out, m.hintRow(g, l))
+	}
+	if l.gap {
+		out = append(out, "")
 	}
 	return out
 }
