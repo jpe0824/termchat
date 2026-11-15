@@ -72,7 +72,12 @@ a draft in the input.
 - [ ] 90: list and thread; the room panel opens as an overlay.
 - [ ] 50: thread only; `esc` or a click on `‹ chats` shows the list.
 - [ ] 30: tiny, author on its own line, timestamps gone.
-- [ ] Very short window (under 12 rows): the footer, then the top bar, disappear.
+- [ ] Key hints follow focus: message keys under the input (blank with the
+      chat list focused), window keys on the bottom border; with the input
+      focused the border shows no `tab`, `/` or `?`.
+- [ ] Short window: the empty row under the hints goes first (under 16 rows),
+      then the border keys (under 12), then the hints (under 11), then the
+      top bar (under 8).
 - [ ] Resizing keeps the draft, the selection and the scroll position.
 - [ ] The mouse: click a conversation, click into the input, wheel scrolls the
       thread, click a failed message to retry it.
