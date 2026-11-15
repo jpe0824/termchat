@@ -107,3 +107,20 @@ func TestStatusShowsThePinnedServerKey(t *testing.T) {
 		t.Fatalf("Status = %+v, %v; want ServerKey SHA256:pinned", st, err)
 	}
 }
+
+// A store that recorded no server key, as every store before the record
+// existed, adopts the account's pinned key at bring-up and keeps its history.
+func TestStoreWithoutServerKeyAdoptsThePin(t *testing.T) {
+	e := newEnv(t)
+	e.conn = keyedConn{e.fake}
+	e.fake.AddConversation(room("r1", "platform", "me", "dana"), posted("dana", "m1", "kept"))
+	c := e.start()
+	waitUntil(t, "connected", func() bool { st, _ := c.Status(); return st.Conn == connector.StateConnected })
+	if got := e.st.ServerKey(); got != "SHA256:pinned" {
+		t.Fatalf("recorded server key %q, want SHA256:pinned", got)
+	}
+	waitUntil(t, "history", func() bool { m, err := e.st.ByMsgID("r1", "m1"); return err == nil && m.Text == "kept" })
+	if st, _ := c.Status(); st.SetAside != "" || st.Problem != "" {
+		t.Fatalf("status = %+v, want nothing set aside and no problem", st)
+	}
+}

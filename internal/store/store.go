@@ -175,6 +175,31 @@ func (s *Store) SetMe(handle string) error {
 	return nil
 }
 
+// ServerKey returns the fingerprint of the server key this store was first
+// filled under, or "" when none was recorded.
+func (s *Store) ServerKey() string {
+	var v string
+	if err := s.db.QueryRow(`SELECT value FROM meta WHERE key = 'server_key'`).Scan(&v); err != nil {
+		return ""
+	}
+	return v
+}
+
+// SetServerKey records the server key fingerprint the store is filled under.
+// It is recorded once: the store's events are numbered by that server, so a
+// different key afterwards is refused with ErrInvalid; the caller starts a
+// new store instead.
+func (s *Store) SetServerKey(fingerprint string) error {
+	if _, err := s.db.Exec(`INSERT INTO meta(key, value) VALUES ('server_key', ?)
+		ON CONFLICT(key) DO NOTHING`, fingerprint); err != nil {
+		return err
+	}
+	if have := s.ServerKey(); have != fingerprint {
+		return fmt.Errorf("%w: store was filled under server key %s", ErrInvalid, have)
+	}
+	return nil
+}
+
 // Me returns the handle recorded by SetMe, or "" if none.
 func (s *Store) Me() string {
 	s.meMu.Lock()

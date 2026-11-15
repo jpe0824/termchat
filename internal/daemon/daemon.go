@@ -76,6 +76,10 @@ type daemon struct {
 	acct    *account
 	joining bool
 	closing bool
+	// problem is why the configured account is not up, "" when it is or
+	// none is configured. setAside is where bring-up last moved a store.
+	problem  string
+	setAside string
 }
 
 // Run serves until ctx ends or a client asks it to stop, then shuts down
@@ -152,10 +156,9 @@ func Run(ctx context.Context, opts Options) error {
 	d.stop = stop
 	d.srv = ipc.NewServer(d, d.log)
 	if len(d.cfg.Accounts) > 0 {
-		if err := d.bringUp(d.cfg.Accounts[0]); err != nil {
-			_ = ln.Close()
-			return err
-		}
+		// A failure is kept as the account's problem, which status shows; the
+		// process stays up so a join can repair it.
+		_, _ = d.bringUp(d.cfg.Accounts[0])
 	}
 	d.log.Info("background process started", "pid", os.Getpid())
 
@@ -223,23 +226,80 @@ func openLog() (*slog.Logger, func(), error) {
 	return slog.New(slog.NewTextHandler(w, nil)), func() { _ = f.Close() }, nil
 }
 
-// bringUp opens the account's store and connector and starts its work.
-func (d *daemon) bringUp(acct config.Account) error {
+// bringUp opens the account's store and connector and starts its work. It
+// is the one place that decides whether the store may be used: a store
+// records the server key it was filled under, and a store filled under
+// another key than the one now pinned is moved aside and replaced by a new
+// one, because a rebuilt server numbers its events from 1 again under the
+// same conversation ids. It returns the directory a store was moved to, if
+// any. On failure the account stays down and the reason is its problem.
+func (d *daemon) bringUp(acct config.Account) (string, error) {
+	moved, err := d.open(acct)
+	d.mu.Lock()
+	if moved != "" {
+		d.setAside = moved
+	}
+	d.problem = ""
+	if err != nil {
+		d.problem = err.Error()
+	}
+	d.mu.Unlock()
+	if err != nil {
+		d.log.Error("account not brought up", "account", acct.Name, "err", err)
+	}
+	if moved != "" {
+		d.log.Info("set aside earlier history", "account", acct.Name, "dir", moved)
+	}
+	return moved, err
+}
+
+func (d *daemon) open(acct config.Account) (string, error) {
 	st, own := d.opts.Store, false
 	conn := d.opts.Connector
+	var dataDir string
 	if st == nil || conn == nil {
-		dataDir, err := paths.Data()
-		if err != nil {
-			return err
-		}
-		if st == nil {
-			if st, err = store.Open(dataDir, acct.Name); err != nil {
-				return err
-			}
-			own = true
+		var err error
+		if dataDir, err = paths.Data(); err != nil {
+			return "", err
 		}
 		if conn == nil {
 			conn = termchat.New(acct, dataDir)
+		}
+	}
+	pin := ""
+	if k, ok := conn.(connector.ServerKeyer); ok {
+		pin = k.ServerKey()
+	}
+	if st == nil {
+		var err error
+		if st, err = store.Open(dataDir, acct.Name); err != nil {
+			return "", err
+		}
+		own = true
+	}
+	moved := ""
+	if have := st.ServerKey(); pin != "" && have != "" && have != pin {
+		if !own {
+			return "", fmt.Errorf("the local store was filled under server key %s, not %s", have, pin)
+		}
+		if err := st.Close(); err != nil {
+			return "", err
+		}
+		dir, err := d.moveAside(dataDir, acct.Name)
+		if err != nil {
+			return "", fmt.Errorf("set aside the earlier history: %w", err)
+		}
+		moved = dir
+		if st, err = store.Open(dataDir, acct.Name); err != nil {
+			return moved, err
+		}
+	}
+	if pin != "" {
+		if err := st.SetServerKey(pin); err != nil {
+			if own {
+				_ = st.Close()
+			}
+			return moved, err
 		}
 	}
 	a := newAccount(d, acct.Name, conn, st, own)
@@ -247,13 +307,16 @@ func (d *daemon) bringUp(acct config.Account) error {
 	d.acct = a
 	d.mu.Unlock()
 	a.start()
-	return nil
+	return moved, nil
 }
 
-// account returns the running account or ErrNoAccount.
+// account returns the running account, or why there is none.
 func (d *daemon) account() (*account, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.acct == nil && d.problem != "" {
+		return nil, fmt.Errorf("account unavailable: %s", d.problem)
+	}
 	if d.acct == nil {
 		return nil, ipc.ErrNoAccount
 	}
@@ -266,13 +329,13 @@ func (d *daemon) Stop() { d.stop() }
 // Join implements ipc.Backend: it registers with the server, saves the
 // account and brings it up without a restart. A configured account is
 // replaced only when the join names its server and its connection is stuck in
-// not_authorised or host_key_changed, which only a new join can leave.
+// not_authorised or host_key_changed, which only a new join can leave, or when
+// it could not be brought up. Whether the old store may be kept is decided by
+// bring-up, from the server key the store recorded.
 //
-// A replaced account that was in host_key_changed talked to a server that is
-// gone: the new one numbers its events from 1 again under the same
-// conversation ids, so the old store's cursors would hide every new event and
-// its outbox would send old items to the new server. Its store is therefore
-// moved aside, never reused. A not_authorised account keeps its store.
+// The config is saved before the old account stops, so whatever fails later
+// the process and the config name the same account, and a failed bring-up
+// leaves it with a problem that another join may replace.
 func (d *daemon) Join(ctx context.Context, req ipc.JoinReq) (ipc.JoinRes, error) {
 	d.mu.Lock()
 	old, err := d.replaceable(req.Server)
@@ -307,40 +370,27 @@ func (d *daemon) Join(ctx context.Context, req ipc.JoinReq) (ipc.JoinRes, error)
 		d.mu.Unlock()
 		return ipc.JoinRes{}, fmt.Errorf("%w: shutting down", ipc.ErrNotConnected)
 	}
-	d.acct = nil
-	d.mu.Unlock()
-	var res ipc.JoinRes
-	if old != nil {
-		rebuilt := old.conn.State() == connector.StateHostKeyChanged
-		old.shutdown()
-		d.log.Info("replaced account", "account", old.name)
-		if rebuilt && old.ownStore {
-			if res.SetAside, err = d.setAside(old.name); err != nil {
-				return ipc.JoinRes{}, fmt.Errorf("set aside the earlier history: %w", err)
-			}
-			d.log.Info("set aside earlier history", "account", old.name, "dir", res.SetAside)
-		}
-	}
-	d.mu.Lock()
 	prev := d.cfg.Accounts
 	d.cfg.Accounts = []config.Account{acct}
 	if err := d.cfg.Save(); err != nil {
 		d.cfg.Accounts = prev
 		d.mu.Unlock()
-		return res, fmt.Errorf("save config: %w", err)
+		return ipc.JoinRes{}, fmt.Errorf("save config: %w", err)
 	}
+	d.acct = nil
 	d.mu.Unlock()
+	if old != nil {
+		old.shutdown()
+		d.log.Info("replaced account", "account", old.name)
+	}
 	d.log.Info("joined server", "account", acct.Name)
-	return res, d.bringUp(acct)
+	moved, err := d.bringUp(acct)
+	return ipc.JoinRes{SetAside: moved}, err
 }
 
-// setAside moves account's local store to <data>/set-aside/<account>-<UTC
+// moveAside moves account's local store to <dataDir>/set-aside/<account>-<UTC
 // time> and returns that directory, or "" when there was no store.
-func (d *daemon) setAside(account string) (string, error) {
-	dataDir, err := paths.Data()
-	if err != nil {
-		return "", err
-	}
+func (d *daemon) moveAside(dataDir, account string) (string, error) {
 	src := filepath.Join(dataDir, "accounts", account)
 	if _, err := os.Stat(src); errors.Is(err, fs.ErrNotExist) {
 		return "", nil
@@ -367,13 +417,16 @@ func (d *daemon) replaceable(server string) (*account, error) {
 	if d.joining {
 		return nil, refuse
 	}
-	if d.acct == nil {
-		if len(d.cfg.Accounts) > 0 {
-			return nil, refuse
-		}
+	if len(d.cfg.Accounts) == 0 && d.acct == nil {
 		return nil, nil
 	}
 	if len(d.cfg.Accounts) != 1 || termchat.ServerAddr(d.cfg.Accounts[0].Server) != termchat.ServerAddr(server) {
+		return nil, refuse
+	}
+	if d.acct == nil {
+		if d.problem != "" {
+			return nil, nil
+		}
 		return nil, refuse
 	}
 	switch d.acct.conn.State() {

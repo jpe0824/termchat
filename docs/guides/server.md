@@ -213,10 +213,18 @@ interface shows "server key changed".
   --server-key SHA256:...` again, with the fingerprint the new server's `serve`
   prints. `join` records the new key and replaces the stuck account. A rebuilt
   server has a new database, so each person needs a new invite, and the
-  client's earlier history cannot continue on it: `join` moves the old local
-  history, with any messages still waiting to be sent, to
-  `set-aside/<handle>-<time>` in the client's data directory and says so. That
-  directory is kept for reference only; nothing reads it again.
+  client's earlier history cannot continue on it. Each local history records
+  the server key it was filled under; when the background process finds the
+  pinned key differs, it moves the old history, with any messages still waiting
+  to be sent, to `set-aside/<handle>-<time>` in the client's data directory and
+  starts a new one. `join` says so (`earlier history set aside in ...`), and
+  `status` shows the directory until the background process restarts. That
+  directory is kept for reference only; nothing reads it again. It does not
+  matter whether the background process was restarted before the rejoin.
+- If the old history cannot be moved (for example the data directory is not
+  writable), the account stays down: `status` shows `problem` with the reason,
+  and every other command fails with it. Fix the cause, then run the same
+  `join` again or `termchat daemon stop`; the next start tries again.
 - If you did not change the server, treat it as a warning that something is
   answering in the server's place, and do not remove the line.
 

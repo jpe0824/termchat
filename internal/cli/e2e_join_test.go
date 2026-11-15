@@ -200,7 +200,7 @@ func TestJoinWithServerKeyChecksBeforeSendingTheCode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p.do("join", s.addr, "--invite", code, "--server-key", "SHA256:not-this-server").
+	p.do("join", s.addr, "--invite", code, "--server-key", "SHA256:"+strings.Repeat("A", 43)).
 		fail(t, 1, "server host key does not match the pinned key ("+s.addr+")")
 	if _, err := os.Stat(filepath.Join(p.data, "known_servers")); !os.IsNotExist(err) {
 		t.Fatalf("known_servers after a refused key: %v", err)
@@ -215,5 +215,17 @@ func TestJoinWithServerKeyChecksBeforeSendingTheCode(t *testing.T) {
 	out := p.ok("join", s.addr, "--invite", code, "--server-key", fp)
 	if !strings.Contains(out, `"handle":"alice"`) || !strings.Contains(out, `"server_key":"`+fp+`"`) {
 		t.Fatalf("join with the right key = %q", out)
+	}
+}
+
+// A fingerprint that is not exactly what serve prints is a usage error, not a
+// mismatch: padding and surrounding whitespace included.
+func TestJoinServerKeyMustBeWellFormed(t *testing.T) {
+	skipOnWindows(t)
+	p := newPerson(t)
+	good := "SHA256:" + strings.Repeat("A", 43)
+	for _, bad := range []string{good + "=", " " + good, good + " ", good + "\n", "SHA256:short", "sha256:" + strings.Repeat("A", 43)} {
+		p.do("join", "127.0.0.1:1", "--invite", "AAAAAAAAAA", "--server-key", bad).
+			fail(t, 2, "--server-key takes the fingerprint serve prints, SHA256:...")
 	}
 }

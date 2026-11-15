@@ -60,11 +60,15 @@ termchat daemon stop                        # stop it; prints nothing
 {"account":"ada","handle":"ada","state":"connected","pending":0,"syncing":false,"server_key":"SHA256:..."}
 ```
 
-`server_key` is the fingerprint of the server key pinned at `join`. `join`
-adds `set_aside`, the directory the earlier local history was moved to, when
-it replaced an account whose server key had changed. `join --server-key
+`server_key` is the fingerprint of the server key pinned at `join`.
+`set_aside` appears when this join, or the background process since it
+started, moved the earlier local history aside because it was filled under
+another server key; it is the directory it went to. `problem` appears when the
+account could not be brought up (for example the history could not be moved);
+`state` is then `offline` and other commands fail with the reason (exit 1). `join --server-key
 SHA256:...` refuses a server with another key before the invite code is sent
-(exit 1).
+(exit 1); a value not exactly in that form (43 base64 characters, no padding or
+whitespace) is a usage error (exit 2).
 
 `state` is `connecting`, `connected`, `offline`, `not_authorised`,
 `host_key_changed` or `version_mismatch`. `pending` counts messages waiting to

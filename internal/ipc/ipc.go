@@ -84,6 +84,11 @@ type Status struct {
 	// ServerKey is the fingerprint of the server key the account pinned when
 	// it joined, "" when the network pins none.
 	ServerKey string
+	// Problem is why the configured account is not up, "" when it is.
+	Problem string
+	// SetAside is where this process moved the account's earlier history
+	// because it was filled from another server, "" when it did not.
+	SetAside string
 }
 
 // Chats is the conversation list: the user's own conversations and the open

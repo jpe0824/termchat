@@ -91,10 +91,17 @@ and wants chat there, reachable by AI agents through a command line.
 - **A server's host key change needs a manual step on every client**
   (delete its line from `known_servers`, then `join` again), by design. `join`
   replaces the configured account only when it names the same server and the
-  connection is `not_authorised` or `host_key_changed`.
-  Replacing a `host_key_changed` account moves its local store aside
-  (`<data>/set-aside/<handle>-<time>`): a rebuilt server restarts event numbers
-  under the same conversation ids, so the old cursors would hide new events.
+  connection is `not_authorised` or `host_key_changed`, or the account could
+  not be brought up.
+- **A client store belongs to one server key.** It records the pinned
+  fingerprint in its `meta` table (`server_key`) the first time it is opened
+  with a pin. Bring-up (`daemon.bringUp`, on start and after every join) is
+  the only place that compares it with the current pin and, on a difference,
+  moves the store to `<data>/set-aside/<handle>-<time>`: a rebuilt server
+  restarts event numbers under the same conversation ids, so old cursors would
+  hide new events. A failed move leaves the account down with a `problem`
+  shown by `status`, never running on the old store. A store from before the
+  record adopts whatever is pinned when it is first opened.
 - **Gaps in a conversation's log are repaired by a sync from the supervise
   goroutine** (`internal/daemon/gaps.go`): a live event past a gap, a room
   change's own events (the server never pushes them to the requesting device)

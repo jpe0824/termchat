@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -130,7 +131,7 @@ func newJoinCmd() *cobra.Command {
 				return usagef("--invite is required")
 			}
 			key, _ := cmd.Flags().GetString("server-key")
-			if key != "" && !strings.HasPrefix(key, "SHA256:") {
+			if key != "" && !fingerprintRE.MatchString(key) {
 				return usagef("--server-key takes the fingerprint serve prints, SHA256:...")
 			}
 			return withClient(cmd, cmdContext(cmd), func(c *ipc.Client) error {
@@ -167,6 +168,10 @@ func newJoinCmd() *cobra.Command {
 	return cmd
 }
 
+// fingerprintRE is the form ssh.FingerprintSHA256 prints: unpadded base64 of
+// 32 bytes.
+var fingerprintRE = regexp.MustCompile(`^SHA256:[A-Za-z0-9+/]{43}$`)
+
 func newStatusCmd() *cobra.Command {
 	return clientCmd(&cobra.Command{
 		Use:   "status",
@@ -202,6 +207,12 @@ func printStatus(w io.Writer, s statusJSON) error {
 	fmt.Fprintf(tw, "syncing\t%s\n", syncing)
 	if s.ServerKey != "" {
 		fmt.Fprintf(tw, "server key\t%s\n", cell(s.ServerKey))
+	}
+	if s.SetAside != "" {
+		fmt.Fprintf(tw, "set aside\t%s\n", cell(s.SetAside))
+	}
+	if s.Problem != "" {
+		fmt.Fprintf(tw, "problem\t%s\n", cell(s.Problem))
 	}
 	return tw.Flush()
 }

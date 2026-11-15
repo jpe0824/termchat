@@ -95,14 +95,17 @@ type statusJSON struct {
 	Syncing bool   `json:"syncing"`
 	// ServerKey is the pinned server key's fingerprint, as serve prints it.
 	ServerKey string `json:"server_key"`
-	// SetAside is set by join only: where the replaced account's earlier
-	// history was moved.
+	// SetAside is where the account's earlier history was moved because it
+	// was filled from another server, by this join or since the background
+	// process started.
 	SetAside string `json:"set_aside,omitempty"`
+	// Problem is why the configured account is not up.
+	Problem string `json:"problem,omitempty"`
 }
 
 func statusOf(s ipc.Status) statusJSON {
 	return statusJSON{Account: s.Account, Handle: s.Me.Handle, State: string(s.Conn), Pending: s.Pending, Syncing: s.Syncing,
-		ServerKey: s.ServerKey}
+		ServerKey: s.ServerKey, SetAside: s.SetAside, Problem: s.Problem}
 }
 
 type convJSON struct {

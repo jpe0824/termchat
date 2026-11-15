@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/jpe0824/termchat/internal/config"
 	"github.com/jpe0824/termchat/internal/connector"
 	"github.com/jpe0824/termchat/internal/ipc"
 	"github.com/jpe0824/termchat/internal/model"
@@ -61,12 +62,22 @@ func errNotMade(what string) error {
 
 func (d *daemon) Status(context.Context) (ipc.Status, error) {
 	d.mu.Lock()
-	a := d.acct
+	a, problem, aside := d.acct, d.problem, d.setAside
+	var acct config.Account
+	if len(d.cfg.Accounts) > 0 {
+		acct = d.cfg.Accounts[0]
+	}
 	d.mu.Unlock()
 	if a == nil {
-		return ipc.Status{Conn: connector.StateOffline}, nil
+		s := ipc.Status{Conn: connector.StateOffline, Problem: problem, SetAside: aside}
+		if problem != "" {
+			s.Account, s.Me.Handle = acct.Name, acct.Handle
+		}
+		return s, nil
 	}
-	return a.status(), nil
+	s := a.status()
+	s.SetAside = aside
+	return s, nil
 }
 
 func (d *daemon) Chats(ctx context.Context) (ipc.Chats, error) {
