@@ -45,7 +45,7 @@ var keyTable = []keyGroup{
 		{keys: "q", desc: "quit", kind: keyGuarded, match: []string{"q"}, run: (*Model).keyQuit},
 	}},
 	{name: "Thread", main: mainThread, binds: []binding{
-		{keys: "↑ ↓ k j", desc: "step through your messages, or scroll", match: []string{"up", "down", "k", "j"},
+		{keys: "↑ ↓ k j", desc: "step through messages, or scroll", match: []string{"up", "down", "k", "j"},
 			run: (*Model).keyMove},
 		{keys: "i enter", desc: "go to the input — letters type only in the input", kind: keyGuarded,
 			match: []string{"i", "enter"}, run: (*Model).keyThreadEnter},

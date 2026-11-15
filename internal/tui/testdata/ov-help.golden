@@ -20,5 +20,5 @@
 │ q             quit                                                                     │
 │                                                                                        │
 │ Thread                                                                                 │
-│ ↑ ↓ k j       step through your messages, or scroll                                    │
+│ ↑ ↓ k j       step through messages, or scroll                                         │
 └─ ↑↓ scroll  ? close  q quit ───────────────────────────────────────────────────────────┘

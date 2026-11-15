@@ -122,7 +122,7 @@ code, so the help overlay and this guide agree.
 | Focus | Keys |
 |---|---|
 | **Chat list** | `↑ ↓` or `k j` move; `enter` opens the chat; `tab` goes to the thread (standard and wide layouts); `/` search; `pgup pgdn` scroll the thread, `home end` jump to its oldest and newest message; `r` starts a stopped background process; `q` quits. |
-| **Thread** | `↑ ↓` or `k j` step through your own messages once one is selected, otherwise scroll; `i` or `enter` go to the input; `e` edit and `d` delete your selected message (`d` asks y/n); `r` retry a failed message, or start a stopped background process; `x` discard a failed message (asks y/n); `esc` goes from a selection to the input, otherwise to the chat list; `tab` goes to the chat list; `/` search; `pgup pgdn home end` scroll; `q` quits. |
+| **Thread** | `↑ ↓` or `k j` step through messages once one is selected, otherwise scroll; `i` or `enter` go to the input; `e` edit and `d` delete your selected message (`d` asks y/n); `r` retry a failed message, or start a stopped background process; `x` discard a failed message (asks y/n); `esc` goes from a selection to the input, otherwise to the chat list; `tab` goes to the chat list; `/` search; `pgup pgdn home end` scroll; `q` quits. |
 | **Input** | Letters type, including `q` and `?`. `← →`, `home end`, `ctrl+a ctrl+e`, `backspace`, `delete`, `ctrl+w` and `ctrl+u` edit. `enter` sends (or saves an edit); `alt+enter` or `ctrl+j` inserts a line break; `esc` cancels an edit, otherwise leaves the input; `↑` in an empty input selects your newest message; `tab` types a tab; `pgup pgdn` scroll the thread. |
 | **A y/n question** | `y` answers yes, only as a lone key press. Any other key answers no. |
 | **Anywhere** | `ctrl+k` jump, `ctrl+n` new conversation, `ctrl+o` room panel, `/` search (not from the input), `ctrl+c` quits. |
@@ -145,8 +145,8 @@ The conversation shown at launch is a preview: it is on screen but is not
 marked read and does not take the keyboard until you act on it (open it with
 `enter` or a click, press `i` or `enter` on its thread, click in it, or scroll
 it). Opening a conversation from the list puts focus in the input. The mouse
-works everywhere: click a row to open it, click the input to type, click your
-own message to select it, use the wheel to scroll.
+works everywhere: click a row to open it, click the input to type, click a
+message to select it, use the wheel to scroll.
 
 ### Sending
 
@@ -163,8 +163,9 @@ own message to select it, use the wheel to scroll.
 ### Editing and deleting your messages
 
 In the input, `↑` on an empty draft selects your newest message; the focus is
-then the thread with a selection. `↑ ↓` or `k j` move among your own messages,
-and `esc` returns to the input.
+then the thread with a selection. `↑ ↓` or `k j` move through the messages,
+and `esc` returns to the input. Any message can be selected, but only your own
+can be edited or deleted.
 
 - `e` loads a delivered message into the input for editing. `enter` saves,
   `esc` cancels. Edited messages show `(edited)`.

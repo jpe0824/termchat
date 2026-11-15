@@ -6,13 +6,20 @@ import (
 	"github.com/jpe0824/termchat/internal/ipc"
 )
 
-// selectable reports whether msg can be selected: the user's own messages
-// that are not deleted, and their unsent items.
+// selectable reports whether msg can be selected: any message that is not
+// deleted. What a selection offers beyond copying depends on own.
 func (m *Model) selectable(msg ipc.Message) bool {
+	return !msg.Deleted
+}
+
+// own reports whether msg is the user's own: delivered and not deleted, or
+// an unsent item.
+func (m *Model) own(msg ipc.Message) bool {
 	return msg.Status != "" || m.delivered(msg)
 }
 
-func (m *Model) ownKeys() []string {
+// selKeys are the keys of every selectable message, oldest first.
+func (m *Model) selKeys() []string {
 	if m.thread == nil {
 		return nil
 	}
@@ -38,20 +45,25 @@ func (m *Model) selected() (item, bool) {
 	return item{}, false
 }
 
-// selectLast selects the user's newest message.
+// selectLast selects the user's newest own message.
 func (m *Model) selectLast() {
-	keys := m.ownKeys()
-	if len(keys) == 0 {
+	if m.thread == nil {
 		return
 	}
-	m.thread.sel = keys[len(keys)-1]
-	m.focus = focusThread
-	m.revealSel()
+	items := m.thread.items()
+	for i := len(items) - 1; i >= 0; i-- {
+		if m.own(items[i].m) {
+			m.thread.sel = items[i].key
+			m.focus = focusThread
+			m.revealSel()
+			return
+		}
+	}
 }
 
-// moveSel steps the selection d of the user's messages, stopping at the ends.
+// moveSel steps the selection d messages, stopping at the ends.
 func (m *Model) moveSel(d int) {
-	keys := m.ownKeys()
+	keys := m.selKeys()
 	for i, k := range keys {
 		if k == m.thread.sel {
 			m.thread.sel = keys[min(max(i+d, 0), len(keys)-1)]
@@ -107,8 +119,8 @@ func (m *Model) itemAt(g geom, y int) (item, bool) {
 }
 
 // clickThread handles a click at row y of the thread pane: in the input it
-// places the cursor, on the user's message it selects it, and on a failed
-// one it also retries it.
+// places the cursor, on any message it selects it, and on a failed one of
+// the user's it also retries it.
 func (m *Model) clickThread(g geom, x, y int) tea.Cmd {
 	if !m.threadShown(g) {
 		return nil
