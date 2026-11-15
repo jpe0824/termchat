@@ -59,9 +59,11 @@ func TestJoinReplacesAccountStuckInTerminalState(t *testing.T) {
 				st, _ := e.c.Status()
 				return st.Conn == connector.StateConnected && st.Account == "me"
 			})
-			if ids := chatIDs(t, e.c); len(ids) != 1 || ids[0] != "r1" {
-				t.Fatalf("chats = %v", ids)
-			}
+			// The chat list can trail the connected state by a moment.
+			waitUntil(t, "the replaced account lists r1", func() bool {
+				ids := chatIDs(t, e.c)
+				return len(ids) == 1 && ids[0] == "r1"
+			})
 		})
 	}
 }
