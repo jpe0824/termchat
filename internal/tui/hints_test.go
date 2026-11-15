@@ -133,7 +133,7 @@ func TestHintSplit(t *testing.T) {
 	mustNotContain(t, foot, "i type")
 
 	_, h = onOwnMessage(t, 90)
-	if got, want := hintRowOf(h), "e edit  d delete  i type  ↑↓ select  esc back"; got != want {
+	if got, want := hintRowOf(h), "e edit  d delete  i type  c copy  ↑↓ select  esc back"; got != want {
 		t.Errorf("selection hints %q, want %q", got, want)
 	}
 

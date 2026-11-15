@@ -81,6 +81,8 @@ a draft in the input.
 - [ ] Resizing keeps the draft, the selection and the scroll position.
 - [ ] The mouse: click a conversation, click into the input, wheel scrolls the
       thread, click a failed message to retry it.
+- [ ] Copy another person's message with `c` and with a second click, in a
+      plain terminal and inside tmux, and paste it elsewhere: the text only.
 
 ### Overlays
 
@@ -96,7 +98,7 @@ widths 120, 90, 50 and 30:
 - [ ] Search opens a result scrolled to its message, which is marked briefly. A
       result in a room you have left is marked `(left)` and cannot be opened.
 - [ ] A non-creator, non-admin sees no invite, remove or rename in the room panel.
-- [ ] `?` lists every key, and it matches the footer of the focus you opened it from.
+- [ ] `?` lists every key, and it matches the key hints of the focus you opened it from.
 - [ ] Paste a line into each field (with and without bracketed paste): it fills
       the field and nothing opens, creates or joins.
 - [ ] A notification appears while the interface is open in a terminal that

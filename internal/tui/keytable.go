@@ -30,7 +30,7 @@ var keyTable = []keyGroup{
 		{keys: "ctrl+o", desc: "room panel: members, invite, remove, rename, leave", kind: keyGuarded,
 			match: []string{"ctrl+o"}, run: overlayRun(ovRoom)},
 		{keys: "ctrl+c", desc: "quit; asked twice when drafts are unsent"},
-		{keys: "mouse", desc: "click a chat, a message, the input or an overlay row; a second click on a row acts; click outside an overlay to close it; the wheel scrolls"},
+		{keys: "mouse", desc: "click a chat, a message, the input or an overlay row; a second click on a row acts, and on a message copies it; click outside an overlay to close it; the wheel scrolls"},
 	}},
 	{name: "Chat list", main: mainList, binds: []binding{
 		{keys: "↑ ↓ k j", desc: "move", match: []string{"up", "down", "k", "j"}, run: (*Model).keyMove},
@@ -45,7 +45,7 @@ var keyTable = []keyGroup{
 		{keys: "q", desc: "quit", kind: keyGuarded, match: []string{"q"}, run: (*Model).keyQuit},
 	}},
 	{name: "Thread", main: mainThread, binds: []binding{
-		{keys: "↑ ↓ k j", desc: "step through your messages, or scroll", match: []string{"up", "down", "k", "j"},
+		{keys: "↑ ↓ k j", desc: "step through messages, or scroll", match: []string{"up", "down", "k", "j"},
 			run: (*Model).keyMove},
 		{keys: "i enter", desc: "go to the input — letters type only in the input", kind: keyGuarded,
 			match: []string{"i", "enter"}, run: (*Model).keyThreadEnter},
@@ -56,6 +56,8 @@ var keyTable = []keyGroup{
 			match: []string{"r"}, run: (*Model).keyR},
 		{keys: "x", desc: "discard a failed message, after y/n", kind: keyGuarded, match: []string{"x"},
 			run: (*Model).keyDiscard},
+		{keys: "c", desc: "copy the selected message", kind: keyGuarded, match: []string{"c"},
+			run: (*Model).keyCopy},
 		{keys: "esc", desc: "from a selection to the input, else to the chat list", match: []string{"esc"},
 			run: (*Model).keyEsc},
 		{keys: "tab", desc: "to the chat list", kind: keyGuarded, match: []string{"tab"}, run: (*Model).keyTab},

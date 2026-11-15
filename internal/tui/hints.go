@@ -80,7 +80,7 @@ func (m *Model) mainKeys(g geom, wide bool) (msg, app []string) {
 		case m.delivered(sel.m):
 			msg = []string{"e edit", "d delete"}
 		}
-		return append(msg, "i type", "↑↓ select", "esc back"), tail
+		return append(msg, "i type", "c copy", "↑↓ select", "esc back"), tail
 	case g.mode == Tiny:
 		return []string{"i type"}, []string{"esc chats", "? help"}
 	case wide:

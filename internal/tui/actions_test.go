@@ -24,7 +24,7 @@ func selectedText(h *tester) string {
 	return ""
 }
 
-func TestUpInEmptyInputSelectsOwnMessagesOnly(t *testing.T) {
+func TestUpSelectsOwnNewestThenStepsAll(t *testing.T) {
 	f := fixture()
 	h := opened(t, f, 90, 20)
 	h.key("up")
@@ -36,13 +36,22 @@ func TestUpInEmptyInputSelectsOwnMessagesOnly(t *testing.T) {
 		h.key(k)
 		seen = append(seen, selectedText(h))
 	}
-	if want := []string{"on it", "yes, 10 min ago", "yes, 10 min ago", "yes, 10 min ago"}; !slices.Equal(seen, want) {
+	if want := []string{"on it", "@jason can you look?", "build 812 passed", "great. one row looks off"}; !slices.Equal(seen, want) {
 		t.Errorf("selection going up = %q, want %q", seen, want)
 	}
 	h.key("j")
+	if selectedText(h) != "build 812 passed" {
+		t.Errorf("selection after j = %q", selectedText(h))
+	}
 	h.key("down")
+	if selectedText(h) != "@jason can you look?" {
+		t.Errorf("selection after down = %q", selectedText(h))
+	}
+	for range 3 {
+		h.key("down")
+	}
 	if selectedText(h) != "pushing a fix now" {
-		t.Errorf("selection going down = %q", selectedText(h))
+		t.Errorf("selection at the newest = %q", selectedText(h))
 	}
 	// Visible without colour.
 	_, l := lineWith(h.lines(), "pushing a fix now")
@@ -127,34 +136,32 @@ func TestEditCancelledByEscUnchangedOrEmpty(t *testing.T) {
 	}
 }
 
-func TestCannotEditOthersMessage(t *testing.T) {
+func TestOthersMessageSelectableNotEditable(t *testing.T) {
 	f := fixture()
 	h := opened(t, f, 90, 20)
 	h.click(30, h.row("great. one row"))
-	if h.m.thread.sel != "" {
-		t.Fatalf("clicking dana's message selected it")
+	if selectedText(h) != "great. one row looks off" {
+		t.Fatalf("clicking dana's message selected %q", selectedText(h))
 	}
 	h.key("e")
 	h.key("d")
 	mustNotContain(t, h.view(), "editing —", "delete this message?")
-	// No key path reaches someone else's message.
+	if got := f.writes("edit ", "delete "); got != nil {
+		t.Errorf("e or d on another person's message called %q", got)
+	}
 	h.key("esc")
-	h.key("tab")
-	h.key("tab")
 	h.key("up")
-	for range 6 {
-		if txt := selectedText(h); txt != "" && txt != "pushing a fix now" && txt != "on it" && txt != "yes, 10 min ago" {
-			t.Fatalf("selected someone else's message %q", txt)
-		}
+	for range 2 {
 		h.key("up")
 	}
+	if selectedText(h) != "@jason can you look?" {
+		t.Fatalf("keyboard reached %q", selectedText(h))
+	}
 	h.key("e")
-	h.typeText("!")
-	h.enter()
-	for _, c := range f.writes("edit ", "delete ") {
-		if !strings.Contains(c, "r-platform-m2") {
-			t.Errorf("edit or delete on another person's message: %q", c)
-		}
+	h.key("d")
+	mustNotContain(t, h.view(), "editing —", "delete this message?")
+	if got := f.writes("edit ", "delete "); got != nil {
+		t.Errorf("e or d on another person's message called %q", got)
 	}
 }
 
