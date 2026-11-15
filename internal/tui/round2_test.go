@@ -204,6 +204,7 @@ func TestInputFocusWithNoInputSwallowsKeys(t *testing.T) {
 func TestOverflowResubscribeKeepsCallsOut(t *testing.T) {
 	f := fixture()
 	h := opened(t, f, 90, 20)
+	h.send(tea.FocusMsg{}) // a terminal that reports focus
 	f.resetCalls()
 	h.hold = true
 	h.send(tea.BlurMsg{})
