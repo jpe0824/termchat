@@ -122,7 +122,7 @@ code, so the help overlay and this guide agree.
 | Focus | Keys |
 |---|---|
 | **Chat list** | `↑ ↓` or `k j` move; `enter` opens the chat; `tab` goes to the thread (standard and wide layouts); `/` search; `pgup pgdn` scroll the thread, `home end` jump to its oldest and newest message; `r` starts a stopped background process; `q` quits. |
-| **Thread** | `↑ ↓` or `k j` step through messages once one is selected, otherwise scroll; `i` or `enter` go to the input; `e` edit and `d` delete your selected message (`d` asks y/n); `r` retry a failed message, or start a stopped background process; `x` discard a failed message (asks y/n); `esc` goes from a selection to the input, otherwise to the chat list; `tab` goes to the chat list; `/` search; `pgup pgdn home end` scroll; `q` quits. |
+| **Thread** | `↑ ↓` or `k j` step through messages once one is selected, otherwise scroll; `i` or `enter` go to the input; `e` edit and `d` delete your selected message (`d` asks y/n); `r` retry a failed message, or start a stopped background process; `x` discard a failed message (asks y/n); `c` copy the selected message; `esc` goes from a selection to the input, otherwise to the chat list; `tab` goes to the chat list; `/` search; `pgup pgdn home end` scroll; `q` quits. |
 | **Input** | Letters type, including `q` and `?`. `← →`, `home end`, `ctrl+a ctrl+e`, `backspace`, `delete`, `ctrl+w` and `ctrl+u` edit. `enter` sends (or saves an edit); `alt+enter` or `ctrl+j` inserts a line break; `esc` cancels an edit, otherwise leaves the input; `↑` in an empty input selects your newest message; `tab` types a tab; `pgup pgdn` scroll the thread. |
 | **A y/n question** | `y` answers yes, only as a lone key press. Any other key answers no. |
 | **Anywhere** | `ctrl+k` jump, `ctrl+n` new conversation, `ctrl+o` room panel, `/` search (not from the input), `ctrl+c` quits. |
@@ -171,6 +171,20 @@ can be edited or deleted.
   `esc` cancels. Edited messages show `(edited)`.
 - `d` asks `delete this message? y/n`. Deleted messages stay as `message
   deleted`; the old text is removed from the server and from every client.
+
+### Copying a message
+
+Select any message, yours or someone else's, with a click or with `↑` from an
+empty input. Then press `c`, or click the selected message again. Its whole
+text goes to the system clipboard, without the time, the author or markers such
+as `[agent]` and `(edited)`, and the line above the input says
+`copied to clipboard (N characters)`. Escape sequences and control characters
+are dropped from the copy.
+
+The copy goes through the terminal (OSC 52), so it works over SSH and inside a
+multiplexer when the terminal allows it. A terminal never says whether it
+refused, so the note shows either way; see
+[terminals and paste](terminals-and-paste.md#copying) if nothing arrives.
 
 ### Failed messages, retry and discard
 

@@ -120,7 +120,8 @@ func (m *Model) itemAt(g geom, y int) (item, bool) {
 
 // clickThread handles a click at row y of the thread pane: in the input it
 // places the cursor, on any message it selects it, and on a failed one of
-// the user's it also retries it.
+// the user's it also retries it. A click on the message already selected
+// copies it instead.
 func (m *Model) clickThread(g geom, x, y int) tea.Cmd {
 	if !m.threadShown(g) {
 		return nil
@@ -135,6 +136,7 @@ func (m *Model) clickThread(g geom, x, y int) tea.Cmd {
 		}
 		return nil
 	}
+	prev := m.thread.sel
 	m.focus, m.thread.sel = focusThread, ""
 	it, ok := m.itemAt(g, y-l.msgY)
 	if !ok || !m.selectable(it.m) {
@@ -144,6 +146,9 @@ func (m *Model) clickThread(g geom, x, y int) tea.Cmd {
 		return nil
 	}
 	m.thread.sel = it.key
+	if it.key == prev {
+		return m.copyMsg(it)
+	}
 	if it.m.Status == ipc.MsgFailed {
 		return m.retry(it.m.MsgID)
 	}

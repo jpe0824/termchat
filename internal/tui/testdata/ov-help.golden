@@ -8,7 +8,8 @@
 │ ctrl+o        room panel: members, invite, remove, rename, leave                       │
 │ ctrl+c        quit; asked twice when drafts are unsent                                 │
 │ mouse         click a chat, a message, the input or an overlay row; a second click on  │
-│               a row acts; click outside an overlay to close it; the wheel scrolls      │
+│               a row acts, and on a message copies it; click outside an overlay to      │
+│               close it; the wheel scrolls                                              │
 │                                                                                        │
 │ Chat list                                                                              │
 │ ↑ ↓ k j       move                                                                     │
@@ -20,5 +21,4 @@
 │ q             quit                                                                     │
 │                                                                                        │
 │ Thread                                                                                 │
-│ ↑ ↓ k j       step through messages, or scroll                                         │
 └─ ↑↓ scroll  ? close  q quit ───────────────────────────────────────────────────────────┘
