@@ -165,6 +165,10 @@ func newPerson(t *testing.T) *person {
 			t.Fatal(err)
 		}
 	}
+	quiet := filepath.Join(dir, "c", "config.toml")
+	if err := os.WriteFile(quiet, []byte(quietConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	bin := filepath.Join(dir, "b", "termchat")
 	src, err := os.ReadFile(filepath.Join(binDir, "termchat"))
 	if err != nil {
@@ -193,6 +197,9 @@ func newPerson(t *testing.T) *person {
 				}
 			}
 			t.Errorf("background process still alive after daemon stop: %v", pids)
+		}
+		if err := checkQuietConfig(quiet); err != nil {
+			t.Errorf("%s: %v", quiet, err)
 		}
 		_ = os.RemoveAll(dir)
 	})
