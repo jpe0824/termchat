@@ -14,8 +14,9 @@ func (m *Model) notification(p *ipc.NotifyPayload) string {
 		return ""
 	}
 	seq := notify.OSC(m.osc, *p)
-	if seq == "" {
-		return ""
+	if seq == "" || m.osc == "7501" {
+		// Herdr plays its own sound for a status report.
+		return seq
 	}
 	return seq + "\a"
 }

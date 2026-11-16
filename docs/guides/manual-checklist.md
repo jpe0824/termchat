@@ -49,7 +49,9 @@ For each terminal, with the interface open on a different conversation, receive
 a direct message and a mention in a room, and confirm a system notification
 appears, and that closing the interface still produces an OS notification.
 
-- [ ] **Herdr.** It shows OSC 99 as an in-app notice only. With
+- [ ] **Herdr.** With another pane focused, a message plays Herdr's alert
+      sound and shows its corner note, and the termchat pane shows as done in
+      the agents list. With a toast mod that passes alerts on, or
       `notify.os = "always"`, a system notification appears as well, once.
 - [ ] A second terminal that uses OSC 9 (iTerm2, WezTerm or Ghostty).
 - [ ] A third terminal of a different kind (kitty, a VTE terminal such as GNOME

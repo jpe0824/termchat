@@ -20,9 +20,10 @@ operating system is asked at most once per message, and the rules in
 [what notifies](#what-notifies) apply to both routes together. The hook is
 independent of both.
 
-Use `"always"` in terminals that keep the notice inside their own window.
-Herdr does this: it shows the OSC 99 sequence as an in-app notice and posts no
-system notification, so while you are in another app you would see nothing.
+Use `"always"` in terminals that keep the notice inside their own window, so
+that while you are in another app you still see a system notification. Herdr
+keeps its alerts inside its window unless a toast mod passes them on; see
+[Herdr](#herdr).
 
 How route 1 is chosen. When the interface starts, it works out which escape
 sequence your terminal understands (from `notify.osc` and the environment, see
@@ -111,7 +112,7 @@ Opening a conversation marks it read in all three cases.
 [notify]
   terminal = true    # route 1
   os = true          # route 2: true, "always" or false
-  osc = "auto"       # "auto", "9", "99", "777" or "off"
+  osc = "auto"       # "auto", "9", "99", "777", "7501" or "off"
   hook = ""          # route 3: a shell command
 ```
 
@@ -151,7 +152,7 @@ variables:
 
 | Terminal | Detected by | Sequence |
 |---|---|---|
-| Herdr | `HC_TERMINAL_ID` set | OSC 99 (kitty style) |
+| Herdr | `HC_TERMINAL_ID` set | OSC 7501 (Herdr's program status) |
 | kitty | `KITTY_WINDOW_ID` set | OSC 99 |
 | iTerm2 | `TERM_PROGRAM=iTerm.app` | OSC 9 |
 | WezTerm | `TERM_PROGRAM=WezTerm` | OSC 9 |
@@ -162,14 +163,31 @@ variables:
 Terminals also need notifications turned on in their own settings, and some
 only notify while the terminal window is in the background.
 
-**Herdr accepts the kitty-style sequence (OSC 99) but shows it as a notice
-inside Herdr only**, with no system notification. To be told while you are in
-another app, set `os = "always"`:
+### Herdr
+
+In Herdr the interface reports its status the way coding agents do (OSC 7501):
+`working`, then `done`. The sequence carries no message text. Herdr treats a
+program that reaches `done` while you are not looking at it as one that needs
+you: it plays its alert sound, shows a note in the corner, and marks the pane
+in its agents list. It sets the status back to idle once you look at the pane.
+No bell is written, since Herdr plays its own sound.
+
+Herdr posts no system notification for its alerts. To be told while you are in
+another app, either:
+
+- use a toast mod that passes Herdr's alerts to the system, such as
+  `system-toast` in the "Herdr + Termchat" layout
+  ([herdr-layouts](https://github.com/jpe0824/herdr-layouts/tree/main/termchat)), or
+- set `os = "always"`, so the background process also posts through the
+  operating system:
 
 ```toml
 [notify]
-  os = "always"   # the Herdr notice and a system notification
+  os = "always"   # the Herdr alert and a system notification
 ```
+
+OSC 9, 99 and 777 show at most an in-app notice in Herdr, and none of them
+reached the system while Herdr was in the background.
 
 ## Testing notifications in your terminal
 
@@ -180,6 +198,7 @@ it and `notify.osc` should be that number.
 printf '\e]9;termchat: hello\a'                                   # OSC 9
 printf '\e]777;notify;termchat;hello\a'                            # OSC 777
 printf '\e]99;i=tc:d=0;termchat\e\\\e]99;i=tc:d=1:p=body;hello\e\\'  # OSC 99
+printf '\e]7501;app=termchat:state=working\a'; sleep 2; printf '\e]7501;app=termchat:state=done\a'  # OSC 7501 (Herdr)
 ```
 
 Then test termchat itself. Open the interface on a conversation other than
