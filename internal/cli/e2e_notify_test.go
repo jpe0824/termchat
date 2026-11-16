@@ -12,11 +12,11 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/jpe0824/termchat/internal/config"
+	"github.com/jpe0824/termchat/internal/ipc"
 )
 
 // quietConfig is every simulated person's config.toml: test traffic must
-// never reach the desktop through an OS notification or a hook. The
-// background process reads the file once when it starts, so it has to exist
+// never reach the desktop through an OS notification or a hook. It has to exist
 // before the person's first command.
 const quietConfig = `[notify]
 os = false
@@ -108,4 +108,51 @@ func TestJoinKeepsNotifySection(t *testing.T) {
 	if len(c.Accounts) != 1 || c.Accounts[0].Handle != "alice" {
 		t.Fatalf("accounts after join = %+v, want only alice", c.Accounts)
 	}
+}
+
+// hookCounter installs a hook on p's running background process that appends
+// a line to the returned file for each notification, and removes it when the
+// test ends so the quiet-config check holds. The CLI refuses to set a hook,
+// so the test sets it as the interface would.
+func hookCounter(t *testing.T, p *person) string {
+	t.Helper()
+	out := filepath.Join(p.dir, "hook.out")
+	script := filepath.Join(p.dir, "hook.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho run >> "+out+"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	p.ipcDo(func(c *ipc.Client) error { _, err := c.ConfigSet("notify.hook", script, "tui"); return err })
+	t.Cleanup(func() {
+		p.ipcDo(func(c *ipc.Client) error { _, err := c.ConfigSet("notify.hook", "", "tui"); return err })
+	})
+	return out
+}
+
+func hookRuns(path string) int {
+	b, _ := os.ReadFile(path)
+	return strings.Count(string(b), "run\n")
+}
+
+func TestRoomNotifyAppliesWithoutRestart(t *testing.T) {
+	_, a, b := pair(t)
+	a.ok("room", "create", "agents")
+	b.ok("room", "join", "agents")
+	runs := hookCounter(t, b)
+
+	a.ok("send", "agents", "first, no mention")
+	eventually(t, "bob to hold the first message", func() bool { return len(b.messages("read", "agents")) == 1 })
+	if n := hookRuns(runs); n != 0 {
+		t.Fatalf("hook ran %d times in a mentions-only room", n)
+	}
+	if out := b.ok("room", "notify", "agents", "all"); out != "#agents notifies: all\n" {
+		t.Fatalf("notify = %q", out)
+	}
+	a.ok("send", "agents", "second")
+	eventually(t, "the hook to run", func() bool { return hookRuns(runs) == 1 })
+}
+
+func TestRoomNotifyRefusesDM(t *testing.T) {
+	_, a, _ := pair(t)
+	a.ok("dm", "bob")
+	a.do("room", "notify", "bob", "all").failContains(t, 2, "rooms only")
 }

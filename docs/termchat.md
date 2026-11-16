@@ -159,7 +159,7 @@ These hold today and are what keep the layers swappable.
 | What | Where |
 |---|---|
 | Server database, host key | `<--data>/server.db`, `<--data>/host_key` |
-| Client config | `config.toml` in the config directory (`$TERMCHAT_CONFIG_DIR`, else the platform's user config directory plus `termchat`) |
+| Client config (changed live with `termchat config set` and `termchat room notify`) | `config.toml` in the config directory (`$TERMCHAT_CONFIG_DIR`, else the platform's user config directory plus `termchat`) |
 | Client local store, device key, pinned server keys, log | `client.db`, `keys/<host:port>.ed25519`, `known_servers`, `daemon.log`, and `set-aside/` (history moved aside when rejoining a server whose key changed) in the data directory (`$TERMCHAT_DATA_DIR`, else `$XDG_DATA_HOME/termchat`, else `~/.local/share/termchat`) |
 | Socket and lock | `daemon.sock`, `daemon.lock` in the runtime directory (`$TERMCHAT_RUNTIME_DIR`, else `$XDG_RUNTIME_DIR/termchat`, else `<data>/run`) |
 

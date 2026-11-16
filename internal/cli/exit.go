@@ -15,6 +15,7 @@ const (
 	exitNoServer   = 4
 	exitTimeout    = 5
 	exitSendDenied = 6
+	exitRefused    = 7
 	exitInterrupt  = 130
 )
 
@@ -37,6 +38,8 @@ func exitCodeFor(err error) int {
 	switch {
 	case errors.Is(err, ipc.ErrSendDenied):
 		return exitSendDenied
+	case errors.Is(err, ipc.ErrRefused):
+		return exitRefused
 	case errors.Is(err, ipc.ErrNotFound), errors.Is(err, ipc.ErrAmbiguous):
 		return exitNotFound
 	case errors.Is(err, ipc.ErrNoAccount), errors.Is(err, ipc.ErrNotConnected),

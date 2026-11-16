@@ -77,8 +77,7 @@ delivered when the connection returns. After `not_authorised` or
 `host_key_changed`, join the same server again with a new invite (see the
 [server guide](server.md#a-device-that-was-revoked)).
 
-Stop the background process after upgrading termchat, and after editing
-`config.toml` (it reads the file at start). The next command starts a new one.
+Stop the background process after upgrading termchat. The next command starts a new one. Settings do not need a restart: change them with `termchat config set <key> <value>` (see [the config file](#the-config-file)).
 termchat does not install a login item; the process starts the first time you run a client command after a reboot. It is not supported on Windows.
 
 Files: `client.db`, the device keys in `keys/`, `known_servers` and
@@ -279,6 +278,12 @@ For the terminal-specific details of paste and timing, see
 `join` writes it with every key set. Edit the existing keys; a second copy of
 a table such as `[cli]` makes the file invalid, and a file that does not parse
 stops the background process from starting. A missing file means the defaults.
+
+You rarely need to edit it. `termchat config` lists every setting, and
+`termchat config set <key> <value>` changes one and applies it at once, without
+a restart. A hand edit applies at the next restart or the next settings change.
+`notify.hook` and `cli.send = "allow"` cannot be set from the command line
+(exit 7); edit the file for those.
 
 ```toml
 mark_read = true        # opening or reading a conversation in the interface marks it read
