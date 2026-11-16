@@ -27,6 +27,7 @@ var slashCmds []slashCmd
 // usage line.
 func init() {
 	slashCmds = []slashCmd{
+		{"settings", "", "view and change settings", (*Model).slashSettings},
 		{"notify", "all|mentions|muted", "set this room's notifications", (*Model).slashNotify},
 		{"help", "", "keys and commands", (*Model).slashHelp},
 	}
@@ -171,6 +172,16 @@ func (m *Model) slashNotify(arg string) tea.Cmd {
 		}
 		return slashDoneMsg{conv: conv, seq: seq, said: ref + " notifies: " + s.Value}
 	}
+}
+
+// slashSettings opens the settings overlay; the command stays in the
+// draft if it cannot open.
+func (m *Model) slashSettings(string) tea.Cmd {
+	cmd := m.openOverlay(ovSettings)
+	if m.ov != nil {
+		m.composeFor(m.openID).endCommand()
+	}
+	return cmd
 }
 
 // slashHelp opens the help overlay.

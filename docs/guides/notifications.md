@@ -1,8 +1,9 @@
 # Notifications
 
 termchat tells you about new messages through up to three routes, stored in
-`config.toml`. You switch them with `termchat config set`, except `notify.hook`,
-which you edit in the file. The background process decides what is worth a
+`config.toml`. You switch them in `/settings` (live, no restart) or with
+`termchat config set`; `notify.hook` only in `/settings`, since the CLI cannot
+change it. The background process decides what is worth a
 notification and routes it, so notifications arrive even when the interface is
 closed.
 
@@ -37,12 +38,14 @@ bell to the terminal, and the operating-system route is not used unless
 `notify.os` is `"always"`. Otherwise, with `notify.os` on, the background
 process posts it through the operating system.
 
-Changes made with `termchat config set` or `termchat room notify` apply at
-once to the background process's settings (`notify.terminal`, `notify.os`,
-`notify.hook`, `cli.send`, room modes), with no restart. The interface's own
-settings (`notify.osc`, `mark_read`, `paste_gap_ms`, `splash`) are read when
-it next starts. `notify.hook` cannot be changed from the command line; edit
-`config.toml` and run `termchat daemon stop`.
+Change these settings with `/settings` in the interface, `termchat config
+set`, or `termchat room notify`. Every change applies at once, with no
+restart: the background process takes `notify.terminal`, `notify.os`,
+`notify.hook`, `cli.send` and room modes, and every running interface takes
+`notify.osc`, working out the escape sequence again and telling the background
+process whether it can now show notifications. `notify.hook` cannot be changed
+from the command line; change it with `/settings`, or edit `config.toml` and
+run `termchat daemon stop`.
 
 Route 2 uses `osascript` on macOS and `notify-send` (or `gdbus` when
 `notify-send` is missing) on Linux. The `gdbus` path has not been tried on a

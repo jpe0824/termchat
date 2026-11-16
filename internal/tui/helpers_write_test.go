@@ -81,16 +81,29 @@ func (f *fakeBackend) ConfigSet(key, value, source string) (ipc.Setting, error) 
 		return ipc.Setting{}, err
 	}
 	s := ipc.Setting{Key: key, Value: value}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if id, ok := strings.CutPrefix(key, "rooms."); ok {
-		f.mu.Lock()
 		for _, c := range f.convs {
 			if c.ID == id {
 				s.Room = c.Name
 			}
 		}
-		f.mu.Unlock()
+	}
+	for i := range f.settings {
+		if f.settings[i].Key == key {
+			f.settings[i].Value = value
+		}
 	}
 	return s, nil
+}
+
+// ConfigGet serves the settings withSettings gave the fake, none by default.
+func (f *fakeBackend) ConfigGet() ([]ipc.Setting, error) {
+	f.record("configget")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.settings), f.errs["configget"]
 }
 
 // writes is the recorded calls that start with one of the prefixes.

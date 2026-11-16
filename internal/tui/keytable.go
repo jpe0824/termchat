@@ -133,6 +133,16 @@ var keyTable = []keyGroup{
 			run: (*Model).ovBackKey, foot: "esc back"},
 		fieldKeys,
 	})},
+	{name: "Settings (/settings)", kind: ovSettings, binds: slices.Concat(
+		onSteps(slices.Concat(moveKeys, listKeys), stepSettings, stepSettingChoice), []binding{
+			{keys: "enter", desc: "change the selected setting: pick a value, or edit text", kind: keyGuarded,
+				match: []string{"enter"}, run: (*Model).ovGoKey, foot: "⏎ change", steps: []ovStep{stepSettings}},
+			{keys: "enter", desc: "save the selected value, or the text", kind: keyGuarded, match: []string{"enter"},
+				run: (*Model).ovGoKey, foot: "⏎ save", steps: []ovStep{stepSettingChoice, stepSettingText}},
+			{keys: "esc", desc: "back to the settings, or close", kind: keyGuarded, match: []string{"esc"},
+				run: (*Model).ovBackKey, foot: "esc back"},
+			fieldKeys,
+		})},
 }
 
 // keyCtx is what a key acts on, as it stands when the key acts.
@@ -152,4 +162,13 @@ func overlayRun(kind ovKind) func(*Model, keyCtx) tea.Cmd {
 // roomRun starts one of the room panel's actions.
 func roomRun(f func(*Model) tea.Cmd) func(*Model, keyCtx) tea.Cmd {
 	return func(m *Model, _ keyCtx) tea.Cmd { return f(m) }
+}
+
+// onSteps is binds limited to an overlay's steps.
+func onSteps(binds []binding, steps ...ovStep) []binding {
+	out := slices.Clone(binds)
+	for i := range out {
+		out[i].steps = steps
+	}
+	return out
 }

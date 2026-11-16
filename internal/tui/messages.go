@@ -98,6 +98,21 @@ type (
 		op, done, conv string
 		err            error
 	}
+	// configMsg is a read of the settings, the seq'th asked for.
+	configMsg struct {
+		b    Backend
+		seq  int
+		list []ipc.Setting
+		err  error
+	}
+	// settingSavedMsg is a setting change's answer, for the overlay gen.
+	settingSavedMsg struct {
+		b   Backend
+		gen int
+		key string
+		s   ipc.Setting
+		err error
+	}
 	searchMsg struct {
 		b    Backend
 		gen  int

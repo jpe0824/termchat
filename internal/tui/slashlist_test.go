@@ -24,17 +24,18 @@ func picked(h *tester) int {
 }
 
 const (
-	notifyRow = "/notify all|mentions|muted  set this room's notifications"
-	helpRow   = "/help  keys and commands"
+	settingsRow = "/settings  view and change settings"
+	notifyRow   = "/notify all|mentions|muted  set this room's notifications"
+	helpRow     = "/help  keys and commands"
 )
 
 func TestSlashListFilters(t *testing.T) {
 	_, h := slashOpened(t)
 	typeSlash(h)
-	if got := listNames(h); !slices.Equal(got, []string{"notify", "help"}) {
+	if got := listNames(h); !slices.Equal(got, []string{"settings", "notify", "help"}) {
 		t.Fatalf("rows after / = %q", got)
 	}
-	mustContain(t, h.view(), "› "+notifyRow, "  "+helpRow)
+	mustContain(t, h.view(), "› "+settingsRow, "  "+notifyRow, "  "+helpRow)
 	h.typeText("n")
 	if got := listNames(h); !slices.Equal(got, []string{"notify"}) {
 		t.Fatalf("rows after /n = %q", got)
@@ -67,8 +68,8 @@ func TestSlashListKeys(t *testing.T) {
 	}
 	h.key("down")
 	h.key("down")
-	if picked(h) != 1 {
-		t.Fatalf("down down: pick %d, want 1", picked(h))
+	if picked(h) != 2 {
+		t.Fatalf("down down: pick %d, want 2", picked(h))
 	}
 	mustContain(t, h.view(), "› "+helpRow, "  "+notifyRow)
 	if h.m.thread.sel != "" || h.draft() != "/" {
@@ -154,7 +155,7 @@ func TestSlashListEsc(t *testing.T) {
 		t.Fatalf("esc: draft %q cmd %v focus %v", h.draft(), cmdMode(h), h.m.focus)
 	}
 	h.enter()
-	if want := "unknown command /no — commands: /notify /help; // sends a leading /"; noteText(h) != want {
+	if want := "unknown command /no — commands: /settings /notify /help; // sends a leading /"; noteText(h) != want {
 		t.Errorf("enter after esc: notice %q, want %q", noteText(h), want)
 	}
 	h.key("esc")
@@ -199,8 +200,8 @@ func TestSlashListPastedLeadingTabTypes(t *testing.T) {
 		t.Errorf("within the gap: draft %q, want the tab typed", h.draft())
 	}
 	pause(h, time.Second)
-	if h.draft() != "/help " {
-		t.Errorf("after the gap: draft %q, want \"/help \"", h.draft())
+	if h.draft() != "/notify " {
+		t.Errorf("after the gap: draft %q, want \"/notify \"", h.draft())
 	}
 }
 

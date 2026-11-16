@@ -1,0 +1,14 @@
+┌ termchat ─────────────── ● ┐
+│ Settings                   │
+│ Notifications              │
+│ › notify.terminal  true    │
+│   notify.os        true    │
+│   notify.osc       auto    │
+│   notify.hook      (none)  │
+│ Interface                  │
+│   mark_read        false   │
+│   paste_gap_ms     25      │
+│                            │
+│ Show notifications inside  │
+│ the terminal.              │
+└─ ⏎ change  esc close ──────┘
