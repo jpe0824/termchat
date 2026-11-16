@@ -11,18 +11,22 @@ import (
 	"syscall"
 	"testing"
 	"time"
-
-	"github.com/jpe0824/termchat/internal/config"
 )
 
-func hookNotifier(t *testing.T, hook string) (*Notifier, *lockedBuf) {
+// hookRunner is a Notifier whose Hook always runs one hook command.
+type hookRunner struct {
+	*Notifier
+	hook string
+}
+
+func (h hookRunner) Hook(p Notification) { h.Notifier.Hook(p, h.hook) }
+
+func hookNotifier(t *testing.T, hook string) (hookRunner, *lockedBuf) {
 	t.Helper()
-	cfg := &config.Config{}
-	cfg.Notify.Hook = hook
 	logs := &lockedBuf{}
-	n := New(cfg, slog.New(slog.NewTextHandler(logs, nil)))
+	n := New(slog.New(slog.NewTextHandler(logs, nil)))
 	t.Cleanup(n.Close)
-	return n, logs
+	return hookRunner{n, hook}, logs
 }
 
 func readFile(t *testing.T, path string) string {

@@ -117,7 +117,14 @@ type env struct {
 	dataDir string
 	runDir  string
 	st      *store.Store
-	adjust  func(*Options)
+	// file is config.toml, seeded from cfg when the daemon starts.
+	file   *cfgFile
+	adjust func(*Options)
+	// built receives the daemon Run builds.
+	built chan *daemon
+	d     *daemon
+	// mu guards file and built, which options sets on first use.
+	mu sync.Mutex
 
 	cancel context.CancelFunc
 	done   chan error
@@ -154,6 +161,24 @@ func (e *env) options() Options {
 		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 		RuntimeDir: e.runDir,
 	}
+	e.mu.Lock()
+	if e.file == nil {
+		e.file = newCfgFile(e.t, e.cfg)
+	}
+	if e.built == nil {
+		e.built = make(chan *daemon, 1)
+	}
+	file, built := e.file, e.built
+	e.mu.Unlock()
+	opts.LoadConfig, opts.SaveConfig = file.load, file.save
+	// Only the daemon that won the lock is built; the send must still never
+	// block Run.
+	opts.built = func(d *daemon) {
+		select {
+		case built <- d:
+		default:
+		}
+	}
 	if e.adjust != nil {
 		e.adjust(&opts)
 	}
@@ -184,6 +209,19 @@ func (e *env) start() *ipc.Client {
 	return c
 }
 
+// daemon returns the daemon the running Run built.
+func (e *env) daemon() *daemon {
+	e.t.Helper()
+	if e.d == nil {
+		select {
+		case e.d = <-e.built:
+		case <-time.After(5 * time.Second):
+			e.t.Fatal("Run built no daemon")
+		}
+	}
+	return e.d
+}
+
 func (e *env) runErr() error {
 	select {
 	case err := <-e.done:
@@ -210,7 +248,7 @@ func (e *env) stop() {
 	case <-time.After(10 * time.Second):
 		e.t.Error("Run did not return after cancel")
 	}
-	e.cancel = nil
+	e.cancel, e.d, e.built = nil, nil, nil
 	if e.st != nil {
 		_ = e.st.Close()
 		e.st = nil

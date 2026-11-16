@@ -50,9 +50,8 @@ func TestJoinReplacesAccountStuckInTerminalState(t *testing.T) {
 			if calls.Load() != 1 {
 				t.Fatalf("join called %d times", calls.Load())
 			}
-			saved, err := config.Load()
-			if err != nil || len(saved.Accounts) != 1 || saved.Accounts[0].Server != "chat.test:7420" {
-				t.Fatalf("saved config = %+v, %v", saved, err)
+			if saved := e.file.saved(); len(saved.Accounts) != 1 || saved.Accounts[0].Server != "chat.test:7420" {
+				t.Fatalf("saved config = %+v", saved)
 			}
 			e.fake.SetState(connector.StateConnected)
 			waitUntil(t, "the replaced account connected", func() bool {

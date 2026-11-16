@@ -106,7 +106,7 @@ func unitNotifications(t *testing.T, mut func(*config.Config)) (*notifications, 
 	}
 	st, rec, srv := newFakeNoteStore(), &noteRec{}, &fakeNoteServer{}
 	logs := &bytes.Buffer{}
-	n := newNotifications(cfg, rec, srv, st, slog.New(slog.NewTextHandler(&lockedWriter{w: logs}, nil)), newFakeClock())
+	n := newNotifications(func() *config.Config { return cfg }, rec, srv, st, slog.New(slog.NewTextHandler(&lockedWriter{w: logs}, nil)), newFakeClock())
 	return n, st, rec, srv, logs
 }
 

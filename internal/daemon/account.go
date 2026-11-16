@@ -106,7 +106,7 @@ func newAccount(d *daemon, name string, conn connector.Connector, st *store.Stor
 	if k, ok := conn.(connector.ServerKeyer); ok {
 		a.serverKey = k.ServerKey()
 	}
-	a.nt = newNotifications(d.cfg, d.notifier, d.srv, st, a.log, d.clock)
+	a.nt = newNotifications(d.config, d.notifier, d.srv, st, a.log, d.clock)
 	a.rooms = &openRooms{clock: d.clock, fetch: func(ctx context.Context) ([]model.Conversation, error) {
 		_, open, err := conn.Conversations(ctx)
 		return open, err

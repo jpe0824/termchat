@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jpe0824/termchat/internal/config"
 	"github.com/jpe0824/termchat/internal/sanitize"
 )
 
@@ -37,8 +36,7 @@ type runner func(ctx context.Context, c command) error
 // configured hook. It never blocks its caller: each command runs on its own
 // goroutine, bounded in number and time.
 type Notifier struct {
-	hook string
-	log  *slog.Logger
+	log *slog.Logger
 
 	// Injectable for tests.
 	run      runner
@@ -53,14 +51,14 @@ type Notifier struct {
 	oses   chan struct{}
 }
 
-// New returns a Notifier for the hook in cfg. A nil logger discards logs.
-func New(cfg *config.Config, logger *slog.Logger) *Notifier {
+// New returns a Notifier. A nil logger discards logs.
+func New(logger *slog.Logger) *Notifier {
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Notifier{
-		hook: cfg.Notify.Hook, log: logger,
+		log: logger,
 		run: execRun, goos: runtime.GOOS, lookPath: exec.LookPath, timeout: commandTimeout,
 		ctx: ctx, cancel: cancel,
 		hooks: make(chan struct{}, maxRunning), oses: make(chan struct{}, maxRunning),
@@ -82,13 +80,13 @@ func (n *Notifier) OS(p Notification) {
 	n.start(n.oses, "operating-system notification", func() *command { return platformCommand(n.goos, n.lookPath, p) })
 }
 
-// Hook runs the configured hook for p, when there is one.
-func (n *Notifier) Hook(p Notification) {
-	if n.hook == "" {
+// Hook runs hook, a shell command, for p; an empty hook does nothing.
+func (n *Notifier) Hook(p Notification, hook string) {
+	if hook == "" {
 		return
 	}
 	p = clean(p)
-	c := hookCommand(n.hook, p)
+	c := hookCommand(hook, p)
 	n.start(n.hooks, "hook", func() *command { return &c })
 }
 
