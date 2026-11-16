@@ -349,3 +349,38 @@ func TestSlashPastedArgsWithTrailingEnterDoesNotRun(t *testing.T) {
 		t.Errorf("deliberate enter: writes = %q", got)
 	}
 }
+
+// A // send whose result arrives while an edit has the draft set aside
+// still ends command mode with the draft, so a later paste is text.
+func TestSlashSentDuringEditEndsCommandMode(t *testing.T) {
+	f, h := slashOpened(t)
+	typeSlash(h)
+	h.typeText("/hi")
+	out := heldEnter(h)
+	if len(out) != 1 {
+		t.Fatalf("held %d commands, want the Send", len(out))
+	}
+	h.m.selectLast()
+	h.key("up")
+	h.key("e")
+	pause(h, time.Second)
+	c := h.m.drafts["r-platform"]
+	if c == nil || c.edit == nil || c.edit.saved.text != "//hi" {
+		t.Fatalf("not editing with //hi set aside: focus %v sel %q c %+v", h.m.focus, h.m.thread.sel, c)
+	}
+	h.deliver(out[0]())
+	if c.edit.saved.text != "" || c.cmd {
+		t.Fatalf("set-aside draft %q cmd %v, want empty and not a command", c.edit.saved.text, c.cmd)
+	}
+	h.enter()
+	if c.edit != nil || h.m.focus != focusInput {
+		t.Fatalf("edit %v focus %v, want the unchanged edit ended in the input", c.edit, h.m.focus)
+	}
+	h.paste("/usr/bin")
+	pause(h, time.Second)
+	h.enter()
+	want := []string{`send r-platform "/hi" tui`, `send r-platform "/usr/bin" tui`}
+	if got := f.writes(slashWrites...); !slices.Equal(got, want) {
+		t.Errorf("writes = %q, want %q (notice %q)", got, want, noteText(h))
+	}
+}

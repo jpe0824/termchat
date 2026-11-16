@@ -129,9 +129,21 @@ code, so the help overlay and this guide agree.
 |---|---|
 | **Chat list** | `↑ ↓` or `k j` move; `enter` opens the chat; `tab` goes to the thread (standard and wide layouts); `/` search; `pgup pgdn` scroll the thread, `home end` jump to its oldest and newest message; `r` starts a stopped background process; `q` quits. |
 | **Thread** | `↑ ↓` or `k j` step through messages once one is selected, otherwise scroll; `i` or `enter` go to the input; `e` edit and `d` delete your selected message (`d` asks y/n); `r` retry a failed message, or start a stopped background process; `x` discard a failed message (asks y/n); `c` copy the selected message; `esc` goes from a selection to the input, otherwise to the chat list; `tab` goes to the chat list; `/` search; `pgup pgdn home end` scroll; `q` quits. |
-| **Input** | Letters type, including `q` and `?`. `← →`, `home end`, `ctrl+a ctrl+e`, `backspace`, `delete`, `ctrl+w` and `ctrl+u` edit. `enter` sends (or saves an edit); `alt+enter` or `ctrl+j` inserts a line break; `esc` cancels an edit, otherwise leaves the input; `↑` in an empty input selects your newest message; `tab` types a tab; `pgup pgdn` scroll the thread. |
+| **Input** | Letters type, including `q` and `?`. `← →`, `home end`, `ctrl+a ctrl+e`, `backspace`, `delete`, `ctrl+w` and `ctrl+u` edit. `enter` sends (or saves an edit); `alt+enter` or `ctrl+j` inserts a line break; `esc` cancels an edit, otherwise leaves the input; `↑` in an empty input selects your newest message; `tab` types a tab; `pgup pgdn` scroll the thread; `/` typed alone in an empty input starts a command, with the list of commands (`//` sends a leading `/`). |
+| **Command list** | Shows above the input while a command name is typed. `↑ ↓` move the highlight; `tab` completes the highlighted command (inside a paste it types a tab); `enter` completes a name typed in part and runs a whole one; `esc` hides the list and keeps the text, and `esc` again leaves the input. |
 | **A y/n question** | `y` answers yes, only as a lone key press. Any other key answers no. |
 | **Anywhere** | `ctrl+k` jump, `ctrl+n` new conversation, `ctrl+o` room panel, `/` search (not from the input), `ctrl+c` quits. |
+
+Commands typed in the input act on the open conversation:
+
+- `/notify all|mentions|muted` sets the open room's notifications, as
+  `termchat room notify` does.
+- `/help` opens the help overlay.
+- `//text` sends `/text` as a message.
+
+A `/` starts a command only when typed alone into an empty input and no other
+key follows within `paste_gap_ms`; a pasted `/` stays text. See
+[terminals and paste](terminals-and-paste.md#commands-and-paste).
 
 Outside the input only these commands act. A letter that is not a command
 shows a short hint instead of doing anything: `press i to type` on the thread,

@@ -80,7 +80,8 @@ per message missed. A **new device's first sync is silent**: when a device has
 no conversations stored yet, nothing it downloads notifies. The notification
 text is cut to 200 characters, with control characters removed.
 
-Set a room's mode with `termchat room notify <room> all|mentions|muted`. It
+Set a room's mode with `termchat room notify <room> all|mentions|muted`, or
+in the interface with `/notify all|mentions|muted` in the open room. It
 applies at once; no hand edit and no restart. `termchat config get rooms.<room>`
 reads it back. The mode does not apply to direct messages.
 

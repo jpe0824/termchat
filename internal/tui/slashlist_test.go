@@ -271,3 +271,19 @@ func TestSlashListClickKeepsTheInput(t *testing.T) {
 		t.Errorf("click on the list: focus %v cmd %v draft %q rows %q", h.m.focus, cmdMode(h), h.draft(), listNames(h))
 	}
 }
+
+// A lone tab with the cursor inside the typed name still completes.
+func TestSlashListTabCompletesMidWord(t *testing.T) {
+	_, h := slashOpened(t)
+	typeSlash(h)
+	h.typeText("no")
+	h.key("left")
+	feed(h, "\t")
+	if h.draft() != "/n\to" {
+		t.Errorf("within the gap: draft %q, want the tab typed at the cursor", h.draft())
+	}
+	pause(h, time.Second)
+	if h.draft() != "/notify " || !cmdMode(h) {
+		t.Errorf("after the gap: draft %q cmd %v, want \"/notify \" in command mode", h.draft(), cmdMode(h))
+	}
+}

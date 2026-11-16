@@ -90,10 +90,14 @@ func (m *Model) slashHeld() tea.Cmd {
 	return nil
 }
 
-// syncCmd ends command mode once the draft no longer starts with /. The
-// draft set aside by an edit keeps its mode.
+// syncCmd ends command mode once the draft no longer starts with /. While
+// an edit is open the mode belongs to the draft it set aside.
 func (c *compose) syncCmd() {
-	if c.edit == nil && !strings.HasPrefix(c.in.text, "/") {
+	draft := c.in.text
+	if c.edit != nil {
+		draft = c.edit.saved.text
+	}
+	if !strings.HasPrefix(draft, "/") {
 		c.cmd, c.hide = false, false
 	}
 }

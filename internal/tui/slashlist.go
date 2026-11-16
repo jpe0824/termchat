@@ -68,17 +68,17 @@ func (m *Model) cmdListKey(k tea.KeyPressMsg) (tea.Cmd, bool) {
 }
 
 // tabHold types the tab at once, so a paste that starts with one keeps it.
-// Once the paste gap passes with no other key, a draft still holding just
-// that tab gets it taken back out and b, the completion, runs.
+// Once the paste gap passes with no other key, a draft still exactly as
+// the tab left it gets the tab taken back out and b, the completion, runs.
 func (m *Model) tabHold(c *compose, b binding) tea.Cmd {
-	before, pick := c.in.text, c.pick
+	before, pick := c.in, c.pick
 	c.in.insert("\t")
+	typed := c.in.text
 	return m.press(b.kind, hold{run: func() tea.Cmd {
-		c := m.drafts[m.openID]
-		if c == nil || c.in.text != before+"\t" || !m.inputActive(m.geom()) {
+		if m.drafts[m.openID] != c || c.in.text != typed || !m.inputActive(m.geom()) {
 			return nil
 		}
-		c.in.set(before)
+		c.in = before
 		c.pick = pick
 		return b.run(m, keyCtx{key: "tab"})
 	}})

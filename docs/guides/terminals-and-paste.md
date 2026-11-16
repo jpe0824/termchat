@@ -63,6 +63,7 @@ that arrive within `paste_gap_ms` of each other as one paste. What that means:
 - **A paste that ends in a line break sends.** The last line break has nothing
   after it, so it looks like a deliberate `enter`: the text is sent as soon as
   the paste ends. In edit mode, it saves the edit instead.
+- **A paste never runs a command.** See [commands and paste](#commands-and-paste).
 - **A paste of exactly one command key acts as that key.** A single `q`, `d`,
   `e`, `r`, `x` or `i` pasted while the input is not focused cannot be told from
   a keypress, so it does what that key does. A longer paste of letters never does:
@@ -96,6 +97,19 @@ the gap can send at each chunk boundary that falls on a line break, which
 happens over a slow SSH connection to a terminal without bracketed paste.
 Typing is not affected by the gap, except that `enter` and `esc` take effect
 after it. The setting is read when the interface starts.
+
+## Commands and paste
+
+A `/` typed alone into an empty input waits for the paste gap before it starts
+a command. If another key arrives in that time, or the `/` came in a paste, it
+stays text: a pasted line that starts with `/`, such as `/usr/bin`, sends as a
+message. With the gap at `0` a typed `/` starts a command at once.
+
+In a command, an `enter` that ends a paste never runs it. The command stays in
+the input with `press enter to run /<name>` (or `press enter to send` for a
+`//` draft), and a deliberate `enter` runs it. While the command list shows,
+`tab` types a tab when it starts a paste and completes the highlighted command
+only as a lone press.
 
 ## Why `tab` types a tab and `esc` leaves the input
 
