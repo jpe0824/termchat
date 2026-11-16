@@ -1,12 +1,12 @@
 ┌ termchat ────── team.example ● connected ┐
 │ ‹ chats ●2    # platform                 │
 │ ──────────────────────────────────────── │
-│               (edited)                   │
 │ 10:45 you     on it                      │
 │ 10:45 you     pushing a fix now          │
 │               sending…                   │
 │ ──────────────────────────────────────── │
-│ › /notify all|mentions|muted  set this … │
+│ › /settings  view and change settings    │
+│   /notify all|mentions|muted  set this … │
 │   /help  keys and commands               │
 │ > /                                      │
 │ ──────────────────────────────────────── │

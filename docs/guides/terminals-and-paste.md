@@ -96,7 +96,8 @@ Raise it on slow links. Pasted text that arrives in chunks further apart than
 the gap can send at each chunk boundary that falls on a line break, which
 happens over a slow SSH connection to a terminal without bracketed paste.
 Typing is not affected by the gap, except that `enter` and `esc` take effect
-after it. The setting is read when the interface starts.
+after it. A change made with `/settings` or `termchat config set` applies at
+once in every running interface.
 
 ## Commands and paste
 

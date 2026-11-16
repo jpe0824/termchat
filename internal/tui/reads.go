@@ -184,7 +184,7 @@ func (m *Model) onOlder(msg olderMsg) tea.Cmd {
 func (m *Model) onEvents(evs []ipc.Event) tea.Cmd {
 	var cmds []tea.Cmd
 	var notes []string
-	chats, thread := false, false
+	chats, thread, cfg := false, false, false
 	for _, ev := range evs {
 		var conv string
 		var seq int64
@@ -213,6 +213,9 @@ func (m *Model) onEvents(evs []ipc.Event) tea.Cmd {
 				notes = append(notes, s)
 			}
 			continue
+		case ipc.KindConfig:
+			cfg = true
+			continue
 		default:
 			continue
 		}
@@ -227,6 +230,9 @@ func (m *Model) onEvents(evs []ipc.Event) tea.Cmd {
 	}
 	if thread {
 		cmds = append(cmds, m.readThread())
+	}
+	if cfg {
+		cmds = append(cmds, m.requestConfig())
 	}
 	if len(notes) > 0 {
 		// One write keeps the notifications in the order they came.

@@ -1,0 +1,14 @@
+┌ termchat ────────────────────────────────────────────── team.example ● connected ┐
+│ Direct             │ # platform                                        4 members │
+│ ● dana           2 │ ─────────────────────────────────────────────────────────── │
+│   sam   ┌─ notify.os ──────────────────────────────────────────────────┐         │
+│   ci-bot│   false                                                      │         │
+│ Rooms   │ › true  current                                              │         │
+│ ● # plat│   always                                                     │         │
+│   # depl│                                                              │         │
+│   # rand│ Post through the operating system: never, only when no       │         │
+│         │ interface showed it, or always.                              │──────── │
+│         └─ ⏎ save  esc back  ↑↓ move ──────────────────────────────────┘         │
+│                    │ ─────────────────────────────────────────────────────────── │
+│                    │                                                             │
+└──────────────────────────────────────────────────────────────────────────────────┘

@@ -115,7 +115,7 @@ func TestSlashUnknown(t *testing.T) {
 	typeSlash(h)
 	h.typeText("frob")
 	h.enter()
-	if want := "unknown command /frob — commands: /notify /help; // sends a leading /"; noteText(h) != want {
+	if want := "unknown command /frob — commands: /settings /notify /help; // sends a leading /"; noteText(h) != want {
 		t.Errorf("notice %q, want %q", noteText(h), want)
 	}
 	if h.draft() != "/frob" || !cmdMode(h) {

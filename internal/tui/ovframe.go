@@ -135,6 +135,9 @@ func (m *Model) fieldLine(w int) string {
 // rowLine draws a row w cells wide: "› " marks the selected one, which is
 // also reversed, and the row's hl part is marked.
 func (m *Model) rowLine(r ovRow, sel bool, w int) string {
+	if r.heading {
+		return m.st.heading.Render(truncate(r.text, w))
+	}
 	lead, st, hl := "  ", lipgloss.NewStyle(), m.st.match
 	if sel {
 		lead, st, hl = "› ", m.st.selected, m.st.match.Reverse(true)
