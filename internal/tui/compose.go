@@ -28,13 +28,16 @@ const (
 
 // compose is one conversation's input: its draft, an edit in progress with
 // the draft set aside, and whether a Send or an Edit is out. cmd says the
-// draft is a command; cmdSeq and cmdText tag the latest command run.
+// draft is a command; cmdSeq and cmdText tag the latest command run. pick
+// is the command list's highlighted row, and hide says esc closed the list.
 type compose struct {
 	in      input
 	edit    *editing
 	sending bool
 	saving  bool
 	cmd     bool
+	hide    bool
+	pick    int
 	cmdSeq  int
 	cmdText string
 }
@@ -104,9 +107,13 @@ func keyText(k tea.KeyPressMsg) string {
 // can carry moves focus or acts as a command here: tab types a tab, and
 // esc and ↑ inside a burst are dropped. A / typed alone into an empty
 // draft makes it a command once the paste gap passes with no other key.
+// While the command list shows, its keys go to it first.
 func (m *Model) inputKey(k tea.KeyPressMsg, g geom) tea.Cmd {
 	c := m.composeFor(m.openID)
-	defer c.syncCmd()
+	defer c.afterInputKey(c.in.text)
+	if cmd, ok := m.cmdListKey(k); ok {
+		return cmd
+	}
 	in, w := &c.in, m.inputWidth(g)
 	switch s := k.String(); s {
 	case "enter":
@@ -299,7 +306,10 @@ func (m *Model) onSent(msg sentMsg) tea.Cmd {
 type tlayout struct {
 	width, vh            int
 	msgY, inputY, inputH int
-	note                 bool
+	// listY and listH are the command list's rows, between the rule and
+	// the notice line.
+	listY, listH int
+	note         bool
 	// bar, hints and gap are the rows under the input: a rule, the message
 	// key hints and an empty row. Short windows drop gap, then bar and hints.
 	bar, hints, gap bool
@@ -332,8 +342,10 @@ func (m *Model) tlayout(g geom) tlayout {
 	}
 	// The input leaves the thread at least one row when the window allows.
 	l.inputH = max(min(n, maxInputRows, g.bodyH-fixed-1), 1)
-	l.vh = max(g.bodyH-fixed-l.inputH, 0)
-	l.inputY = l.msgY + l.vh + 1
+	l.listH = m.cmdListHeight(g, g.bodyH-fixed-l.inputH-1)
+	l.vh = max(g.bodyH-fixed-l.inputH-l.listH, 0)
+	l.listY = l.msgY + l.vh + 1
+	l.inputY = l.listY + l.listH
 	if l.note {
 		l.inputY++
 	}
@@ -344,7 +356,8 @@ func (m *Model) tlayout(g geom) tlayout {
 // inputWidth is the cells the input's text is drawn in, after "> ".
 func (m *Model) inputWidth(g geom) int { return max(g.thr.inner()-2, 1) }
 
-// inputArea draws the rule above the input, the notice line and the input.
+// inputArea draws the rule above the input, the command list, the notice
+// line and the input.
 func (m *Model) inputArea(g geom, l tlayout) []string {
 	c := m.drafts[m.openID]
 	if c == nil {
@@ -361,7 +374,7 @@ func (m *Model) inputArea(g geom, l tlayout) []string {
 	} else {
 		rule = m.st.faint.Render(rule)
 	}
-	out := []string{rule}
+	out := append([]string{rule}, m.cmdListLines(g, l)...)
 	if s, st := m.noteLine(); l.note {
 		out = append(out, st.Render(truncate(s, l.width)))
 	}

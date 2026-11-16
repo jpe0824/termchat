@@ -1,0 +1,16 @@
+┌ termchat ────────────────────────────────────────────────────────────────────────── team.example ● connected ┐
+│ Direct             │ # platform                                                         │ Members (4)        │
+│ ● dana           2 │ ────────────────────────────────────────────────────────────────── │ ci-bot [agent]     │
+│   sam              │ 10:41  dana    great. one row looks off                            │ dana               │
+│   ci-bot           │ 10:42  ci-bot  [agent] build 812 passed                            │ jason (you)        │
+│ Rooms              │ 10:44  sam     @jason can you look? (edited)                       │ sam                │
+│ ● # platform     5 │ 10:45  you     on it                                               │                    │
+│   # deploys        │ 10:45  you     pushing a fix now  sending…                         │ Open room          │
+│   # random         │ ────────────────────────────────────────────────────────────────── │ created by dana    │
+│                    │ › /notify all|mentions|muted  set this room's notifications        │                    │
+│                    │   /help  keys and commands                                         │                    │
+│                    │ > /                                                                │                    │
+│                    │ ────────────────────────────────────────────────────────────────── │                    │
+│                    │ ↑↓ pick  tab complete  ⏎ run  esc hide                             │                    │
+│                    │                                                                    │                    │
+└─ ctrl+k jump  ctrl+n new  ctrl+o room  ctrl+c quit ──────────────────────────────────────────────────────────┘

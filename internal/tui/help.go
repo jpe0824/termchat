@@ -57,6 +57,8 @@ const (
 	mainAnywhere mainPart = iota + 1
 	mainList
 	mainThread
+	// mainCmdList is the command list under the input.
+	mainCmdList
 )
 
 // mainBinding is the binding key s triggers in the main view: from the

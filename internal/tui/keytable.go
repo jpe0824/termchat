@@ -74,6 +74,16 @@ var keyTable = []keyGroup{
 		{keys: "↑", desc: "in an empty input: select your newest message"},
 		{keys: "tab", desc: "types a tab"},
 		{keys: "pgup pgdn", desc: "scroll the thread"},
+		{keys: "/", desc: "typed alone in an empty input: a command, with the list of commands; // sends a leading /"},
+	}},
+	{name: "Command list", main: mainCmdList, binds: []binding{
+		{keys: "↑ ↓", desc: "move the highlight", match: []string{"up", "down"}, run: (*Model).cmdListMove,
+			foot: "↑↓ pick"},
+		{keys: "tab", desc: "complete the highlighted command; inside a paste it types a tab", kind: keyGuarded,
+			match: []string{"tab"}, run: (*Model).cmdListComplete, foot: "tab complete"},
+		{keys: "enter", desc: "complete a name typed in part, run a whole one", foot: "⏎ run"},
+		{keys: "esc", desc: "hide the list and keep the text; esc again leaves the input", kind: keyDeferred,
+			match: []string{"esc"}, run: (*Model).cmdListHide, foot: "esc hide"},
 	}},
 	{name: "Questions (y/n)", binds: []binding{
 		{keys: "y", desc: "yes, as a lone key press"},

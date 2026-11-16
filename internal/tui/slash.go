@@ -54,6 +54,7 @@ func slashParse(text string) (name, arg string) {
 // commandEnter acts on enter in a draft in command mode. A bare / does
 // nothing. An enter that came within the paste gap of the key before it
 // may end pasted text, so it runs nothing and asks for a deliberate one.
+// With the command list showing, a name typed in part is completed.
 func (m *Model) commandEnter(conv, text string, pasted bool) tea.Cmd {
 	switch {
 	case text == "/":
@@ -63,6 +64,9 @@ func (m *Model) commandEnter(conv, text string, pasted bool) tea.Cmd {
 	case pasted:
 		name, _ := slashParse(text)
 		return m.setNotice(conv, "press enter to run /"+name, false)
+	case m.slashPartial(m.composeFor(conv)):
+		m.completeSlash(m.composeFor(conv))
+		return nil
 	}
 	return m.runSlash(conv, text)
 }
@@ -81,7 +85,7 @@ type slashDoneMsg struct {
 // the / that was typed alone.
 func (m *Model) slashHeld() tea.Cmd {
 	if c := m.drafts[m.openID]; c != nil && c.edit == nil && c.in.text == "/" && m.inputActive(m.geom()) {
-		c.cmd = true
+		c.cmd, c.hide, c.pick = true, false, 0
 	}
 	return nil
 }
@@ -90,14 +94,14 @@ func (m *Model) slashHeld() tea.Cmd {
 // draft set aside by an edit keeps its mode.
 func (c *compose) syncCmd() {
 	if c.edit == nil && !strings.HasPrefix(c.in.text, "/") {
-		c.cmd = false
+		c.cmd, c.hide = false, false
 	}
 }
 
 // endCommand empties a draft whose command has run.
 func (c *compose) endCommand() {
 	c.in.set("")
-	c.cmd = false
+	c.cmd, c.hide, c.pick = false, false, 0
 }
 
 // runSlash runs the command in text, a draft in command mode, on conv.
