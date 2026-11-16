@@ -30,18 +30,22 @@ func OSC(variant string, n Notification) string {
 		return "\x1b]99;i=tc:d=0;" + title + "\x1b\\" +
 			"\x1b]99;i=tc:d=1:p=body;" + text + "\x1b\\"
 	case "7501":
-		return herdrAttention
+		return herdrWorking
 	}
 	return ""
 }
 
-// herdrAttention reports the program's status to Herdr: working, then done.
-// Herdr raises its alert (sound, note, agent status) when a program reaches
-// done while the person is not looking at it, and only on a change, so each
-// notification passes through working first. It carries no message text.
-// Herdr turns done back to idle itself once the person looks.
-const herdrAttention = "\x1b]7501;app=termchat:state=working\x07" +
-	"\x1b]7501;app=termchat:state=done\x07"
+// herdrWorking and HerdrDone report the program's status to Herdr. Herdr
+// raises its alert (sound, note, agent status) when a program reaches done
+// while the person is not looking at it, and only when the status changes.
+// OSC("7501") is the working report; HerdrDone must follow it in a separate,
+// later write, or a pane still done from an earlier message shows no change.
+// Neither carries message text. Herdr turns done back to idle itself once the
+// person looks.
+const herdrWorking = "\x1b]7501;app=termchat:state=working\x07"
+
+// HerdrDone is the done report that follows OSC("7501").
+const HerdrDone = "\x1b]7501;app=termchat:state=done\x07"
 
 // oscField makes s safe inside an OSC payload. Line breaks and tabs become
 // spaces, other control characters (C0, DEL and C1, which includes the 8-bit

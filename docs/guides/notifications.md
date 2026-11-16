@@ -168,7 +168,9 @@ only notify while the terminal window is in the background.
 ### Herdr
 
 In Herdr the interface reports its status the way coding agents do (OSC 7501):
-`working`, then `done`. The sequence carries no message text. Herdr treats a
+`working`, then `done` a second later. Herdr alerts only when the status
+changes, so the gap lets a pane still `done` from an earlier message alert
+again. The reports carry no message text. Herdr treats a
 program that reaches `done` while you are not looking at it as one that needs
 you: it plays its alert sound, shows a note in the corner, and marks the pane
 in its agents list. It sets the status back to idle once you look at the pane.

@@ -19,8 +19,8 @@ func TestOSCSequences(t *testing.T) {
 		{"777", room, "\x1b]777;notify;dana in #ops;hi\x07"},
 		{"99", dm, "\x1b]99;i=tc:d=0;dana\x1b\\\x1b]99;i=tc:d=1:p=body;hi\x1b\\"},
 		{"99", room, "\x1b]99;i=tc:d=0;dana in #ops\x1b\\\x1b]99;i=tc:d=1:p=body;hi\x1b\\"},
-		{"7501", dm, "\x1b]7501;app=termchat:state=working\x07\x1b]7501;app=termchat:state=done\x07"},
-		{"7501", room, "\x1b]7501;app=termchat:state=working\x07\x1b]7501;app=termchat:state=done\x07"},
+		{"7501", dm, "\x1b]7501;app=termchat:state=working\x07"},
+		{"7501", room, "\x1b]7501;app=termchat:state=working\x07"},
 		{"1", dm, ""},
 		{"", dm, ""},
 		{"off", dm, ""},
@@ -121,10 +121,16 @@ func TestDetectOSC(t *testing.T) {
 
 func TestOSC7501CarriesNoMessageText(t *testing.T) {
 	n := Notification{Sender: "da\x1bna", ConvName: "ops", Text: "secret\x07\x1b]9;x"}
-	got := OSC("7501", n)
+	got := OSC("7501", n) + HerdrDone
 	for _, leak := range []string{"secret", "dana", "da\x1bna", "ops"} {
 		if strings.Contains(got, leak) {
 			t.Errorf("OSC 7501 = %q, carries %q", got, leak)
 		}
+	}
+}
+
+func TestHerdrDone(t *testing.T) {
+	if want := "\x1b]7501;app=termchat:state=done\x07"; HerdrDone != want {
+		t.Errorf("HerdrDone = %q, want %q", HerdrDone, want)
 	}
 }

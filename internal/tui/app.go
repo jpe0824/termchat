@@ -212,6 +212,8 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		if !m.focusUntrusted {
 			m.termFocus = focusOut
 		}
+	case herdrDoneMsg:
+		return tea.Raw(notify.HerdrDone)
 	case timerMsg:
 		return m.onTimer(msg)
 	case sentMsg:
