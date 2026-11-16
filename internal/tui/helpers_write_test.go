@@ -75,6 +75,37 @@ func (f *fakeBackend) SetFocus(conv string, focused bool) error {
 	return f.errFor("setfocus")
 }
 
+func (f *fakeBackend) ConfigSet(key, value, source string) (ipc.Setting, error) {
+	f.record(fmt.Sprintf("configset %s %s", key, value))
+	if err := f.errFor("configset"); err != nil {
+		return ipc.Setting{}, err
+	}
+	s := ipc.Setting{Key: key, Value: value}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if id, ok := strings.CutPrefix(key, "rooms."); ok {
+		for _, c := range f.convs {
+			if c.ID == id {
+				s.Room = c.Name
+			}
+		}
+	}
+	for i := range f.settings {
+		if f.settings[i].Key == key {
+			f.settings[i].Value = value
+		}
+	}
+	return s, nil
+}
+
+// ConfigGet serves the settings withSettings gave the fake, none by default.
+func (f *fakeBackend) ConfigGet() ([]ipc.Setting, error) {
+	f.record("configget")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.settings), f.errs["configget"]
+}
+
 // writes is the recorded calls that start with one of the prefixes.
 func (f *fakeBackend) writes(prefixes ...string) []string {
 	f.mu.Lock()
@@ -100,8 +131,31 @@ func (f *fakeBackend) resetCalls() {
 	f.mu.Unlock()
 }
 
-// typeText types s one character at a time, as a terminal sends keys.
+// arrowSeqs are the escape sequences for ↑ and ↓, which pasted text can
+// carry and a terminal without bracketed paste reports as those keys.
+var arrowSeqs = map[string]string{"\x1b[A": "up", "\x1b[B": "down"}
+
+// typeText types s one character at a time, as a terminal sends keys; an
+// arrow's escape sequence arrives as that arrow key.
 func (h *tester) typeText(s string) {
+	h.t.Helper()
+	for s != "" {
+		next, key := len(s), ""
+		for seq, k := range arrowSeqs {
+			if i := strings.Index(s, seq); i >= 0 && i < next {
+				next, key = i, k
+			}
+		}
+		h.typeChars(s[:next])
+		if key == "" {
+			return
+		}
+		h.key(key)
+		s = s[next+3:]
+	}
+}
+
+func (h *tester) typeChars(s string) {
 	h.t.Helper()
 	graphemes(s, func(g string, _ int) bool {
 		switch g {

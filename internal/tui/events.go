@@ -19,9 +19,19 @@ type supervisor struct {
 	b     Backend
 	opts  Options
 	adopt <-chan Backend
-	// canNotify says the interface writes notifications to the terminal.
+	// canNotify says the interface writes notifications to the terminal;
+	// renotify carries a new value from the interface, which needs a new
+	// subscription to reach the background process.
 	canNotify bool
+	renotify  <-chan bool
 }
+
+// How forward ended.
+const (
+	fwdStopped  = iota // ctx ended
+	fwdEnded           // the subscription ended
+	fwdRenotify        // canNotify changed
+)
 
 func (s *supervisor) run(ctx context.Context) {
 	defer func() {
@@ -39,14 +49,25 @@ func (s *supervisor) run(ctx context.Context) {
 				}
 			}
 		}
-		ch, err := s.b.SubscribeUI(ctx, s.canNotify)
+		s.takeRenotify()
+		subCtx, end := context.WithCancel(ctx)
+		ch, err := s.b.SubscribeUI(subCtx, s.canNotify)
 		if err != nil {
+			end()
 			s.drop(ctx, err)
 			continue
 		}
 		s.send(ctx, subscribedMsg{b: s.b})
-		if !s.forward(ctx, ch) {
+		how := s.forward(ctx, ch)
+		end()
+		switch how {
+		case fwdStopped:
 			return
+		case fwdRenotify:
+			if !s.finish(ctx, ch) {
+				return
+			}
+			continue
 		}
 		why := s.b.SubscriptionErr()
 		if errors.Is(why, ipc.ErrSubscriptionOverflow) {
@@ -59,20 +80,31 @@ func (s *supervisor) run(ctx context.Context) {
 	}
 }
 
-// forward passes events on until the channel closes, and reports false
-// when ctx ended first. Events already waiting behind one go with it as
-// one batch, so a busy conversation costs one update, not one per event.
-func (s *supervisor) forward(ctx context.Context, ch <-chan ipc.Event) bool {
+// forward passes events on until the channel closes, ctx ends or
+// canNotify changes. Events already waiting behind one go with it as one
+// batch, so a busy conversation costs one update, not one per event.
+func (s *supervisor) forward(ctx context.Context, ch <-chan ipc.Event) int {
+	ended := func() int {
+		if ctx.Err() != nil {
+			return fwdStopped
+		}
+		return fwdEnded
+	}
 	for {
 		select {
 		case <-ctx.Done():
-			return false
+			return fwdStopped
 		case b := <-s.adopt:
 			// Started by the user after this connection came back.
 			_ = b.Close()
+		case v := <-s.renotify:
+			if v != s.canNotify {
+				s.canNotify = v
+				return fwdRenotify
+			}
 		case ev, ok := <-ch:
 			if !ok {
-				return ctx.Err() == nil
+				return ended()
 			}
 			evs, open := drain(ch, ev)
 			if len(evs) == 1 {
@@ -81,8 +113,35 @@ func (s *supervisor) forward(ctx context.Context, ch <-chan ipc.Event) bool {
 				s.send(ctx, eventsMsg{evs: evs})
 			}
 			if !open {
-				return ctx.Err() == nil
+				return ended()
 			}
+		}
+	}
+}
+
+// takeRenotify takes a canNotify sent while no subscription was being
+// forwarded.
+func (s *supervisor) takeRenotify() {
+	select {
+	case v := <-s.renotify:
+		s.canNotify = v
+	default:
+	}
+}
+
+// finish waits for an ended subscription's channel to close, passing on
+// the events still in it, since a connection takes one subscription at a
+// time; it reports false when ctx ended first.
+func (s *supervisor) finish(ctx context.Context, ch <-chan ipc.Event) bool {
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case ev, ok := <-ch:
+			if !ok {
+				return true
+			}
+			s.send(ctx, eventMsg{ev: ev})
 		}
 	}
 }

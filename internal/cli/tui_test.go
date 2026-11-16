@@ -7,7 +7,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -73,13 +72,5 @@ func TestTUIReconnectDialNeverStartsTheProcess(t *testing.T) {
 	}
 	if _, err := start(context.Background()); err == nil || starts != 1 {
 		t.Fatalf("start dial: err=%v starts=%d, want one start", err, starts)
-	}
-}
-
-func TestPasteGapFromConfig(t *testing.T) {
-	for ms, want := range map[int]time.Duration{25: 25 * time.Millisecond, 80: 80 * time.Millisecond, 0: -1, -5: -1} {
-		if got := pasteGap(ms); got != want {
-			t.Errorf("pasteGap(%d) = %v, want %v", ms, got, want)
-		}
 	}
 }

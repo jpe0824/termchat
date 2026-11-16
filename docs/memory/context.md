@@ -84,9 +84,13 @@ and wants chat there, reachable by AI agents through a command line.
   the background process and interface handle one server.
 - **No background process on Windows.** The Windows binary can run the server;
   the client commands need the background process, which refuses to start there.
-- **Settings change live through `termchat config set` and `termchat room
-  notify`.** A hand edit of `config.toml` applies at the next restart or the
-  next settings change. From the CLI, `cli.send` can be set to `deny` but not
+- **Settings change live through `/settings`, `termchat config set` and
+  `termchat room notify`.** The background process announces each change with
+  a `config` event; a running interface re-reads the list and applies
+  `notify.osc`, `mark_read` and `paste_gap_ms` at once (`splash` waits for the
+  next launch). A hand edit of `config.toml` applies after `termchat daemon stop` (a newly
+  started interface takes the background process's values) or at the next
+  settings change. From the CLI, `cli.send` can be set to `deny` but not
   `allow`, and `notify.hook` cannot be changed. A config file that does not
   parse stops the process from starting, and the client reports only that the
   socket cannot be reached.

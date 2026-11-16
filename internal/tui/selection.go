@@ -127,6 +127,10 @@ func (m *Model) clickThread(g geom, x, y int) tea.Cmd {
 		return nil
 	}
 	l := m.tlayout(g)
+	if y >= l.listY && y < l.listY+l.listH {
+		// The command list is keys only; a click there keeps the input.
+		return nil
+	}
 	wasPreview := m.preview
 	m.promote()
 	if y >= l.inputY && y < l.inputY+l.inputH {

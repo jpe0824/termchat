@@ -77,9 +77,9 @@ delivered when the connection returns. After `not_authorised` or
 `host_key_changed`, join the same server again with a new invite (see the
 [server guide](server.md#a-device-that-was-revoked)).
 
-Stop the background process after upgrading termchat. The next command starts a new one. The background process's settings do not need a restart: change them with
-`termchat config set <key> <value>`. The interface's settings apply when it next
-starts (see [the config file](#the-config-file)).
+Stop the background process after upgrading termchat. The next command starts a new one. Settings do not need a restart: change them with
+`/settings` in the interface or `termchat config set <key> <value>` (see
+[the config file](#the-config-file)).
 termchat does not install a login item; the process starts the first time you run a client command after a reboot. It is not supported on Windows.
 
 Files: `client.db`, the device keys in `keys/`, `known_servers` and
@@ -129,9 +129,26 @@ code, so the help overlay and this guide agree.
 |---|---|
 | **Chat list** | `↑ ↓` or `k j` move; `enter` opens the chat; `tab` goes to the thread (standard and wide layouts); `/` search; `pgup pgdn` scroll the thread, `home end` jump to its oldest and newest message; `r` starts a stopped background process; `q` quits. |
 | **Thread** | `↑ ↓` or `k j` step through messages once one is selected, otherwise scroll; `i` or `enter` go to the input; `e` edit and `d` delete your selected message (`d` asks y/n); `r` retry a failed message, or start a stopped background process; `x` discard a failed message (asks y/n); `c` copy the selected message; `esc` goes from a selection to the input, otherwise to the chat list; `tab` goes to the chat list; `/` search; `pgup pgdn home end` scroll; `q` quits. |
-| **Input** | Letters type, including `q` and `?`. `← →`, `home end`, `ctrl+a ctrl+e`, `backspace`, `delete`, `ctrl+w` and `ctrl+u` edit. `enter` sends (or saves an edit); `alt+enter` or `ctrl+j` inserts a line break; `esc` cancels an edit, otherwise leaves the input; `↑` in an empty input selects your newest message; `tab` types a tab; `pgup pgdn` scroll the thread. |
+| **Input** | Letters type, including `q` and `?`. `← →`, `home end`, `ctrl+a ctrl+e`, `backspace`, `delete`, `ctrl+w` and `ctrl+u` edit. `enter` sends (or saves an edit); `alt+enter` or `ctrl+j` inserts a line break; `esc` cancels an edit, otherwise leaves the input; `↑` in an empty input selects your newest message; `tab` types a tab; `pgup pgdn` scroll the thread; `/` typed alone in an empty input starts a command, with the list of commands (`//` sends a leading `/`). |
+| **Command list** | Shows above the input while a command name is typed. `↑ ↓` move the highlight; `tab` completes the highlighted command (inside a paste it types a tab); `enter` completes a name typed in part and runs a whole one; `esc` hides the list and keeps the text, and `esc` again leaves the input. |
 | **A y/n question** | `y` answers yes, only as a lone key press. Any other key answers no. |
 | **Anywhere** | `ctrl+k` jump, `ctrl+n` new conversation, `ctrl+o` room panel, `/` search (not from the input), `ctrl+c` quits. |
+
+Commands typed in the input:
+
+- `/settings` opens the settings overlay: every setting in `config.toml`,
+  grouped as notifications, interface, CLI, rooms and account. `enter` on a
+  setting offers its values, or a text field for `notify.hook` and
+  `paste_gap_ms`; `enter` again saves. The account is read-only (change it
+  with `termchat join`).
+- `/notify all|mentions|muted` sets the open room's notifications, as
+  `termchat room notify` does.
+- `/help` opens the help overlay.
+- `//text` sends `/text` as a message.
+
+A `/` starts a command only when typed alone into an empty input and no other
+key follows within `paste_gap_ms`; a pasted `/` stays text. See
+[terminals and paste](terminals-and-paste.md#commands-and-paste).
 
 Outside the input only these commands act. A letter that is not a command
 shows a short hint instead of doing anything: `press i to type` on the thread,
@@ -256,6 +273,18 @@ a direct message it says `not a room`. `↑ ↓` or `k j home end` move.
 - `esc` goes back from the invite and rename forms to the members, and from
   the members closes the panel.
 
+**Settings (`/settings`).** Lists every setting under the headings
+Notifications, Interface, CLI, Rooms and Account, with its value; the help for
+the selected one shows below the list. `↑ ↓` or `k j home end` move. `enter`
+on a setting with a fixed set of values lists them with the current one
+marked; `enter` on `notify.hook` or `paste_gap_ms` opens a text field filled
+with the current value. `enter` there saves: a refused value shows why and
+leaves the step open. Every change applies at once, also in this interface
+(`notify.osc`, `mark_read`, `paste_gap_ms`); `splash` is marked `next launch`.
+The account rows are read-only. `esc` goes back to the list, and from the list
+closes the overlay. A change made elsewhere (`termchat config set`, another
+interface) updates the list while it is open.
+
 **Help (`?`).** The whole key table, grouped as above, from anywhere outside a
 text field. `↑ ↓ pgup pgdn` scroll it; `?` or `esc` closes it.
 
@@ -281,14 +310,15 @@ For the terminal-specific details of paste and timing, see
 a table such as `[cli]` makes the file invalid, and a file that does not parse
 stops the background process from starting. A missing file means the defaults.
 
-You rarely need to edit it. `termchat config` lists every setting, and
-`termchat config set <key> <value>` changes one without a restart: the background
-process's settings (`notify.terminal`, `notify.os`, `notify.hook`, `cli.send`,
-room modes) apply at once, the interface's (`notify.osc`, `mark_read`,
-`paste_gap_ms`, `splash`) when it next starts. A hand edit applies at the next
-restart or the next settings change.
+You rarely need to edit it. `/settings` in the interface shows and changes
+every setting. `termchat config` lists them, and `termchat config set <key>
+<value>` changes one. Either way there is no restart: the change applies at
+once in the background process and in every running interface, except
+`splash`, which applies when the interface next starts. A hand edit applies after
+`termchat daemon stop` (a newly started interface takes the background
+process's values) or at the next settings change.
 `notify.hook` and `cli.send = "allow"` cannot be set from the command line
-(exit 7); edit the file for those.
+(exit 7); use `/settings` for those.
 
 ```toml
 mark_read = true        # opening or reading a conversation in the interface marks it read
@@ -318,7 +348,7 @@ paste_gap_ms = 25       # milliseconds; 0 to 200; see terminals-and-paste.md
 | `mark_read` | `true` | The interface marks a conversation read when you open it, or when new messages arrive at the bottom while the terminal is focused (where the terminal never reports focus, on your next key or mouse input). Off: it never does. |
 | `splash` | `true` | Show the opening screen. |
 | `paste_gap_ms` | `25` | Wait after `enter` for more pasted input. Values outside 0 to 200 are clamped. `0` sends at once. |
-| `cli.send` | `"allow"` | `"deny"` makes `termchat send` fail with exit code 6. `"allow"` cannot be set from the command line; edit the file. |
+| `cli.send` | `"allow"` | `"deny"` makes `termchat send` fail with exit code 6. `"allow"` cannot be set from the command line; use `/settings`. |
 | `notify.terminal` | `true` | Let the interface raise notifications with terminal escape sequences. |
 | `notify.os` | `true` | `true`: post through the operating system when the terminal route does not apply. `"always"`: post through it as well as the terminal route. `false`: never. |
 | `notify.osc` | `"auto"` | Which escape sequence to use; `"off"` disables. |

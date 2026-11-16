@@ -19,8 +19,10 @@ type supHarness struct {
 	waits chan chan time.Time
 	dials chan dialResult
 	adopt chan Backend
-	stop  context.CancelFunc
-	done  chan struct{}
+	// renotify is the interface telling it whether it can notify now.
+	renotify chan bool
+	stop     context.CancelFunc
+	done     chan struct{}
 }
 
 type dialResult struct {
@@ -31,7 +33,8 @@ type dialResult struct {
 func startSupervisor(t *testing.T, b Backend) *supHarness {
 	t.Helper()
 	s := &supHarness{t: t, out: make(chan tea.Msg, 64), waits: make(chan chan time.Time, 8),
-		dials: make(chan dialResult, 8), adopt: make(chan Backend, 1), done: make(chan struct{})}
+		dials: make(chan dialResult, 8), adopt: make(chan Backend, 1), renotify: make(chan bool, 1),
+		done: make(chan struct{})}
 	opts := Options{
 		Send: func(m tea.Msg) { s.out <- m },
 		After: func(d time.Duration) <-chan time.Time {
@@ -58,7 +61,7 @@ func startSupervisor(t *testing.T, b Backend) *supHarness {
 		t.Error("the subscription goroutine must never start the background process")
 		return nil, errors.New("not allowed")
 	}
-	sup := &supervisor{b: b, opts: opts, adopt: s.adopt}
+	sup := &supervisor{b: b, opts: opts, adopt: s.adopt, renotify: s.renotify}
 	go func() { defer close(s.done); sup.run(ctx) }()
 	t.Cleanup(func() {
 		cancel()
@@ -129,6 +132,30 @@ func TestSubscriptionOverflowResubscribes(t *testing.T) {
 	}
 	if f.callCount("subscribe") != 2 || f.closed {
 		t.Errorf("calls = %v closed=%v, want a second subscribe on the same connection", f.calls, f.closed)
+	}
+}
+
+// A change of whether the interface can notify ends the subscription and
+// makes a new one on the same connection that says so.
+func TestRenotifyResubscribes(t *testing.T) {
+	f := fixture()
+	s := startSupervisor(t, f)
+	s.next()
+	s.renotify <- false
+	f.sub() <- ipc.Event{Kind: ipc.KindConv}
+	if m, ok := s.next().(eventMsg); !ok || m.ev.Kind != ipc.KindConv {
+		t.Fatalf("after an unchanged renotify: %#v", m)
+	}
+	s.renotify <- true
+	if m, ok := s.next().(subscribedMsg); !ok || m.b != Backend(f) {
+		t.Fatalf("want subscribedMsg on the same connection, got %#v", m)
+	}
+	if f.callCount("subscribe false") != 1 || f.callCount("subscribe true") != 1 || f.closed {
+		t.Errorf("calls = %v closed=%v", f.calls, f.closed)
+	}
+	s.renotify <- false
+	if _, ok := s.next().(subscribedMsg); !ok || f.callCount("subscribe false") != 2 {
+		t.Errorf("back to false: calls = %v", f.calls)
 	}
 }
 

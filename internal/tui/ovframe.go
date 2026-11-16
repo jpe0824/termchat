@@ -105,6 +105,12 @@ func (m *Model) ovPlaceIn(g geom) ovPlace {
 	}
 	ov := m.ov
 	ov.sel = max(min(ov.sel, len(rows)-1), 0)
+	// A group's first row keeps its heading in view when the window allows.
+	anchor := ov.sel
+	if anchor > 0 && rows[anchor-1].heading {
+		anchor--
+	}
+	ov.top = window(ov.top, anchor, len(rows), p.listN)
 	ov.top = window(ov.top, ov.sel, len(rows), p.listN)
 	p.top = ov.top
 	lines := append([]string{}, head[:headN]...)
@@ -135,6 +141,9 @@ func (m *Model) fieldLine(w int) string {
 // rowLine draws a row w cells wide: "› " marks the selected one, which is
 // also reversed, and the row's hl part is marked.
 func (m *Model) rowLine(r ovRow, sel bool, w int) string {
+	if r.heading {
+		return m.st.heading.Render(truncate(r.text, w))
+	}
 	lead, st, hl := "  ", lipgloss.NewStyle(), m.st.match
 	if sel {
 		lead, st, hl = "› ", m.st.selected, m.st.match.Reverse(true)

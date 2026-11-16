@@ -30,9 +30,11 @@ type fakeBackend struct {
 	errs      writeErrs
 	reasons   map[string][]ipc.OutboxItem
 
-	ov overlayData
+	ov       overlayData
+	settings []ipc.Setting
 
 	subCh  chan ipc.Event
+	subEnd func()
 	subErr error
 	closed bool
 }
@@ -92,12 +94,16 @@ func (f *fakeBackend) Messages(conv string, beforeSeq int64, limit int) ([]ipc.M
 	return out, nil
 }
 
-func (f *fakeBackend) SubscribeUI(_ context.Context, canNotify bool) (<-chan ipc.Event, error) {
+// SubscribeUI ends the subscription when ctx ends, as the real client does.
+func (f *fakeBackend) SubscribeUI(ctx context.Context, canNotify bool) (<-chan ipc.Event, error) {
 	f.record(fmt.Sprintf("subscribe %v", canNotify))
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.subCh, f.subErr = make(chan ipc.Event, 16), nil
-	return f.subCh, nil
+	ch := make(chan ipc.Event, 16)
+	end := sync.OnceFunc(func() { close(ch) })
+	f.subCh, f.subEnd, f.subErr = ch, end, nil
+	go func() { <-ctx.Done(); end() }()
+	return ch, nil
 }
 
 // endSub closes the current subscription with why as its reason.
@@ -105,7 +111,7 @@ func (f *fakeBackend) endSub(why error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.subErr = why
-	close(f.subCh)
+	f.subEnd()
 }
 
 func (f *fakeBackend) sub() chan ipc.Event {

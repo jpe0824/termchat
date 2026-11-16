@@ -1,0 +1,14 @@
+┌ termchat ────────────────────────────────────────────── team.example ● connected ┐
+│ Direct             │ # platform                                        4 members │
+│ ● dana           2 │ ─────────────────────────────────────────────────────────── │
+│   sam              │ 10:44  sam     @jason can you look? (edited)                │
+│   ci-bot           │ 10:45  you     on it                                        │
+│ Rooms              │ 10:45  you     pushing a fix now  sending…                  │
+│ ● # platform     5 │ ─────────────────────────────────────────────────────────── │
+│   # deploys        │ › /settings  view and change settings                       │
+│   # random         │   /notify all|mentions|muted  set this room's notifications │
+│                    │   /help  keys and commands                                  │
+│                    │ > /                                                         │
+│                    │ ─────────────────────────────────────────────────────────── │
+│                    │ ↑↓ pick  tab complete  esc hide                             │
+└─ ctrl+k jump  ctrl+n new  ctrl+o room  ctrl+c quit ──────────────────────────────┘
