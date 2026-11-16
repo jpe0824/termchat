@@ -231,6 +231,8 @@ func (m *Model) saveSetting(key, value string) tea.Cmd {
 		return nil
 	}
 	ov.busy, ov.err, ov.info = true, "", ""
+	// A read already in flight predates this change and must not revert it.
+	m.cfgSeq++
 	b, gen := m.b, ov.gen
 	return func() tea.Msg {
 		s, err := b.ConfigSet(key, value, configSource)
@@ -249,7 +251,7 @@ func (m *Model) onSettingSaved(msg settingSavedMsg) tea.Cmd {
 		if msg.err == nil {
 			return nil
 		}
-		text := settingFailure(msg.key, msg.err)
+		text := m.settingFailure(msg.key, msg.err)
 		if m.openID == "" {
 			return m.setBanner(text)
 		}
@@ -257,7 +259,7 @@ func (m *Model) onSettingSaved(msg settingSavedMsg) tea.Cmd {
 	}
 	ov.busy = false
 	if msg.err != nil {
-		ov.err = settingFailure(msg.key, msg.err)
+		ov.err = m.settingFailure(msg.key, msg.err)
 		return nil
 	}
 	if ov.step != stepSettings {
@@ -268,12 +270,22 @@ func (m *Model) onSettingSaved(msg settingSavedMsg) tea.Cmd {
 
 // settingFailure words a failed change. A refused value says why in the
 // background process's own words.
-func settingFailure(key string, err error) string {
+func (m *Model) settingFailure(key string, err error) string {
 	prefix := ipc.ErrInvalid.Error() + ": "
 	if errors.Is(err, ipc.ErrInvalid) && strings.HasPrefix(err.Error(), prefix) {
 		return sanitize.Line(strings.TrimPrefix(err.Error(), prefix))
 	}
-	return failure("change "+key, err)
+	label := sanitize.Line(key)
+	for _, s := range m.settings {
+		if s.Key == key {
+			label = settingLabel(s)
+			if s.Room != "" && errors.Is(err, ipc.ErrNotFound) {
+				return "can't change " + label + ": not in that room any more"
+			}
+			break
+		}
+	}
+	return failure("change "+label, err)
 }
 
 // storeSetting records key's new value and applies it.

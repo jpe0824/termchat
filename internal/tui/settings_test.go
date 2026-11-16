@@ -315,3 +315,54 @@ func TestGoldenSettings(t *testing.T) {
 		checkGolden(t, "settings-choice-standard", h.view()+"\n")
 	})
 }
+
+func TestSettingsRoomGoneNamesTheRoom(t *testing.T) {
+	f, h := settingsOpen(t, 90, 30)
+	f.failWith("configset", ipc.ErrNotFound)
+	selectSetting(t, h, config.RoomPrefix+"r-random")
+	h.enter()
+	h.key("down")
+	h.enter()
+	if want := "can't change #random: not in that room any more"; h.m.ov.err != want {
+		t.Errorf("error %q, want %q", h.m.ov.err, want)
+	}
+}
+
+func TestSettingsSaveBeatsOlderRead(t *testing.T) {
+	f, h := settingsOpen(t, 90, 30)
+	h.m.requestConfig()
+	stale := configMsg{b: h.m.b, seq: h.m.cfgSeq, list: slices.Clone(h.m.settings)}
+	selectSetting(t, h, "paste_gap_ms")
+	h.enter()
+	h.key("ctrl+u")
+	h.typeText("80")
+	h.enter()
+	if got := f.writes("configset "); !slices.Equal(got, []string{"configset paste_gap_ms 80"}) {
+		t.Fatalf("writes %q", got)
+	}
+	h.send(stale)
+	if !slices.Contains(rowTexts(h), "paste_gap_ms     80") {
+		t.Errorf("rows %q lost the saved value", rowTexts(h))
+	}
+	if h.m.opts.PasteGap != 80*time.Millisecond {
+		t.Errorf("paste gap reverted to %v", h.m.opts.PasteGap)
+	}
+}
+
+func TestSettingsHeadingStaysWithItsFirstRow(t *testing.T) {
+	_, h := settingsOpen(t, 44, 9)
+	for range 12 {
+		h.key("down")
+	}
+	h.key("home")
+	if !strings.Contains(h.view(), "Notifications") {
+		t.Errorf("home hid the first heading:\n%s", h.view())
+	}
+	// Moving up onto a later group's first row keeps its heading too.
+	selectSetting(t, h, "mark_read")
+	h.key("down")
+	h.key("up")
+	if !strings.Contains(h.view(), "Interface") {
+		t.Errorf("the Interface heading is hidden:\n%s", h.view())
+	}
+}

@@ -88,8 +88,9 @@ and wants chat there, reachable by AI agents through a command line.
   `termchat room notify`.** The background process announces each change with
   a `config` event; a running interface re-reads the list and applies
   `notify.osc`, `mark_read` and `paste_gap_ms` at once (`splash` waits for the
-  next launch). A hand edit of `config.toml` applies at the next restart or the
-  next settings change. From the CLI, `cli.send` can be set to `deny` but not
+  next launch). A hand edit of `config.toml` applies after `termchat daemon stop` (a newly
+  started interface takes the background process's values) or at the next
+  settings change. From the CLI, `cli.send` can be set to `deny` but not
   `allow`, and `notify.hook` cannot be changed. A config file that does not
   parse stops the process from starting, and the client reports only that the
   socket cannot be reached.

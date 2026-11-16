@@ -134,7 +134,7 @@ code, so the help overlay and this guide agree.
 | **A y/n question** | `y` answers yes, only as a lone key press. Any other key answers no. |
 | **Anywhere** | `ctrl+k` jump, `ctrl+n` new conversation, `ctrl+o` room panel, `/` search (not from the input), `ctrl+c` quits. |
 
-Commands typed in the input act on the open conversation:
+Commands typed in the input:
 
 - `/settings` opens the settings overlay: every setting in `config.toml`,
   grouped as notifications, interface, CLI, rooms and account. `enter` on a
@@ -314,10 +314,11 @@ You rarely need to edit it. `/settings` in the interface shows and changes
 every setting. `termchat config` lists them, and `termchat config set <key>
 <value>` changes one. Either way there is no restart: the change applies at
 once in the background process and in every running interface, except
-`splash`, which applies when the interface next starts. A hand edit applies at
-the next restart or the next settings change.
+`splash`, which applies when the interface next starts. A hand edit applies after
+`termchat daemon stop` (a newly started interface takes the background
+process's values) or at the next settings change.
 `notify.hook` and `cli.send = "allow"` cannot be set from the command line
-(exit 7); use `/settings` or edit the file for those.
+(exit 7); use `/settings` for those.
 
 ```toml
 mark_read = true        # opening or reading a conversation in the interface marks it read
@@ -347,7 +348,7 @@ paste_gap_ms = 25       # milliseconds; 0 to 200; see terminals-and-paste.md
 | `mark_read` | `true` | The interface marks a conversation read when you open it, or when new messages arrive at the bottom while the terminal is focused (where the terminal never reports focus, on your next key or mouse input). Off: it never does. |
 | `splash` | `true` | Show the opening screen. |
 | `paste_gap_ms` | `25` | Wait after `enter` for more pasted input. Values outside 0 to 200 are clamped. `0` sends at once. |
-| `cli.send` | `"allow"` | `"deny"` makes `termchat send` fail with exit code 6. `"allow"` cannot be set from the command line; edit the file. |
+| `cli.send` | `"allow"` | `"deny"` makes `termchat send` fail with exit code 6. `"allow"` cannot be set from the command line; use `/settings`. |
 | `notify.terminal` | `true` | Let the interface raise notifications with terminal escape sequences. |
 | `notify.os` | `true` | `true`: post through the operating system when the terminal route does not apply. `"always"`: post through it as well as the terminal route. `false`: never. |
 | `notify.osc` | `"auto"` | Which escape sequence to use; `"off"` disables. |

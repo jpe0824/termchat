@@ -105,6 +105,12 @@ func (m *Model) ovPlaceIn(g geom) ovPlace {
 	}
 	ov := m.ov
 	ov.sel = max(min(ov.sel, len(rows)-1), 0)
+	// A group's first row keeps its heading in view when the window allows.
+	anchor := ov.sel
+	if anchor > 0 && rows[anchor-1].heading {
+		anchor--
+	}
+	ov.top = window(ov.top, anchor, len(rows), p.listN)
 	ov.top = window(ov.top, ov.sel, len(rows), p.listN)
 	p.top = ov.top
 	lines := append([]string{}, head[:headN]...)

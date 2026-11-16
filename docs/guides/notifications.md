@@ -1,8 +1,9 @@
 # Notifications
 
 termchat tells you about new messages through up to three routes, stored in
-`config.toml`. You switch them with `termchat config set`, except `notify.hook`,
-which you edit in the file. The background process decides what is worth a
+`config.toml`. You switch them in `/settings` (live, no restart) or with
+`termchat config set`; `notify.hook` only in `/settings`, since the CLI cannot
+change it. The background process decides what is worth a
 notification and routes it, so notifications arrive even when the interface is
 closed.
 
