@@ -21,14 +21,55 @@ type slashCmd struct {
 	run              func(m *Model, arg string) tea.Cmd
 }
 
-var slashCmds = []slashCmd{
-	{"notify", "all|mentions|muted", "set this room's notifications", (*Model).slashNotify},
-	{"help", "", "keys and commands", (*Model).slashHelp},
+var slashCmds []slashCmd
+
+// The table is filled in init because its commands read it for their own
+// usage line.
+func init() {
+	slashCmds = []slashCmd{
+		{"notify", "all|mentions|muted", "set this room's notifications", (*Model).slashNotify},
+		{"help", "", "keys and commands", (*Model).slashHelp},
+	}
+}
+
+// slashUsage is how the command name is written with its arguments.
+func slashUsage(name string) string {
+	for _, s := range slashCmds {
+		if s.name == name && s.args != "" {
+			return "/" + s.name + " " + s.args
+		}
+	}
+	return "/" + name
+}
+
+// slashParse splits a command draft into the command's name and the rest.
+func slashParse(text string) (name, arg string) {
+	fields := strings.Fields(strings.TrimPrefix(text, "/"))
+	if len(fields) == 0 {
+		return "", ""
+	}
+	return fields[0], strings.Join(fields[1:], " ")
+}
+
+// commandEnter acts on enter in a draft in command mode. A bare / does
+// nothing. An enter that came within the paste gap of the key before it
+// may end pasted text, so it runs nothing and asks for a deliberate one.
+func (m *Model) commandEnter(conv, text string, pasted bool) tea.Cmd {
+	switch {
+	case text == "/":
+		return nil
+	case pasted && strings.HasPrefix(text, "//"):
+		return m.setNotice(conv, "press enter to send", false)
+	case pasted:
+		name, _ := slashParse(text)
+		return m.setNotice(conv, "press enter to run /"+name, false)
+	}
+	return m.runSlash(conv, text)
 }
 
 // slashDoneMsg is a command's result. said is the notice it leaves: what
-// changed, or why it failed. A result whose seq is not the draft's latest
-// is dropped.
+// changed, or why it failed. A result whose seq is not the latest call
+// from conv's draft is dropped.
 type slashDoneMsg struct {
 	conv string
 	seq  int
@@ -62,11 +103,7 @@ func (c *compose) endCommand() {
 // runSlash runs the command in text, a draft in command mode, on conv.
 // Text that names no command stays in the draft with a notice.
 func (m *Model) runSlash(conv, text string) tea.Cmd {
-	fields := strings.Fields(strings.TrimPrefix(text, "/"))
-	name, arg := "", ""
-	if len(fields) > 0 {
-		name, arg = fields[0], strings.Join(fields[1:], " ")
-	}
+	name, arg := slashParse(text)
 	i := slices.IndexFunc(slashCmds, func(s slashCmd) bool { return s.name == name })
 	if i < 0 {
 		names := make([]string, len(slashCmds))
@@ -76,10 +113,16 @@ func (m *Model) runSlash(conv, text string) tea.Cmd {
 		return m.setNotice(conv, "unknown command /"+name+" — commands: "+strings.Join(names, " ")+
 			"; // sends a leading /", false)
 	}
+	return slashCmds[i].run(m, arg)
+}
+
+// startCall tags a command that calls the background process as conv's
+// latest and returns its tag; a result from an earlier one is dropped.
+func (m *Model) startCall(conv string) int {
 	c := m.composeFor(conv)
 	c.cmdSeq++
 	c.cmdText = c.in.text
-	return slashCmds[i].run(m, arg)
+	return c.cmdSeq
 }
 
 // onSlashDone takes a command's result. Success empties the draft only if
@@ -107,9 +150,9 @@ func (m *Model) slashNotify(arg string) tea.Cmd {
 	}
 	key := config.RoomPrefix + conv
 	if spec, _ := config.SpecFor(key); !slices.Contains(spec.Choices, arg) {
-		return m.setNotice(conv, "/notify all|mentions|muted", false)
+		return m.setNotice(conv, slashUsage("notify"), false)
 	}
-	seq, b, ref := m.composeFor(conv).cmdSeq, m.b, m.convRef(cv.Conversation)
+	seq, b, ref := m.startCall(conv), m.b, m.convRef(cv.Conversation)
 	return func() tea.Msg {
 		s, err := b.ConfigSet(key, arg, configSource)
 		if err != nil {

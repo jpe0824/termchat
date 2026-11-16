@@ -111,9 +111,9 @@ func (m *Model) inputKey(k tea.KeyPressMsg, g geom) tea.Cmd {
 	switch s := k.String(); s {
 	case "enter":
 		if m.opts.PasteGap < 0 {
-			return m.submit()
+			return m.submit(false)
 		}
-		m.enterConv = m.openID
+		m.enterConv, m.enterPasted = m.openID, m.tm.recent
 		return m.opts.Tick(m.opts.PasteGap, m.enterT.arm(timerEnter))
 	case "alt+enter", "ctrl+j":
 		in.insert("\n")
@@ -219,14 +219,15 @@ func (m *Model) onEnterTimer(msg timerMsg) tea.Cmd {
 	if conv != m.openID || !m.inputActive(m.geom()) {
 		return nil
 	}
-	return m.submit()
+	return m.submit(m.enterPasted)
 }
 
 // submit acts on enter: saves an edit, runs a command, or sends the draft.
 // A command draft starting // sends the rest; a draft that is not a
 // command sends as it is, leading / and all. A draft is sent by one Send
-// call, and only when no Send for it is out.
-func (m *Model) submit() tea.Cmd {
+// call, and only when no Send for it is out. pasted says the enter came
+// within the paste gap of the key before it; it never acts on a command.
+func (m *Model) submit(pasted bool) tea.Cmd {
 	conv := m.openID
 	c := m.composeFor(conv)
 	if c.edit != nil {
@@ -235,8 +236,8 @@ func (m *Model) submit() tea.Cmd {
 	text := strings.TrimRight(c.in.text, "\n")
 	draft := text
 	if c.cmd {
-		if !strings.HasPrefix(text, "//") {
-			return m.runSlash(conv, text)
+		if pasted || !strings.HasPrefix(text, "//") {
+			return m.commandEnter(conv, text, pasted)
 		}
 		text = text[1:]
 	}

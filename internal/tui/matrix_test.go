@@ -68,6 +68,14 @@ var starts = []start{
 	{"delete question", pasteWidths, openedAt(fixture, "up", "up", "d"), true},
 	{"discard question", pasteWidths, openedAt(failedFixture, "up", "x"), true},
 	{"input", pasteWidths, openedAt(fixture), false},
+	{"command mode", pasteWidths, func(t *testing.T, w int, starts *int) (*fakeBackend, *tester) {
+		f, h := openedAt(fixture)(t, w, starts)
+		h.key("/")
+		if c := h.m.drafts["r-platform"]; c == nil || !c.cmd {
+			t.Fatal("/ alone did not enter command mode")
+		}
+		return f, h
+	}, false},
 	{"disabled input", pasteWidths, thenDown(openedAt(fixture)), false},
 	{"previewed thread", []int{44, 30}, func(t *testing.T, w int, starts *int) (*fakeBackend, *tester) {
 		f := fixture()
@@ -195,6 +203,13 @@ func checkPaste(t *testing.T, st start, w int, parts []string, cut int) {
 	typed := strings.TrimSuffix(text, "\n")
 	if st.name == "input" && h.draft() != typed {
 		fail("draft %q, want the pasted text %q", h.draft(), typed)
+	}
+	if st.name == "command mode" {
+		// The text joins the command; its enter runs nothing.
+		before.drafts["r-platform"] = "/" + typed
+		if c := h.m.drafts["r-platform"]; c == nil || !c.cmd {
+			fail("command mode ended")
+		}
 	}
 	pause(h, time.Second)
 

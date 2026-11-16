@@ -77,6 +77,9 @@ type Model struct {
 	// enterConv is the conversation an enter waits to act in, "" for none.
 	enterConv string
 	enterT    timer
+	// enterPasted says the waiting enter followed another key within the
+	// paste gap: it may be the end of pasted text.
+	enterPasted bool
 
 	// termFocus is the terminal's focus. It stays unknown until the terminal
 	// sends a focus or blur event, which some terminals and multiplexers

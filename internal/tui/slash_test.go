@@ -221,7 +221,7 @@ func TestSlashHelpOpensHelp(t *testing.T) {
 	}
 }
 
-func TestSlashStaleResultDropped(t *testing.T) {
+func TestSlashResultKeepsChangedDraft(t *testing.T) {
 	f, h := slashOpened(t)
 	typeSlash(h)
 	h.typeText("notify all")
@@ -245,5 +245,107 @@ func TestSlashStaleResultDropped(t *testing.T) {
 	}
 	if got := f.writes("configset "); !slices.Equal(got, []string{"configset rooms.r-platform all"}) {
 		t.Errorf("writes = %q", got)
+	}
+}
+
+// heldEnter presses enter with commands held and returns what was held.
+func heldEnter(h *tester) []func() any {
+	h.t.Helper()
+	h.hold = true
+	h.enter()
+	held := h.held
+	h.hold, h.held = false, nil
+	var out []func() any
+	for _, c := range held {
+		out = append(out, func() any { return c() })
+	}
+	return out
+}
+
+func TestSlashStaleResultDropped(t *testing.T) {
+	_, h := slashOpened(t)
+	typeSlash(h)
+	h.typeText("notify all")
+	first := heldEnter(h)
+	second := heldEnter(h)
+	if len(first) != 1 || len(second) != 1 {
+		t.Fatalf("held %d and %d commands, want one each", len(first), len(second))
+	}
+	h.deliver(second[0]())
+	if noteText(h) != "#platform notifies: all" || h.draft() != "" {
+		t.Fatalf("second result: notice %q draft %q", noteText(h), h.draft())
+	}
+	h.m.note = nil
+	h.deliver(first[0]())
+	if h.m.note != nil {
+		t.Errorf("an earlier call's result was taken: notice %q", noteText(h))
+	}
+}
+
+func TestSlashUncalledCommandKeepsResult(t *testing.T) {
+	_, h := slashOpened(t)
+	typeSlash(h)
+	h.typeText("notify muted")
+	out := heldEnter(h)
+	if len(out) != 1 {
+		t.Fatalf("held %d commands", len(out))
+	}
+	h.send(keyMsg("ctrl+u"))
+	typeSlash(h)
+	h.typeText("notify loud")
+	h.enter()
+	h.send(keyMsg("ctrl+u"))
+	typeSlash(h)
+	h.typeText("help")
+	h.enter()
+	if !h.m.help {
+		t.Fatal("help not open")
+	}
+	h.key("esc")
+	h.deliver(out[0]())
+	if noteText(h) != "#platform notifies: muted" {
+		t.Errorf("notice %q, want the outstanding result", noteText(h))
+	}
+}
+
+func TestSlashBareSlashEnterDoesNothing(t *testing.T) {
+	f, h := slashOpened(t)
+	typeSlash(h)
+	h.enter()
+	if h.draft() != "/" || !cmdMode(h) || h.m.note != nil || f.writes(slashWrites...) != nil {
+		t.Errorf("draft %q cmd %v notice %q writes %q", h.draft(), cmdMode(h), noteText(h), f.writes(slashWrites...))
+	}
+}
+
+func TestSlashPasteInsideGapIsText(t *testing.T) {
+	_, h := slashOpened(t)
+	feed(h, "/")
+	soon(h, func() { h.paste("usr") })
+	pause(h, time.Second)
+	if cmdMode(h) || h.draft() != "/usr" {
+		t.Errorf("cmd %v draft %q, want text", cmdMode(h), h.draft())
+	}
+}
+
+func TestSlashPastedArgsWithTrailingEnterDoesNotRun(t *testing.T) {
+	f, h := slashOpened(t)
+	typeSlash(h)
+	if !cmdMode(h) {
+		t.Fatal("not in command mode")
+	}
+	feed(h, "notify muted\n")
+	pause(h, time.Second)
+	if got := f.writes(slashWrites...); got != nil {
+		t.Errorf("pasted enter ran the command: %q", got)
+	}
+	if want := "press enter to run /notify"; noteText(h) != want {
+		t.Errorf("notice %q, want %q", noteText(h), want)
+	}
+	if h.draft() != "/notify muted" || !cmdMode(h) {
+		t.Errorf("draft %q cmd %v", h.draft(), cmdMode(h))
+	}
+	h.enter()
+	if got := f.writes(slashWrites...); !slices.Equal(got, []string{"configset rooms.r-platform muted"}) {
+		t.Errorf("deliberate enter: writes = %q", got)
 	}
 }
