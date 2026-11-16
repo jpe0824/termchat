@@ -15,8 +15,8 @@ func headline(n Notification) string {
 }
 
 // OSC returns the terminal escape sequence that raises n in a terminal that
-// understands variant: "9" (iTerm2, WezTerm, Ghostty), "99" (kitty) or "777"
-// (VTE). An unknown variant returns "". Every field is stripped of control
+// understands variant: "9" (iTerm2, WezTerm, Ghostty), "99" (kitty), "777"
+// (VTE) or "7501" (Herdr). An unknown variant returns "". Every field is stripped of control
 // characters and of the ';' that separates fields, so message text cannot end
 // or split the sequence.
 func OSC(variant string, n Notification) string {
@@ -29,9 +29,23 @@ func OSC(variant string, n Notification) string {
 	case "99":
 		return "\x1b]99;i=tc:d=0;" + title + "\x1b\\" +
 			"\x1b]99;i=tc:d=1:p=body;" + text + "\x1b\\"
+	case "7501":
+		return herdrWorking
 	}
 	return ""
 }
+
+// herdrWorking and HerdrDone report the program's status to Herdr. Herdr
+// raises its alert (sound, note, agent status) when a program reaches done
+// while the person is not looking at it, and only when the status changes.
+// OSC("7501") is the working report; HerdrDone must follow it in a separate,
+// later write, or a pane still done from an earlier message shows no change.
+// Neither carries message text. Herdr turns done back to idle itself once the
+// person looks.
+const herdrWorking = "\x1b]7501;app=termchat:state=working\x07"
+
+// HerdrDone is the done report that follows OSC("7501").
+const HerdrDone = "\x1b]7501;app=termchat:state=done\x07"
 
 // oscField makes s safe inside an OSC payload. Line breaks and tabs become
 // spaces, other control characters (C0, DEL and C1, which includes the 8-bit
@@ -54,7 +68,9 @@ func oscField(s string) string {
 // understands, or "" when it is unknown. env is os.Getenv in production.
 func DetectOSC(env func(string) string) string {
 	switch {
-	case env("KITTY_WINDOW_ID") != "" || env("HC_TERMINAL_ID") != "":
+	case env("HC_TERMINAL_ID") != "":
+		return "7501"
+	case env("KITTY_WINDOW_ID") != "":
 		return "99"
 	}
 	switch env("TERM_PROGRAM") {
@@ -68,13 +84,13 @@ func DetectOSC(env func(string) string) string {
 }
 
 // ResolveOSC applies the configured notify.osc value: "auto" (or empty)
-// detects, "off" and anything unrecognised disable, and "9", "99" and "777"
-// are used as given.
+// detects, "off" and anything unrecognised disable, and "9", "99", "777" and
+// "7501" are used as given.
 func ResolveOSC(cfg string, env func(string) string) string {
 	switch cfg {
 	case "", "auto":
 		return DetectOSC(env)
-	case "9", "99", "777":
+	case "9", "99", "777", "7501":
 		return cfg
 	}
 	return ""

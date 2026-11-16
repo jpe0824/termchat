@@ -19,6 +19,8 @@ func TestOSCSequences(t *testing.T) {
 		{"777", room, "\x1b]777;notify;dana in #ops;hi\x07"},
 		{"99", dm, "\x1b]99;i=tc:d=0;dana\x1b\\\x1b]99;i=tc:d=1:p=body;hi\x1b\\"},
 		{"99", room, "\x1b]99;i=tc:d=0;dana in #ops\x1b\\\x1b]99;i=tc:d=1:p=body;hi\x1b\\"},
+		{"7501", dm, "\x1b]7501;app=termchat:state=working\x07"},
+		{"7501", room, "\x1b]7501;app=termchat:state=working\x07"},
 		{"1", dm, ""},
 		{"", dm, ""},
 		{"off", dm, ""},
@@ -91,7 +93,8 @@ func TestDetectOSC(t *testing.T) {
 		want string
 	}{
 		{"kitty", envOf("KITTY_WINDOW_ID", "3"), "99"},
-		{"herdr", envOf("HC_TERMINAL_ID", "t1"), "99"},
+		{"herdr", envOf("HC_TERMINAL_ID", "t1"), "7501"},
+		{"herdr beats kitty", envOf("HC_TERMINAL_ID", "t1", "KITTY_WINDOW_ID", "3"), "7501"},
 		{"kitty beats term program", envOf("KITTY_WINDOW_ID", "3", "TERM_PROGRAM", "iTerm.app"), "99"},
 		{"iterm", envOf("TERM_PROGRAM", "iTerm.app"), "9"},
 		{"wezterm", envOf("TERM_PROGRAM", "WezTerm"), "9"},
@@ -106,12 +109,28 @@ func TestDetectOSC(t *testing.T) {
 		}
 	}
 	vte := envOf("VTE_VERSION", "1")
-	for cfg, want := range map[string]string{"auto": "777", "off": "", "9": "9", "99": "99", "777": "777", "bogus": "", "": "777"} {
+	for cfg, want := range map[string]string{"auto": "777", "off": "", "9": "9", "99": "99", "777": "777", "7501": "7501", "bogus": "", "": "777"} {
 		if got := ResolveOSC(cfg, vte); got != want {
 			t.Errorf("ResolveOSC(%q) = %q, want %q", cfg, got, want)
 		}
 	}
 	if got := ResolveOSC("9", envOf()); got != "9" {
 		t.Errorf("explicit variant ignored: %q", got)
+	}
+}
+
+func TestOSC7501CarriesNoMessageText(t *testing.T) {
+	n := Notification{Sender: "da\x1bna", ConvName: "ops", Text: "secret\x07\x1b]9;x"}
+	got := OSC("7501", n) + HerdrDone
+	for _, leak := range []string{"secret", "dana", "da\x1bna", "ops"} {
+		if strings.Contains(got, leak) {
+			t.Errorf("OSC 7501 = %q, carries %q", got, leak)
+		}
+	}
+}
+
+func TestHerdrDone(t *testing.T) {
+	if want := "\x1b]7501;app=termchat:state=done\x07"; HerdrDone != want {
+		t.Errorf("HerdrDone = %q, want %q", HerdrDone, want)
 	}
 }

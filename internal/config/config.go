@@ -27,7 +27,7 @@ type Config struct {
 	Notify struct {
 		Terminal bool   `toml:"terminal"`
 		OS       OSMode `toml:"os"`
-		OSC      string `toml:"osc"` // "auto" | "9" | "99" | "777" | "off"
+		OSC      string `toml:"osc"` // "auto" | "9" | "99" | "777" | "7501" | "off"
 		Hook     string `toml:"hook"`
 	} `toml:"notify"`
 	Rooms    map[string]string `toml:"rooms"` // conversation ID -> "all" | "mentions" | "muted"

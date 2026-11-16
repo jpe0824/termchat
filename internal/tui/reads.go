@@ -230,7 +230,7 @@ func (m *Model) onEvents(evs []ipc.Event) tea.Cmd {
 	}
 	if len(notes) > 0 {
 		// One write keeps the notifications in the order they came.
-		cmds = append(cmds, tea.Raw(strings.Join(notes, "")))
+		cmds = append(cmds, tea.Raw(strings.Join(notes, "")), m.herdrDone())
 	}
 	return tea.Batch(cmds...)
 }
