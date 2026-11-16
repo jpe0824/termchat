@@ -1,7 +1,8 @@
 # Notifications
 
-termchat tells you about new messages through up to three routes, each
-switchable with `termchat config set` (stored in `config.toml`). The background process decides what is worth a
+termchat tells you about new messages through up to three routes, stored in
+`config.toml`. You switch them with `termchat config set`, except `notify.hook`,
+which you edit in the file. The background process decides what is worth a
 notification and routes it, so notifications arrive even when the interface is
 closed.
 

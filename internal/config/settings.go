@@ -49,7 +49,7 @@ var (
 var Specs = []Spec{
 	{"notify.terminal", boolChoices, AppliesProcess, "Show notifications inside the terminal."},
 	{"notify.os", []string{"false", "true", "always"}, AppliesProcess, "Post through the operating system: never, only when no interface showed it, or always."},
-	{"notify.osc", []string{"auto", "9", "99", "777", "7501", "off"}, AppliesProcess, "Terminal escape sequence used for notifications."},
+	{"notify.osc", []string{"auto", "9", "99", "777", "7501", "off"}, AppliesTUI, "Terminal escape sequence used for notifications."},
 	{"notify.hook", nil, AppliesProcess, "Command run for each notification; empty for none."},
 	{"mark_read", boolChoices, AppliesTUI, "Mark a conversation read when the interface shows it."},
 	{"paste_gap_ms", nil, AppliesTUI, "Milliseconds to wait after enter for more pasted input, 0 to 200."},

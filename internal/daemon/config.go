@@ -1,6 +1,10 @@
 package daemon
 
-import "github.com/jpe0824/termchat/internal/config"
+import (
+	"fmt"
+
+	"github.com/jpe0824/termchat/internal/config"
+)
 
 // config returns the current settings. Any goroutine may call it, the drain
 // goroutine included: it never blocks. The result is shared and must not be
@@ -27,7 +31,7 @@ func (d *daemon) updateConfig(change func(*config.Config) error) (*config.Config
 		return nil, err
 	}
 	if err := d.opts.SaveConfig(c); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("save config: %w", err)
 	}
 	d.live.Store(c)
 	return c, nil

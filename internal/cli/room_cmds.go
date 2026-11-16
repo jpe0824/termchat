@@ -151,12 +151,9 @@ func roomOp(cmd *cobra.Command, ref string, op func(model.Conversation) ipc.Room
 
 func roomNotify(cmd *cobra.Command, args []string) error {
 	return withClient(cmd, cmdContext(cmd), func(c *ipc.Client) error {
-		room, err := resolveChat(c, args[0])
+		room, err := memberRoom(c, args[0])
 		if err != nil {
 			return err
-		}
-		if room.Kind != model.ConvRoom {
-			return usagef("%s", roomsOnly)
 		}
 		key := config.RoomPrefix + room.ID
 		if err := config.Validate(key, args[1]); err != nil {

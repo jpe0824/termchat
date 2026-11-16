@@ -400,7 +400,7 @@ func (d *daemon) Join(ctx context.Context, req ipc.JoinReq) (ipc.JoinRes, error)
 	})
 	if err != nil {
 		d.mu.Unlock()
-		return ipc.JoinRes{}, fmt.Errorf("save config: %w", err)
+		return ipc.JoinRes{}, err
 	}
 	d.acct = nil
 	d.mu.Unlock()

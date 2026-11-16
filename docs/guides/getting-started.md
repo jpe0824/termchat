@@ -77,7 +77,9 @@ delivered when the connection returns. After `not_authorised` or
 `host_key_changed`, join the same server again with a new invite (see the
 [server guide](server.md#a-device-that-was-revoked)).
 
-Stop the background process after upgrading termchat. The next command starts a new one. Settings do not need a restart: change them with `termchat config set <key> <value>` (see [the config file](#the-config-file)).
+Stop the background process after upgrading termchat. The next command starts a new one. The background process's settings do not need a restart: change them with
+`termchat config set <key> <value>`. The interface's settings apply when it next
+starts (see [the config file](#the-config-file)).
 termchat does not install a login item; the process starts the first time you run a client command after a reboot. It is not supported on Windows.
 
 Files: `client.db`, the device keys in `keys/`, `known_servers` and
@@ -283,7 +285,8 @@ You rarely need to edit it. `termchat config` lists every setting, and
 `termchat config set <key> <value>` changes one without a restart: the background
 process's settings (`notify.terminal`, `notify.os`, `notify.hook`, `cli.send`,
 room modes) apply at once, the interface's (`notify.osc`, `mark_read`,
-`paste_gap_ms`, `splash`) when it next starts. A hand edit applies at the next restart or the next settings change.
+`paste_gap_ms`, `splash`) when it next starts. A hand edit applies at the next
+restart or the next settings change.
 `notify.hook` and `cli.send = "allow"` cannot be set from the command line
 (exit 7); edit the file for those.
 
@@ -303,7 +306,7 @@ paste_gap_ms = 25       # milliseconds; 0 to 200; see terminals-and-paste.md
 [notify]
   terminal = true       # route 1: terminal escape sequences
   os = true             # route 2: true (when route 1 does not apply), "always" or false
-  osc = "auto"          # "auto", "9", "99", "777" or "off"
+  osc = "auto"          # "auto", "9", "99", "777", "7501" or "off"
   hook = ""             # route 3: a command to run for each notification
 
 [rooms]                 # per-conversation notification mode
@@ -315,12 +318,12 @@ paste_gap_ms = 25       # milliseconds; 0 to 200; see terminals-and-paste.md
 | `mark_read` | `true` | The interface marks a conversation read when you open it, or when new messages arrive at the bottom while the terminal is focused (where the terminal never reports focus, on your next key or mouse input). Off: it never does. |
 | `splash` | `true` | Show the opening screen. |
 | `paste_gap_ms` | `25` | Wait after `enter` for more pasted input. Values outside 0 to 200 are clamped. `0` sends at once. |
-| `cli.send` | `"allow"` | `"deny"` makes `termchat send` fail with exit code 6. |
+| `cli.send` | `"allow"` | `"deny"` makes `termchat send` fail with exit code 6. `"allow"` cannot be set from the command line; edit the file. |
 | `notify.terminal` | `true` | Let the interface raise notifications with terminal escape sequences. |
 | `notify.os` | `true` | `true`: post through the operating system when the terminal route does not apply. `"always"`: post through it as well as the terminal route. `false`: never. |
 | `notify.osc` | `"auto"` | Which escape sequence to use; `"off"` disables. |
 | `notify.hook` | `""` | Command run for each notification. |
-| `rooms.<id>` | none, meaning `mentions` | Notification mode for one room. Find a room's id with `termchat chats --json`. |
+| `rooms.<id>` | none, meaning `mentions` | Notification mode for one room. Change it with `termchat room notify <room> <mode>`. |
 | `account` | none | The joined server. One account is supported. |
 
 Notifications and their keys are explained in

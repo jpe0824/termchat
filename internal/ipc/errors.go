@@ -19,7 +19,7 @@ var (
 	ErrNotAuthorised = errors.New("not authorised")
 	ErrForbidden     = errors.New("forbidden")
 	ErrInvalid       = errors.New("invalid request")
-	ErrRefused       = errors.New("refused from the command line: change it in the termchat interface")
+	ErrRefused       = errors.New("refused from the command line: edit config.toml")
 	// ErrTimeout means a request got no answer in time, or the server did
 	// not confirm a change; the message says which.
 	ErrTimeout         = errors.New("timed out")

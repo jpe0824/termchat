@@ -118,6 +118,18 @@ func TestValidateAndSpecFor(t *testing.T) {
 	if _, ok := SpecFor("nope"); ok {
 		t.Fatal("unknown key has a spec")
 	}
+	for key, want := range map[string]Applies{
+		"notify.terminal": AppliesProcess, "notify.os": AppliesProcess, "notify.hook": AppliesProcess,
+		"cli.send": AppliesProcess, "notify.osc": AppliesTUI, "mark_read": AppliesTUI,
+		"paste_gap_ms": AppliesTUI, "splash": AppliesLaunch,
+	} {
+		if s, ok := SpecFor(key); !ok || s.Applies != want {
+			t.Errorf("SpecFor(%q).Applies = %q, want %q", key, s.Applies, want)
+		}
+	}
+	if len(Specs) != 8 {
+		t.Errorf("%d specs; add the new key to the Applies table above", len(Specs))
+	}
 }
 
 func TestSaveRoundTripsSettings(t *testing.T) {

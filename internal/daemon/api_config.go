@@ -15,8 +15,10 @@ import (
 
 const accountKey = "account"
 
-// ConfigGet implements ipc.Backend. Per-room entries and the account line
-// are listed only when an account exists.
+// ConfigGet implements ipc.Backend. Per-room entries are listed only when an
+// account is available; without one (not joined, or the account failed to
+// come up) it lists the global settings alone, deliberately, so the CLI can
+// still read and change them.
 func (d *daemon) ConfigGet(context.Context) ([]ipc.Setting, error) {
 	cfg := d.config()
 	out := make([]ipc.Setting, 0, len(config.Specs)+len(cfg.Accounts)+4)

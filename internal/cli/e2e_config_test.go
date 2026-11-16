@@ -57,3 +57,19 @@ func TestConfigSetRefused(t *testing.T) {
 	a.ok("config", "set", "cli.send", "deny")
 	a.do("send", "bob", "hi").fail(t, 6, `sending from the command line is disabled (cli.send = "deny")`)
 }
+
+func TestRoomModeNeedsMembership(t *testing.T) {
+	_, a, b := pair(t)
+	a.ok("room", "create", "lounge")
+	eventually(t, "the open room to be listed", func() bool {
+		for _, c := range b.chats("--all") {
+			if c.Name == "lounge" {
+				return true
+			}
+		}
+		return false
+	})
+	b.do("room", "notify", "lounge", "muted").fail(t, 3, "not a member of #lounge")
+	b.do("config", "get", "rooms.lounge").fail(t, 3, "not a member of #lounge")
+	b.do("config", "set", "rooms.lounge", "muted").fail(t, 3, "not a member of #lounge")
+}

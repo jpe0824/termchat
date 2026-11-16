@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -61,18 +62,35 @@ func configList(cmd *cobra.Command, _ []string) error {
 	})
 }
 
+// memberRoom resolves ref to a room the account has joined. A room that
+// exists but is not joined exits 3 naming it, the same as an unknown chat.
+func memberRoom(c *ipc.Client, ref string) (model.Conversation, error) {
+	conv, err := resolveChat(c, ref)
+	if err != nil {
+		return model.Conversation{}, err
+	}
+	if conv.Kind != model.ConvRoom {
+		return model.Conversation{}, usagef("%s", roomsOnly)
+	}
+	mine, _, err := c.Chats()
+	if err != nil {
+		return model.Conversation{}, err
+	}
+	if !slices.ContainsFunc(mine, func(v ipc.ConvView) bool { return v.ID == conv.ID }) {
+		return model.Conversation{}, exitf(exitNotFound, "not a member of #"+conv.Name)
+	}
+	return conv, nil
+}
+
 // roomKey turns rooms.<name> into rooms.<id>. Other keys pass unchanged.
 func roomKey(c *ipc.Client, key string) (string, error) {
 	ref, ok := strings.CutPrefix(key, config.RoomPrefix)
 	if !ok {
 		return key, nil
 	}
-	conv, err := resolveChat(c, ref)
+	conv, err := memberRoom(c, ref)
 	if err != nil {
 		return "", err
-	}
-	if conv.Kind != model.ConvRoom {
-		return "", usagef("%s", roomsOnly)
 	}
 	return config.RoomPrefix + conv.ID, nil
 }

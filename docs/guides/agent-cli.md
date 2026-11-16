@@ -183,6 +183,11 @@ list follows the usual rule (table on a terminal, JSON when piped). Background
 process settings apply at once; the interface's (`notify.osc`, `mark_read`,
 `paste_gap_ms`, `splash`) apply when it next starts.
 
+APPLIES says when a change takes effect: `process` applies at once in the
+background process; `tui` is read by the interface (for now when it next
+starts); `launch` when the interface next starts; `read-only` cannot be changed
+here.
+
 An invalid key or value exits 2 with the reason. `notify.hook` cannot be
 changed from the command line, and `cli.send` cannot be set to `allow`: both
 exit 7, so an agent cannot widen what it may do.

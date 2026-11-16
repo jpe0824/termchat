@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 
@@ -222,6 +223,24 @@ func TestJoinSaveFailureKeepsConfig(t *testing.T) {
 	}
 	if got := e.daemon().config().Accounts; len(got) != 0 {
 		t.Fatalf("snapshot accounts = %+v, want none", got)
+	}
+}
+
+func TestJoinLoadFailureIsNotCalledSaveFailure(t *testing.T) {
+	e := newEnv(t)
+	e.cfg.Accounts = nil
+	e.adjust = func(o *Options) {
+		o.Join = func(_ context.Context, req ipc.JoinReq) (config.Account, error) {
+			return config.Account{Name: "me", Server: req.Server, Handle: "me"}, nil
+		}
+	}
+	c := e.start()
+	e.file.mu.Lock()
+	e.file.broken = true
+	e.file.mu.Unlock()
+	_, err := c.Join(ipc.JoinReq{Server: "chat.test", Code: "invite-1"})
+	if err == nil || !strings.Contains(err.Error(), errBrokenFile.Error()) || strings.Contains(err.Error(), "save config") {
+		t.Fatalf("Join = %v, want the load error without a save config prefix", err)
 	}
 }
 

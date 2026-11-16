@@ -152,6 +152,7 @@ These hold today and are what keep the layers swappable.
 | Untrusted text cannot drive the terminal | Every string shown goes through `internal/sanitize` (TUI, CLI table output, notifications). |
 | Reading as an agent does not mark read | `read`, `wait` and `search` never call `MarkRead`; only the TUI and `mark-read` do (`daemon/api.go`). |
 | One background process per user | Lock file `daemon.lock` in the runtime directory (`daemon/lock_unix.go`). |
+| Only the background process writes `config.toml` | The CLI and the interface change settings through it (`config_set`, `daemon/api_config.go`); `termchat join` goes through the same writer. |
 | Notification rules | `notify.ShouldNotify` plus the routing in `daemon/notify.go`. |
 
 ## Where state lives
