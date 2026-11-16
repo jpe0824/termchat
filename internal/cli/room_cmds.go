@@ -7,8 +7,10 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/jpe0824/termchat/internal/config"
 	"github.com/jpe0824/termchat/internal/ipc"
 	"github.com/jpe0824/termchat/internal/model"
+	"github.com/jpe0824/termchat/internal/sanitize"
 )
 
 func newRoomCmd() *cobra.Command {
@@ -31,7 +33,14 @@ func newRoomCmd() *cobra.Command {
 	})
 	create.Flags().Bool("private", false, "invite-only instead of open to everyone")
 
-	cmd.AddCommand(create)
+	notify := clientCmd(&cobra.Command{
+		Use:   "notify <room> all|mentions|muted",
+		Short: "Set how a room notifies you; it applies at once",
+		Args:  exactArgs(2),
+		RunE:  roomNotify,
+	})
+
+	cmd.AddCommand(create, notify)
 	for _, c := range roomChanges {
 		cmd.AddCommand(roomChange(c))
 	}
@@ -135,6 +144,27 @@ func roomOp(cmd *cobra.Command, ref string, op func(model.Conversation) ipc.Room
 		}
 		return emit(cmd, convOf(res, me), func(w io.Writer) error {
 			_, err := fmt.Fprintln(w, said(res))
+			return err
+		})
+	})
+}
+
+func roomNotify(cmd *cobra.Command, args []string) error {
+	return withClient(cmd, cmdContext(cmd), func(c *ipc.Client) error {
+		room, err := memberRoom(c, args[0])
+		if err != nil {
+			return err
+		}
+		key := config.RoomPrefix + room.ID
+		if err := config.Validate(key, args[1]); err != nil {
+			return usagef("%s", sanitize.Line(err.Error()))
+		}
+		s, err := c.ConfigSet(key, args[1], configSource)
+		if err != nil {
+			return err
+		}
+		return printSetting(cmd, s, func(w io.Writer) error {
+			_, err := fmt.Fprintf(w, "#%s notifies: %s\n", cell(room.Name), cell(s.Value))
 			return err
 		})
 	})

@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"log/slog"
+	"slices"
 	"testing"
 	"time"
 
@@ -179,10 +180,10 @@ func (c *closingNotifier) Close() { close(c.closed) }
 func TestNewNotifierIsUsedAndClosedOnShutdown(t *testing.T) {
 	e := newEnv(t)
 	n := &closingNotifier{closed: make(chan struct{})}
-	var gotCfg bool
+	var gotLog bool
 	e.adjust = func(o *Options) {
-		o.NewNotifier = func(cfg *config.Config, log *slog.Logger) Notifier {
-			gotCfg = cfg == e.cfg && log != nil
+		o.NewNotifier = func(log *slog.Logger) Notifier {
+			gotLog = log != nil
 			return n
 		}
 	}
@@ -193,8 +194,8 @@ func TestNewNotifierIsUsedAndClosedOnShutdown(t *testing.T) {
 	default:
 		t.Fatal("notifier not closed when Run returned")
 	}
-	if !gotCfg {
-		t.Error("factory did not receive the config and logger")
+	if !gotLog {
+		t.Error("factory did not receive the logger")
 	}
 }
 
@@ -301,5 +302,21 @@ func TestOSAlwaysWithTerminalOffPostsOnce(t *testing.T) {
 	}
 	if got := rec.osCalls(); len(got) != 1 {
 		t.Errorf("OS calls = %+v, want exactly one", got)
+	}
+}
+
+func TestHookIsCurrent(t *testing.T) {
+	e, rec := noteEnv(t)
+	e.cfg.Notify.Hook = "a"
+	started(t, e, dm("d1", "dana"))
+	push(e, "d1", "dana", "m1", "one", 0)
+	waitUntil(t, "first hook", func() bool { return len(rec.hookCmds()) == 1 })
+	if _, err := e.daemon().updateConfig(func(c *config.Config) error { return c.Set("notify.hook", "b") }); err != nil {
+		t.Fatal(err)
+	}
+	push(e, "d1", "dana", "m2", "two", 0)
+	waitUntil(t, "second hook", func() bool { return len(rec.hookCmds()) == 2 })
+	if got := rec.hookCmds(); !slices.Equal(got, []string{"a", "b"}) {
+		t.Fatalf("hook commands = %q, want [a b]", got)
 	}
 }

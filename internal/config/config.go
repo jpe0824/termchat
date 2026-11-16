@@ -3,6 +3,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -69,7 +70,7 @@ func Load() (*Config, error) {
 	}
 	_, err = toml.DecodeFile(f, c)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return nil, err
+		return nil, fmt.Errorf("%s: %w", f, err)
 	}
 	c.PasteGapMS = min(max(c.PasteGapMS, 0), maxPasteGapMS)
 	return c, nil

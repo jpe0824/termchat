@@ -13,8 +13,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/jpe0824/termchat/internal/config"
 )
 
 const hostile = "$(touch x) `touch y` '\"; & | \\ -rf"
@@ -112,7 +110,7 @@ func (r *recorder) run(ctx context.Context, c command) error {
 
 func TestOSRouteRunsHostCommandOnce(t *testing.T) {
 	logs := &lockedBuf{}
-	n := New(&config.Config{}, slog.New(slog.NewTextHandler(logs, nil)))
+	n := New(slog.New(slog.NewTextHandler(logs, nil)))
 	rec := &recorder{err: errors.New("boom")}
 	n.run = rec.run
 	n.lookPath = func(name string) (string, error) { return "/bin/" + name, nil }
@@ -140,7 +138,7 @@ func TestOSRouteNoNotifierIsSilent(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("only Linux probes for a notifier")
 	}
-	n := New(&config.Config{}, nil)
+	n := New(nil)
 	rec := &recorder{}
 	n.run = rec.run
 	n.lookPath = func(string) (string, error) { return "", exec.ErrNotFound }
@@ -196,7 +194,7 @@ func TestLinuxBodyMarkupIsEscaped(t *testing.T) {
 }
 
 func TestOSCommandIsBuiltOffTheCallingGoroutine(t *testing.T) {
-	n := New(&config.Config{}, nil)
+	n := New(nil)
 	n.run = (&recorder{}).run
 	n.goos = "linux" // the platform that searches PATH
 	release := make(chan struct{})

@@ -284,3 +284,30 @@ func TestOverlayEscIsDeferred(t *testing.T) {
 		t.Errorf("esc from the dm step: %q", ovState(h))
 	}
 }
+
+func TestSettingsPaste(t *testing.T) {
+	f, h := settingsOpen(t, 90, 30)
+	// The list takes no paste, typed or bracketed.
+	pastedLine(t, f, h, "y\n")
+	h.paste("true\n")
+	if w := f.writes(everyWrite...); w != nil || ovState(h) != fmt.Sprintf("%d/%d", ovSettings, stepSettings) {
+		t.Errorf("paste into the list: %q wrote %q", ovState(h), w)
+	}
+	mustContain(t, flat(h), "paste ignored")
+	// The text step takes a paste whole and saves only on a lone enter.
+	selectSetting(t, h, "notify.hook")
+	h.enter()
+	pastedLine(t, f, h, "notify-send hi\n")
+	if h.m.ov.field.text != "notify-send hi" {
+		t.Errorf("typed paste: field %q", h.m.ov.field.text)
+	}
+	h.key("ctrl+u")
+	h.paste("say done\nrm -rf /\n")
+	if h.m.ov.field.text != "say done" || f.writes(everyWrite...) != nil {
+		t.Errorf("bracketed paste: field %q writes %q", h.m.ov.field.text, f.writes(everyWrite...))
+	}
+	h.enter()
+	if got := f.writes("configset "); !slices.Equal(got, []string{"configset notify.hook say done"}) {
+		t.Errorf("a lone enter wrote %q", got)
+	}
+}

@@ -62,10 +62,12 @@ type (
 		ov  int
 	}
 	// sentMsg is not tied to a connection: a message queued on one that
-	// has since gone is still queued, and its draft is still done.
+	// has since gone is still queued, and its draft is still done. draft
+	// is the start of the draft it came from, which text may differ from
+	// by a leading /.
 	sentMsg struct {
-		conv, text string
-		err        error
+		conv, text, draft string
+		err               error
 	}
 	actionMsg struct {
 		b               Backend
@@ -95,6 +97,21 @@ type (
 		gen            int
 		op, done, conv string
 		err            error
+	}
+	// configMsg is a read of the settings, the seq'th asked for.
+	configMsg struct {
+		b    Backend
+		seq  int
+		list []ipc.Setting
+		err  error
+	}
+	// settingSavedMsg is a setting change's answer, for the overlay gen.
+	settingSavedMsg struct {
+		b   Backend
+		gen int
+		key string
+		s   ipc.Setting
+		err error
 	}
 	searchMsg struct {
 		b    Backend

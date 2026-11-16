@@ -1,7 +1,9 @@
 # Notifications
 
-termchat tells you about new messages through up to three routes, each
-switchable in `config.toml`. The background process decides what is worth a
+termchat tells you about new messages through up to three routes, stored in
+`config.toml`. You switch them in `/settings` (live, no restart) or with
+`termchat config set`; `notify.hook` only in `/settings`, since the CLI cannot
+change it. The background process decides what is worth a
 notification and routes it, so notifications arrive even when the interface is
 closed.
 
@@ -34,9 +36,16 @@ and whether an interface that can show it is attached. If so, it sends the
 notification to that interface, which writes the escape sequence followed by a
 bell to the terminal, and the operating-system route is not used unless
 `notify.os` is `"always"`. Otherwise, with `notify.os` on, the background
-process posts it through the operating system. The interface decides at start: changing `notify.osc` needs the
-interface restarted, and `notify.terminal`, `notify.os` and `notify.hook` need
-`termchat daemon stop`.
+process posts it through the operating system.
+
+Change these settings with `/settings` in the interface, `termchat config
+set`, or `termchat room notify`. Every change applies at once, with no
+restart: the background process takes `notify.terminal`, `notify.os`,
+`notify.hook`, `cli.send` and room modes, and every running interface takes
+`notify.osc`, working out the escape sequence again and telling the background
+process whether it can now show notifications. `notify.hook` cannot be changed
+from the command line; change it with `/settings`, or edit `config.toml` and
+run `termchat daemon stop`.
 
 Route 2 uses `osascript` on macOS and `notify-send` (or `gdbus` when
 `notify-send` is missing) on Linux. The `gdbus` path has not been tried on a
@@ -74,17 +83,16 @@ per message missed. A **new device's first sync is silent**: when a device has
 no conversations stored yet, nothing it downloads notifies. The notification
 text is cut to 200 characters, with control characters removed.
 
-Set a room's mode in `config.toml` under `[rooms]`, keyed by the room's id
-(`termchat chats --json` lists ids):
+Set a room's mode with `termchat room notify <room> all|mentions|muted`, or
+in the interface with `/notify all|mentions|muted` in the open room. It
+applies at once; no hand edit and no restart. `termchat config get rooms.<room>`
+reads it back. The mode does not apply to direct messages.
 
-```toml
-[rooms]
-  r_1d6c074850726d7d = "all"
-  r_a1b2c3d4e5f60718 = "muted"
+```sh
+termchat room notify agents all
 ```
 
-The mode does not apply to direct messages. The background process reads the
-config at start: run `termchat daemon stop` after editing.
+The modes are stored in `config.toml` under `[rooms]`, keyed by the room's id.
 
 ## How focus is detected
 
@@ -211,8 +219,8 @@ account or device (`termchat send @you "test"` from the other one). If
 nothing appears, check in this order:
 
 1. `termchat status` shows `connected`.
-2. `notify.terminal`, `notify.os` and `notify.osc` are what you expect, and you
-   ran `termchat daemon stop` after editing.
+2. `notify.terminal`, `notify.os` and `notify.osc` are what you expect (`termchat config`).
+   A hand edit of `config.toml` needs `termchat daemon stop` first.
 3. The message qualifies: a direct message, or a mention in a room with the
    default mode, and you are not looking at that conversation.
 4. The hook route: set `hook = 'touch /tmp/termchat-hook-ran'` and look for the

@@ -27,12 +27,19 @@ const (
 )
 
 // compose is one conversation's input: its draft, an edit in progress with
-// the draft set aside, and whether a Send or an Edit is out.
+// the draft set aside, and whether a Send or an Edit is out. cmd says the
+// draft is a command; cmdSeq and cmdText tag the latest command run. pick
+// is the command list's highlighted row, and hide says esc closed the list.
 type compose struct {
 	in      input
 	edit    *editing
 	sending bool
 	saving  bool
+	cmd     bool
+	hide    bool
+	pick    int
+	cmdSeq  int
+	cmdText string
 }
 
 type editing struct {
@@ -98,16 +105,22 @@ func keyText(k tea.KeyPressMsg) string {
 
 // inputKey handles a key for the focused input. No key that pasted text
 // can carry moves focus or acts as a command here: tab types a tab, and
-// esc and ↑ inside a burst are dropped.
+// esc and ↑ inside a burst are dropped. A / typed alone into an empty
+// draft makes it a command once the paste gap passes with no other key.
+// While the command list shows, its keys go to it first.
 func (m *Model) inputKey(k tea.KeyPressMsg, g geom) tea.Cmd {
 	c := m.composeFor(m.openID)
+	defer c.afterInputKey(c.in.text)
+	if cmd, ok := m.cmdListKey(k); ok {
+		return cmd
+	}
 	in, w := &c.in, m.inputWidth(g)
 	switch s := k.String(); s {
 	case "enter":
 		if m.opts.PasteGap < 0 {
-			return m.submit()
+			return m.submit(false)
 		}
-		m.enterConv = m.openID
+		m.enterConv, m.enterPasted = m.openID, m.tm.recent
 		return m.opts.Tick(m.opts.PasteGap, m.enterT.arm(timerEnter))
 	case "alt+enter", "ctrl+j":
 		in.insert("\n")
@@ -153,7 +166,12 @@ func (m *Model) inputKey(k tea.KeyPressMsg, g geom) tea.Cmd {
 		}
 		return m.guardKey(k, g)
 	default:
-		if t := keyText(k); t != "" {
+		t := keyText(k)
+		if t == "/" && in.text == "" && c.edit == nil && !m.tm.burst {
+			in.insert(t)
+			return m.press(keyDeferred, hold{run: m.slashHeld})
+		}
+		if t != "" {
 			in.insert(cleanInput(t))
 		}
 	}
@@ -208,21 +226,31 @@ func (m *Model) onEnterTimer(msg timerMsg) tea.Cmd {
 	if conv != m.openID || !m.inputActive(m.geom()) {
 		return nil
 	}
-	return m.submit()
+	return m.submit(m.enterPasted)
 }
 
-// submit acts on enter: saves an edit, or sends the draft. A draft is sent
-// by one Send call, and only when no Send for it is out.
-func (m *Model) submit() tea.Cmd {
+// submit acts on enter: saves an edit, runs a command, or sends the draft.
+// A command draft starting // sends the rest; a draft that is not a
+// command sends as it is, leading / and all. A draft is sent by one Send
+// call, and only when no Send for it is out. pasted says the enter came
+// within the paste gap of the key before it; it never acts on a command.
+func (m *Model) submit(pasted bool) tea.Cmd {
 	conv := m.openID
 	c := m.composeFor(conv)
 	if c.edit != nil {
 		return m.saveEdit(conv, c)
 	}
+	text := strings.TrimRight(c.in.text, "\n")
+	draft := text
+	if c.cmd {
+		if pasted || !strings.HasPrefix(text, "//") {
+			return m.commandEnter(conv, text, pasted)
+		}
+		text = text[1:]
+	}
 	if c.sending {
 		return m.setInfo(conv, "still sending…")
 	}
-	text := strings.TrimRight(c.in.text, "\n")
 	switch model.CheckText(text) {
 	case model.ErrEmptyText:
 		return nil
@@ -235,7 +263,7 @@ func (m *Model) submit() tea.Cmd {
 	b := m.b
 	return func() tea.Msg {
 		_, err := b.Send(conv, text, sendSource)
-		return sentMsg{conv: conv, text: text, err: err}
+		return sentMsg{conv: conv, text: text, draft: draft, err: err}
 	}
 }
 
@@ -256,11 +284,12 @@ func (m *Model) onSent(msg sentMsg) tea.Cmd {
 		in = &c.edit.saved
 	}
 	var cmd tea.Cmd
-	if rest, ok := strings.CutPrefix(in.text, msg.text); ok {
+	if rest, ok := strings.CutPrefix(in.text, msg.draft); ok {
 		rest = strings.TrimLeft(rest, "\n")
 		pos := max(in.pos-(len(in.text)-len(rest)), 0)
 		in.set(rest)
 		in.pos = pos
+		c.syncCmd()
 	} else {
 		// The draft was changed while it was sent; it stays, and says so.
 		cmd = m.setInfo(msg.conv, "sent — draft kept")
@@ -277,7 +306,10 @@ func (m *Model) onSent(msg sentMsg) tea.Cmd {
 type tlayout struct {
 	width, vh            int
 	msgY, inputY, inputH int
-	note                 bool
+	// listY and listH are the command list's rows, between the rule and
+	// the notice line.
+	listY, listH int
+	note         bool
 	// bar, hints and gap are the rows under the input: a rule, the message
 	// key hints and an empty row. Short windows drop gap, then bar and hints.
 	bar, hints, gap bool
@@ -310,8 +342,10 @@ func (m *Model) tlayout(g geom) tlayout {
 	}
 	// The input leaves the thread at least one row when the window allows.
 	l.inputH = max(min(n, maxInputRows, g.bodyH-fixed-1), 1)
-	l.vh = max(g.bodyH-fixed-l.inputH, 0)
-	l.inputY = l.msgY + l.vh + 1
+	l.listH = m.cmdListHeight(g, g.bodyH-fixed-l.inputH-1)
+	l.vh = max(g.bodyH-fixed-l.inputH-l.listH, 0)
+	l.listY = l.msgY + l.vh + 1
+	l.inputY = l.listY + l.listH
 	if l.note {
 		l.inputY++
 	}
@@ -322,7 +356,8 @@ func (m *Model) tlayout(g geom) tlayout {
 // inputWidth is the cells the input's text is drawn in, after "> ".
 func (m *Model) inputWidth(g geom) int { return max(g.thr.inner()-2, 1) }
 
-// inputArea draws the rule above the input, the notice line and the input.
+// inputArea draws the rule above the input, the command list, the notice
+// line and the input.
 func (m *Model) inputArea(g geom, l tlayout) []string {
 	c := m.drafts[m.openID]
 	if c == nil {
@@ -339,7 +374,7 @@ func (m *Model) inputArea(g geom, l tlayout) []string {
 	} else {
 		rule = m.st.faint.Render(rule)
 	}
-	out := []string{rule}
+	out := append([]string{rule}, m.cmdListLines(g, l)...)
 	if s, st := m.noteLine(); l.note {
 		out = append(out, st.Render(truncate(s, l.width)))
 	}

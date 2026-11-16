@@ -374,6 +374,17 @@ func (c *Client) People() ([]Person, error) {
 	return result[[]Person](c, opPeople, nil)
 }
 
+// ConfigGet lists every setting with its current value.
+func (c *Client) ConfigGet() ([]Setting, error) {
+	return result[[]Setting](c, opConfigGet, nil)
+}
+
+// ConfigSet changes one setting and returns it as now stored. source is
+// "cli" or "tui"; from "cli" a few settings are refused with ErrRefused.
+func (c *Client) ConfigSet(key, value, source string) (Setting, error) {
+	return result[Setting](c, opConfigSet, &args{Key: key, Value: value, Source: source})
+}
+
 // DeviceInvite returns a code that adds another device to this account.
 func (c *Client) DeviceInvite() (string, error) {
 	return result[string](c, opDeviceInvite, nil)

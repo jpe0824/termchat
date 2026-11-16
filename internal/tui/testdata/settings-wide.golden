@@ -1,0 +1,16 @@
+┌ termchat ────────────────────────────────────────────────────────────────────────── team.example ● connected ┐
+│ Direct             │ #┌─ Settings ───────────────────────────────────────────────────┐  │ Members (4)        │
+│ ● dana           2 │ ─│ Notifications                                                │─ │ ci-bot [agent]     │
+│   sam              │ 1│ › notify.terminal  true                                      │  │ dana               │
+│   ci-bot           │ 1│   notify.os        true                                      │  │ jason (you)        │
+│ Rooms              │ 1│   notify.osc       auto                                      │  │ sam                │
+│ ● # platform     5 │ 1│   notify.hook      (none)                                    │  │                    │
+│   # deploys        │ 1│ Interface                                                    │  │ Open room          │
+│   # random         │ 1│   mark_read        false                                     │  │ created by dana    │
+│                    │ 1│   paste_gap_ms     25                                        │  │                    │
+│                    │ ─│   splash           true  next launch                         │─ │                    │
+│                    │ >│ CLI                                                          │  │                    │
+│                    │ ─│                                                              │─ │                    │
+│                    │  │ Show notifications inside the terminal.                      │  │                    │
+│                    │  └─ ⏎ change  esc close  ↑↓ move ───────────────────────────────┘  │                    │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

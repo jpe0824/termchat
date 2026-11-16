@@ -18,11 +18,13 @@ const (
 	ovNew
 	ovSearch
 	ovRoom
+	ovSettings
 )
 
 // ovStep is where an overlay is: the new conversation overlay's choices
-// and their three forms, and the room panel's member list and its forms.
-// Jump and search have one step, stepChoose.
+// and their three forms, the room panel's member list and its forms, and
+// the settings list with its choice and text steps. Jump and search have
+// one step, stepChoose.
 type ovStep int
 
 const (
@@ -33,6 +35,9 @@ const (
 	stepMembers
 	stepInvite
 	stepRename
+	stepSettings
+	stepSettingChoice
+	stepSettingText
 )
 
 // downBanner is what an overlay key says while it cannot work.
@@ -53,9 +58,11 @@ type overlay struct {
 	info     string
 	busy     bool
 	ask      *question
-	// open is the new room's visibility; conv the room the panel is about.
+	// open is the new room's visibility; conv the room the panel is about;
+	// key the setting being changed.
 	open bool
 	conv string
+	key  string
 	// seq numbers the search queries; results are shown only for the
 	// newest, and searched says they came back.
 	seq      timer
@@ -65,10 +72,12 @@ type overlay struct {
 
 // ovRow is one row of an overlay's list. text[hlAt:hlEnd] is a part to
 // mark, whole characters, none when hlEnd is 0; from is where the part of
-// text that may be cut to bring it into view starts.
+// text that may be cut to bring it into view starts. A heading names the
+// rows below it and is never selected.
 type ovRow struct {
 	id, text          string
 	hlAt, hlEnd, from int
+	heading           bool
 }
 
 // ovSpec is what one kind of overlay is made of; the shared frame draws
@@ -119,6 +128,11 @@ func init() {
 			title: (*Model).roomTitle, field: func(s ovStep) bool { return s == stepInvite || s == stepRename },
 			start: (*Model).roomStartPanel, load: (*Model).requestPeople, rows: (*Model).roomRows,
 			act: (*Model).roomGo, body: (*Model).roomBody, first: stepMembers,
+		},
+		ovSettings: {
+			title: (*Model).settingsTitle, field: func(s ovStep) bool { return s == stepSettingText },
+			start: (*Model).settingsStart, load: (*Model).requestConfig, rows: (*Model).settingsRows,
+			act: (*Model).settingsGo, body: (*Model).settingsBody, first: stepSettings,
 		},
 	}
 }
@@ -219,8 +233,10 @@ func (m *Model) ovSelect(f func(ov *overlay, n, page int)) {
 	ov.sel = max(min(ov.sel, n-1), 0)
 }
 
-// ovMoveKey moves the selection for a key of moveKeys or listKeys.
+// ovMoveKey moves the selection for a key of moveKeys or listKeys, past
+// any heading it lands on.
 func (m *Model) ovMoveKey(c keyCtx) tea.Cmd {
+	defer m.ovSkipHeading(map[string]int{"up": -1, "k": -1, "pgup": -1, "end": -1}[c.key])
 	m.ovSelect(func(ov *overlay, n, page int) {
 		switch c.key {
 		case "up", "k":
@@ -238,6 +254,23 @@ func (m *Model) ovMoveKey(c keyCtx) tea.Cmd {
 		}
 	})
 	return nil
+}
+
+// ovSkipHeading moves the selection off a heading: up when dir is -1,
+// else down, and the other way when there is no row that way.
+func (m *Model) ovSkipHeading(dir int) {
+	rows := m.ovRows()
+	if dir == 0 {
+		dir = 1
+	}
+	for _, d := range []int{dir, -dir} {
+		for i := m.ov.sel; i >= 0 && i < len(rows); i += d {
+			if !rows[i].heading {
+				m.ov.sel = i
+				return
+			}
+		}
+	}
 }
 
 func (m *Model) ovGoKey(keyCtx) tea.Cmd { return m.ovGo() }
@@ -272,6 +305,9 @@ func (m *Model) ovBack() {
 		ov.step = stepChoose
 	case ov.kind == ovRoom && ov.step != stepMembers:
 		ov.step, ov.sel = stepMembers, 0
+	case ov.kind == ovSettings && ov.step != stepSettings:
+		ov.step = stepSettings
+		m.settingsSelect(ov.key)
 	default:
 		m.closeOverlay()
 		return
@@ -330,6 +366,9 @@ func (m *Model) ovClick(x, y int) tea.Cmd {
 		return nil
 	}
 	row := m.ovRows()[i]
+	if row.heading {
+		return nil
+	}
 	if row.id == "vis" {
 		ov.open = !ov.open
 		return nil

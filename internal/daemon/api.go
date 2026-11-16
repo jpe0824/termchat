@@ -64,8 +64,8 @@ func (d *daemon) Status(context.Context) (ipc.Status, error) {
 	d.mu.Lock()
 	a, problem, aside := d.acct, d.problem, d.setAside
 	var acct config.Account
-	if len(d.cfg.Accounts) > 0 {
-		acct = d.cfg.Accounts[0]
+	if accts := d.config().Accounts; len(accts) > 0 {
+		acct = accts[0]
 	}
 	d.mu.Unlock()
 	if a == nil {
@@ -140,10 +140,7 @@ func (d *daemon) Send(_ context.Context, conv, text, source string) (string, err
 	return onAccount(d, func(a *account) (string, error) {
 		switch source {
 		case "cli":
-			d.mu.Lock()
-			deny := d.cfg.CLI.Send == "deny"
-			d.mu.Unlock()
-			if deny {
+			if d.config().CLI.Send == "deny" {
 				return "", ipc.ErrSendDenied
 			}
 		case "tui":

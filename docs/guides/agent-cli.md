@@ -28,6 +28,7 @@ Every client command takes `--json` and `--account <name>`.
 | 4 | No account joined, not connected to the server, not authorised (key removed), or forbidden. |
 | 5 | Timeout (`wait --timeout`). |
 | 6 | Sending from the command line is disabled (`cli.send = "deny"`). |
+| 7 | Refused from the command line: `config set` of `notify.hook`, or of `cli.send` to `allow`. |
 | 130 | Interrupted with Ctrl-C. |
 
 Sending while the server is unreachable is not an error: the message is queued
@@ -141,10 +142,11 @@ termchat send [flags] <chat> [text]
   dropped; line breaks inside the text are kept and make one multi-line message.
   `echo "build passed" | termchat send '#ci'`
 - Empty text, or text over 8192 bytes, is a usage error (exit 2).
-- `cli.send = "deny"` in `config.toml` makes `send` fail with exit 6 and the
+- `cli.send = "deny"` makes `send` fail with exit 6 and the
   message `sending from the command line is disabled (cli.send = "deny")`.
   Use it on a machine where scripts should read but never write as you.
-  Restart the background process after changing it.
+  `termchat config set cli.send deny` takes effect at once. The command line
+  can tighten it but not lift it: `config set cli.send allow` exits 7.
 
 ### Waiting
 
@@ -168,6 +170,27 @@ exits 0. It never returns your own messages, deleted messages or edits.
   next command starts a new process. With `--since` set to the last `seq` you
   handled, nothing is lost.
 
+### Settings
+
+```sh
+termchat config                          # every setting: KEY VALUE APPLIES (JSON: the full list)
+termchat config get <key>                # the value alone; rooms.<room> for a room's mode
+termchat config set <key> <value>        # prints "<key> = <value>"
+```
+
+`config get` and `config set` print plain text unless `--json` is passed; the
+list follows the usual rule (table on a terminal, JSON when piped). A change
+applies at once, in the background process and in any running interface, except
+`splash`, which applies when the interface next starts.
+
+APPLIES says when a change takes effect: `process` applies at once in the
+background process; `tui` applies at once in every running interface; `launch`
+when the interface next starts; `read-only` cannot be changed here.
+
+An invalid key or value exits 2 with the reason. `notify.hook` cannot be
+changed from the command line, and `cli.send` cannot be set to `allow`: both
+exit 7, so an agent cannot widen what it may do.
+
 ### Rooms, invites and agents
 
 ```sh
@@ -175,6 +198,7 @@ termchat room create <name> [--private]
 termchat room join|leave <room>
 termchat room invite|remove <room> <handle>
 termchat room rename <room> <name>
+termchat room notify <room> all|mentions|muted       # how the room notifies you; applies at once
 termchat invite <handle> [--name <display name>]     # admins only
 termchat device add                                  # code for another device of yours
 termchat agent create <handle> [--name <display name>]

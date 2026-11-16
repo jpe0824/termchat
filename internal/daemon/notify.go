@@ -30,14 +30,14 @@ var errHandleUnknown = errors.New("the user's handle is not known yet")
 type Notifier interface {
 	// OS posts p through the operating system.
 	OS(p ipc.NotifyPayload)
-	// Hook runs the user's hook command for p, when one is configured.
-	Hook(p ipc.NotifyPayload)
+	// Hook runs hook, the user's hook command, for p.
+	Hook(p ipc.NotifyPayload, hook string)
 }
 
 type nopNotifier struct{}
 
-func (nopNotifier) OS(ipc.NotifyPayload)   {}
-func (nopNotifier) Hook(ipc.NotifyPayload) {}
+func (nopNotifier) OS(ipc.NotifyPayload)           {}
+func (nopNotifier) Hook(ipc.NotifyPayload, string) {}
 
 type msgKey struct{ conv, msgID string }
 
@@ -60,7 +60,8 @@ type noteServer interface {
 // notification goes. It runs on whichever goroutine stores the message and
 // only reads the store and hands off to the Notifier.
 type notifications struct {
-	cfg *config.Config
+	// cfg returns the current settings; it never blocks.
+	cfg func() *config.Config
 	n   Notifier
 	srv noteServer
 	st  noteStore
@@ -75,21 +76,22 @@ type notifications struct {
 	mu sync.Mutex
 }
 
-func newNotifications(cfg *config.Config, n Notifier, srv noteServer, st noteStore, log *slog.Logger, clock Clock) *notifications {
+func newNotifications(cfg func() *config.Config, n Notifier, srv noteServer, st noteStore, log *slog.Logger, clock Clock) *notifications {
 	return &notifications{cfg: cfg, n: n, srv: srv, st: st, log: log, clock: clock,
 		retries: newRetryQueue(clock, log), claims: claims{held: map[msgKey]bool{}}}
 }
 
 // pass is what one evaluation of newly stored messages reads once and
-// shares: the subscribers as they were when it began, and each
-// conversation's view.
+// shares: the settings and the subscribers as they were when it began, and
+// each conversation's view.
 type pass struct {
+	cfg   *config.Config
 	subs  []ipc.Subscriber
 	views map[string]store.ConvView
 }
 
 func (n *notifications) newPass() *pass {
-	return &pass{subs: n.srv.Subscribers(), views: map[string]store.ConvView{}}
+	return &pass{cfg: n.cfg(), subs: n.srv.Subscribers(), views: map[string]store.ConvView{}}
 }
 
 // view returns conv's view, read once per pass. A failed read is not kept, so
@@ -108,7 +110,7 @@ func (n *notifications) view(r *pass, conv string) (store.ConvView, error) {
 // anyRoute reports whether some route could deliver a notification now. When
 // none can, nothing is read from the store on its behalf.
 func (n *notifications) anyRoute(r *pass) bool {
-	c := n.cfg.Notify
+	c := r.cfg.Notify
 	return c.OS != config.OSOff || c.Hook != "" || c.Terminal && slices.ContainsFunc(r.subs, func(s ipc.Subscriber) bool { return s.CanNotify })
 }
 
@@ -321,7 +323,7 @@ func (n *notifications) decide(ev model.Event, r *pass) (ipc.NotifyPayload, bool
 	if err != nil {
 		return ipc.NotifyPayload{}, false, err
 	}
-	ctx := notify.Context{Me: me, RoomMode: n.cfg.Rooms[v.ID], Unread: ev.Seq > v.ReadSeq, Focused: r.focused(v.ID)}
+	ctx := notify.Context{Me: me, RoomMode: r.cfg.Rooms[v.ID], Unread: ev.Seq > v.ReadSeq, Focused: r.focused(v.ID)}
 	// The event cannot tell whether the message has since been deleted, or
 	// edited to mention the user, so this check assumes neither.
 	maybe := store.Message{ConvID: ev.ConvID, Author: ev.Actor, Seq: ev.Seq, Mentions: []string{me}}
@@ -344,12 +346,12 @@ func (n *notifications) decide(ev model.Event, r *pass) (ipc.NotifyPayload, bool
 // independently runs the hook. It runs once per notification, so the
 // operating system is asked at most once.
 func (n *notifications) dispatch(p ipc.NotifyPayload) {
-	cfg := n.cfg.Notify
+	cfg := n.cfg().Notify
 	shown := cfg.Terminal && n.srv.BroadcastNotify(ipc.Event{Kind: ipc.KindNotify, Notify: &p}) > 0
 	if cfg.OS == config.OSAlways || !shown && cfg.OS == config.OSFallback {
 		n.n.OS(p)
 	}
 	if cfg.Hook != "" {
-		n.n.Hook(p)
+		n.n.Hook(p, cfg.Hook)
 	}
 }

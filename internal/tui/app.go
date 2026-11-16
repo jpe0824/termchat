@@ -77,6 +77,9 @@ type Model struct {
 	// enterConv is the conversation an enter waits to act in, "" for none.
 	enterConv string
 	enterT    timer
+	// enterPasted says the waiting enter followed another key within the
+	// paste gap: it may be the end of pasted text.
+	enterPasted bool
 
 	// termFocus is the terminal's focus. It stays unknown until the terminal
 	// sends a focus or blur event, which some terminals and multiplexers
@@ -123,9 +126,15 @@ type Model struct {
 		width int
 		lines []string
 	}
-	// osc is the notification escape sequence variant, "" for none.
-	osc    string
-	flashT timer
+	// osc is the notification escape sequence variant, "" for none;
+	// renotify tells the subscription goroutine when that turns on or off.
+	osc      string
+	renotify chan bool
+	flashT   timer
+	// settings is the latest settings list read; cfgSeq tags the reads, so
+	// only the newest is taken.
+	settings []ipc.Setting
+	cfgSeq   int
 }
 
 // New returns the interface's root model. With b nil and Options.Start set,
@@ -140,7 +149,7 @@ func New(b Backend, opts Options) *Model {
 		ctx: ctx, cancel: cancel, b: b, procDown: b == nil, adopt: make(chan Backend, 1),
 		splashDone: !opts.Splash, drafts: map[string]*compose{},
 		readBusy: map[string]bool{}, osc: notify.ResolveOSC(opts.NotifyOSC, opts.Env),
-		focusUntrusted: opts.Env("HC_TERMINAL_ID") != "",
+		focusUntrusted: opts.Env("HC_TERMINAL_ID") != "", renotify: make(chan bool, 1),
 	}
 }
 
@@ -174,7 +183,7 @@ func (m *Model) supervise() tea.Cmd {
 		return nil
 	}
 	m.supervised = true
-	sup := &supervisor{b: m.b, opts: m.opts, adopt: m.adopt, canNotify: m.osc != ""}
+	sup := &supervisor{b: m.b, opts: m.opts, adopt: m.adopt, canNotify: m.osc != "", renotify: m.renotify}
 	ctx := m.ctx
 	return func() tea.Msg { go sup.run(ctx); return nil }
 }
@@ -218,6 +227,8 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		return m.onTimer(msg)
 	case sentMsg:
 		return m.onSent(msg)
+	case slashDoneMsg:
+		return m.onSlashDone(msg)
 	case actionMsg:
 		return m.onAction(msg)
 	case outboxMsg:
@@ -256,7 +267,8 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 			m.peopleBusy = false
 		}
 		m.b, m.procDown, m.downErr, m.startErr = msg.b, false, nil, ""
-		return m.rereadAll()
+		// Settings changed while no subscription was there to say so.
+		return tea.Batch(m.rereadAll(), m.requestConfig())
 	case resyncMsg:
 		return m.rereadAll()
 	case backendDownMsg:
@@ -271,6 +283,10 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		m.onPeople(msg)
 	case ovDoneMsg:
 		return m.onOvDone(msg)
+	case configMsg:
+		return m.onConfig(msg)
+	case settingSavedMsg:
+		return m.onSettingSaved(msg)
 	case searchMsg:
 		m.onSearch(msg)
 	case statusMsg:

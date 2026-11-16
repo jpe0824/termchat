@@ -220,9 +220,8 @@ func TestJoinBringsDaemonUp(t *testing.T) {
 	if gotServer != "chat.test" || gotCode != "invite-1" {
 		t.Fatalf("join called with %q %q", gotServer, gotCode)
 	}
-	saved, err := config.Load()
-	if err != nil || len(saved.Accounts) != 1 || saved.Accounts[0].Name != "me" {
-		t.Fatalf("saved config = %+v, %v", saved, err)
+	if saved := e.file.saved(); len(saved.Accounts) != 1 || saved.Accounts[0].Name != "me" {
+		t.Fatalf("saved config = %+v", saved)
 	}
 	waitUntil(t, "the joined account's conversations", func() bool {
 		ids := chatIDs(t, c)

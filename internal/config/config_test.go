@@ -1,12 +1,16 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
+
+	"github.com/BurntSushi/toml"
 
 	"github.com/jpe0824/termchat/internal/paths"
 )
@@ -120,5 +124,22 @@ func TestPasteGapClamped(t *testing.T) {
 		if c, err := Load(); err != nil || c.PasteGapMS != want {
 			t.Errorf("paste_gap_ms = %d: loaded %d, %v; want %d", in, c.PasteGapMS, err, want)
 		}
+	}
+}
+
+func TestLoadParseErrorNamesFileAndLine(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TERMCHAT_CONFIG_DIR", dir)
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte("splash = true\nmark_read = = 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() accepted a broken file")
+	}
+	var perr toml.ParseError
+	if !strings.Contains(err.Error(), path) || !errors.As(err, &perr) || perr.Position.Line != 2 {
+		t.Fatalf("Load() = %v (line %d), want the path %s and line 2", err, perr.Position.Line, path)
 	}
 }

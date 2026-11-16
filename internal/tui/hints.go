@@ -64,6 +64,11 @@ func (m *Model) mainKeys(g geom, wide bool) (msg, app []string) {
 		return nil, []string{"⏎ open", "? help"}
 	case m.listShown():
 		return nil, []string{"↑↓ move", "⏎ open", "/ search", "? help", "ctrl+k jump", "ctrl+n new", "q quit"}
+	case len(m.shownMatches(g)) > 0:
+		if wide {
+			return m.cmdListFoot(), nonEmpty("ctrl+k jump", "ctrl+n new", room, "ctrl+c quit")
+		}
+		return m.cmdListFoot(), []string{"ctrl+c quit"}
 	case m.inputActive(g):
 		if c := m.drafts[m.openID]; c != nil && c.edit != nil {
 			msg = []string{"⏎ save", "esc cancel", "alt+⏎ newline"}

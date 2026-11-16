@@ -126,6 +126,19 @@ See [terminals and paste](terminals-and-paste.md).
 - [ ] Quit (`q`, then `q` again) with an unsent draft: the warning appears and
       the second press quits.
 
+## 5b. Settings
+
+- [ ] `/settings`: change `paste_gap_ms` and `mark_read`; each takes effect at
+      once in the open interface, with no restart.
+- [ ] In a terminal without bracketed paste, paste text that starts with `/`
+      into an empty input; it sends as text and does not open the command list
+      or run a command.
+- [ ] Switch `notify.osc` from `off` to `auto` and back in `/settings`; with a
+      real message arriving each time, the terminal notification appears only
+      while it is on.
+- [ ] With `/settings` open, run `termchat room notify <room> muted` from
+      another shell; the room's row updates without reopening the overlay.
+
 ## 6. Upgrade with a running background process
 
 - [ ] With the old version's background process running and the interface

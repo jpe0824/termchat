@@ -29,6 +29,7 @@ func TestExitCodeMapping(t *testing.T) {
 		{ipc.ErrForbidden, 4},
 		{ipc.ErrTimeout, 5},
 		{ipc.ErrSendDenied, 6},
+		{ipc.ErrRefused, 7},
 		{ipc.ErrShuttingDown, 1},
 		{ipc.ErrInvalid, 1},
 		{ipc.ErrClosed, 1},

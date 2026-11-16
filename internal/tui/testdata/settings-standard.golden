@@ -1,0 +1,14 @@
+┌ termchat ────────────────────────────────────────────── team.example ● connected ┐
+│ Direct  ┌─ Settings ───────────────────────────────────────────────────┐ members │
+│ ● dana  │ Notifications                                                │──────── │
+│   sam   │ › notify.terminal  true                                      │         │
+│   ci-bot│   notify.os        true                                      │         │
+│ Rooms   │   notify.osc       auto                                      │         │
+│ ● # plat│   notify.hook      (none)                                    │         │
+│   # depl│ Interface                                                    │         │
+│   # rand│   mark_read        false                                     │         │
+│         │   paste_gap_ms     25                                        │──────── │
+│         │                                                              │         │
+│         │ Show notifications inside the terminal.                      │──────── │
+│         └─ ⏎ change  esc close  ↑↓ move ───────────────────────────────┘         │
+└──────────────────────────────────────────────────────────────────────────────────┘

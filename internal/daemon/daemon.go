@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jpe0824/termchat/internal/config"
@@ -46,19 +47,28 @@ func (realClock) After(d time.Duration) <-chan time.Time { return time.After(d) 
 type Options struct {
 	Connector connector.Connector
 	Store     *store.Store
-	Config    *config.Config
+	// Config, when set, is the settings the process starts with instead of
+	// what LoadConfig returns. Changes still go through LoadConfig and
+	// SaveConfig.
+	Config *config.Config
+	// LoadConfig reads config.toml; the default is config.Load.
+	LoadConfig func() (*config.Config, error)
+	// SaveConfig writes config.toml; the default is (*config.Config).Save.
+	SaveConfig func(*config.Config) error
 	// Notifier raises the OS and hook routes; the default does nothing.
-	// Notification settings are read once, when the process starts.
 	Notifier Notifier
-	// NewNotifier builds the Notifier from the loaded config and the logger
-	// when Notifier is nil. Run closes what it built, when it has a Close
-	// method, after the account has stopped.
-	NewNotifier func(*config.Config, *slog.Logger) Notifier
+	// NewNotifier builds the Notifier from the logger when Notifier is nil.
+	// Run closes what it built, when it has a Close method, after the
+	// account has stopped.
+	NewNotifier func(*slog.Logger) Notifier
 	Clock       Clock
 	Logger      *slog.Logger
 	RuntimeDir  string
 	// Join registers with a server; the default is termchat.Join.
 	Join func(ctx context.Context, req ipc.JoinReq) (config.Account, error)
+
+	// built, when set, is given the daemon once Run has built it.
+	built func(*daemon)
 }
 
 // daemon is the process-wide state; account holds what exists only once an
@@ -71,8 +81,11 @@ type daemon struct {
 	srv      *ipc.Server
 	stop     context.CancelFunc
 
+	// live is the current settings; cfgMu serialises writes to config.toml.
+	live  atomic.Pointer[config.Config]
+	cfgMu sync.Mutex
+
 	mu      sync.Mutex
-	cfg     *config.Config
 	acct    *account
 	joining bool
 	closing bool
@@ -109,7 +122,13 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	defer unlock()
 
-	d := &daemon{opts: opts, clock: opts.Clock, log: opts.Logger, notifier: opts.Notifier, cfg: opts.Config}
+	if opts.LoadConfig == nil {
+		opts.LoadConfig = config.Load
+	}
+	if opts.SaveConfig == nil {
+		opts.SaveConfig = (*config.Config).Save
+	}
+	d := &daemon{opts: opts, clock: opts.Clock, log: opts.Logger, notifier: opts.Notifier}
 	if d.clock == nil {
 		d.clock = realClock{}
 	}
@@ -124,14 +143,19 @@ func Run(ctx context.Context, opts Options) error {
 		defer closeLog()
 		d.log = logger
 	}
-	if d.cfg == nil {
-		if d.cfg, err = config.Load(); err != nil {
+	cfg := opts.Config
+	if cfg == nil {
+		if cfg, err = opts.LoadConfig(); err != nil {
 			return err
 		}
 	}
+	d.live.Store(cfg)
+	if opts.built != nil {
+		opts.built(d)
+	}
 
 	if opts.Notifier == nil && opts.NewNotifier != nil {
-		d.notifier = opts.NewNotifier(d.cfg, d.log)
+		d.notifier = opts.NewNotifier(d.log)
 		if c, ok := d.notifier.(interface{ Close() }); ok {
 			defer c.Close()
 		}
@@ -155,10 +179,10 @@ func Run(ctx context.Context, opts Options) error {
 	defer stop()
 	d.stop = stop
 	d.srv = ipc.NewServer(d, d.log)
-	if len(d.cfg.Accounts) > 0 {
+	if accts := cfg.Accounts; len(accts) > 0 {
 		// A failure is kept as the account's problem, which status shows; the
 		// process stays up so a join can repair it.
-		_, _ = d.bringUp(d.cfg.Accounts[0])
+		_, _ = d.bringUp(accts[0])
 	}
 	d.log.Info("background process started", "pid", os.Getpid())
 
@@ -370,12 +394,13 @@ func (d *daemon) Join(ctx context.Context, req ipc.JoinReq) (ipc.JoinRes, error)
 		d.mu.Unlock()
 		return ipc.JoinRes{}, fmt.Errorf("%w: shutting down", ipc.ErrNotConnected)
 	}
-	prev := d.cfg.Accounts
-	d.cfg.Accounts = []config.Account{acct}
-	if err := d.cfg.Save(); err != nil {
-		d.cfg.Accounts = prev
+	_, err = d.updateConfig(func(c *config.Config) error {
+		c.Accounts = []config.Account{acct}
+		return nil
+	})
+	if err != nil {
 		d.mu.Unlock()
-		return ipc.JoinRes{}, fmt.Errorf("save config: %w", err)
+		return ipc.JoinRes{}, err
 	}
 	d.acct = nil
 	d.mu.Unlock()
@@ -417,10 +442,11 @@ func (d *daemon) replaceable(server string) (*account, error) {
 	if d.joining {
 		return nil, refuse
 	}
-	if len(d.cfg.Accounts) == 0 && d.acct == nil {
+	accts := d.config().Accounts
+	if len(accts) == 0 && d.acct == nil {
 		return nil, nil
 	}
-	if len(d.cfg.Accounts) != 1 || termchat.ServerAddr(d.cfg.Accounts[0].Server) != termchat.ServerAddr(server) {
+	if len(accts) != 1 || termchat.ServerAddr(accts[0].Server) != termchat.ServerAddr(server) {
 		return nil, refuse
 	}
 	if d.acct == nil {

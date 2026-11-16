@@ -100,6 +100,6 @@ func Root() *cobra.Command {
 	})
 	root.AddCommand(newServeCmd(), newServerCmd(), newDaemonCmd(), newTUICmd())
 	root.AddCommand(newJoinCmd(), newStatusCmd(), newChatsCmd(), newReadCmd(), newSendCmd(), newWaitCmd(),
-		newSearchCmd(), newMarkReadCmd(), newDMCmd(), newRoomCmd(), newDeviceCmd(), newAgentCmd(), newInviteCmd())
+		newSearchCmd(), newMarkReadCmd(), newDMCmd(), newRoomCmd(), newDeviceCmd(), newAgentCmd(), newInviteCmd(), newConfigCmd())
 	return root
 }

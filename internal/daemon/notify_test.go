@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jpe0824/termchat/internal/config"
 	"github.com/jpe0824/termchat/internal/connector"
 	"github.com/jpe0824/termchat/internal/ipc"
 	"github.com/jpe0824/termchat/internal/model"
@@ -18,7 +19,8 @@ type noteRec struct {
 	mu    sync.Mutex
 	os    []ipc.NotifyPayload
 	hooks []ipc.NotifyPayload
-	sent  int // sentinels pushed, touched only by the test goroutine
+	cmds  []string // the hook command each Hook call was given
+	sent  int      // sentinels pushed, touched only by the test goroutine
 }
 
 func (r *noteRec) OS(p ipc.NotifyPayload) {
@@ -27,10 +29,17 @@ func (r *noteRec) OS(p ipc.NotifyPayload) {
 	r.os = append(r.os, p)
 }
 
-func (r *noteRec) Hook(p ipc.NotifyPayload) {
+func (r *noteRec) Hook(p ipc.NotifyPayload, hook string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.hooks = append(r.hooks, p)
+	r.cmds = append(r.cmds, hook)
+}
+
+func (r *noteRec) hookCmds() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.cmds)
 }
 
 func (r *noteRec) osCalls() []ipc.NotifyPayload {
@@ -333,4 +342,22 @@ func runClock(e *env) func() {
 		}
 	}()
 	return func() { close(stop) }
+}
+
+func TestRoomModeChangeDecidesNextMessage(t *testing.T) {
+	e, rec := noteEnv(t)
+	started(t, e, room("r1", "platform", "me", "dana"))
+	push(e, "r1", "dana", "m1", "before", 0)
+	sentinel(t, e, rec)
+	if got := texts(dropSentinels(rec.osCalls())); len(got) != 0 {
+		t.Fatalf("notified %q at the default mode", got)
+	}
+	if _, err := e.daemon().updateConfig(func(c *config.Config) error { return c.Set(config.RoomPrefix+"r1", "all") }); err != nil {
+		t.Fatal(err)
+	}
+	push(e, "r1", "dana", "m2", "after", 0)
+	sentinel(t, e, rec)
+	if got := texts(dropSentinels(rec.osCalls())); !slices.Equal(got, []string{"after"}) {
+		t.Fatalf("notified %q, want only the message after the change", got)
+	}
 }

@@ -8,7 +8,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/jpe0824/termchat/internal/config"
 	"github.com/jpe0824/termchat/internal/daemon"
 	"github.com/jpe0824/termchat/internal/notify"
 )
@@ -29,7 +28,7 @@ func newDaemonCmd() *cobra.Command {
 			ctx, stop := signal.NotifyContext(cmdContext(cmd), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			return daemon.Run(ctx, daemon.Options{
-				NewNotifier: func(cfg *config.Config, log *slog.Logger) daemon.Notifier { return notify.New(cfg, log) },
+				NewNotifier: func(log *slog.Logger) daemon.Notifier { return notify.New(log) },
 			})
 		},
 	})

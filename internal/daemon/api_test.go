@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 
+	"github.com/jpe0824/termchat/internal/config"
 	"github.com/jpe0824/termchat/internal/connector"
 	"github.com/jpe0824/termchat/internal/ipc"
 	"github.com/jpe0824/termchat/internal/model"
@@ -291,5 +293,120 @@ func TestPeopleListsTheStore(t *testing.T) {
 	}
 	if !slices.EqualFunc(others, want, func(a, b model.Person) bool { return a == b }) {
 		t.Fatalf("People = %+v, want %+v", got, want)
+	}
+}
+
+func TestConfigGetLists(t *testing.T) {
+	e := newEnv(t)
+	e.fake.AddConversation(room("r-z", "zeta", "me", "dana"))
+	e.fake.AddConversation(room("r-a", "alpha", "me", "dana"))
+	e.fake.AddConversation(model.Conversation{ID: "dm1", Kind: model.ConvDM, Members: []string{"me", "dana"}})
+	c := e.start()
+	waitUntil(t, "three chats", func() bool { return len(chatIDs(t, c)) == 3 })
+	got, err := c.ConfigGet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var keys []string
+	for _, s := range got {
+		keys = append(keys, s.Key)
+	}
+	want := []string{"notify.terminal", "notify.os", "notify.osc", "notify.hook", "mark_read", "paste_gap_ms", "splash", "cli.send", "rooms.r-a", "rooms.r-z", "account"}
+	if !slices.Equal(keys, want) {
+		t.Fatalf("keys = %v, want %v", keys, want)
+	}
+	if r := got[8]; r.Room != "alpha" || r.Value != "mentions" || r.Applies != config.AppliesProcess || !slices.Equal(r.Choices, []string{"all", "mentions", "muted"}) {
+		t.Fatalf("room entry = %+v", r)
+	}
+	acct := got[len(got)-1]
+	if acct.Value != "me@chat.test:7420" || acct.Applies != config.AppliesReadOnly || acct.Help != "change with termchat join" {
+		t.Fatalf("account entry = %+v", acct)
+	}
+	if got[0].Value != "true" || got[0].Applies != config.AppliesProcess {
+		t.Fatalf("first entry = %+v", got[0])
+	}
+}
+
+func TestConfigGetWithoutAccount(t *testing.T) {
+	e := newEnv(t)
+	e.cfg.Accounts = nil
+	c := e.start()
+	got, err := c.ConfigGet()
+	if err != nil || len(got) != len(config.Specs) {
+		t.Fatalf("ConfigGet = %d entries, %v; want %d specs only", len(got), err, len(config.Specs))
+	}
+}
+
+func TestConfigSetRefusedFromCLI(t *testing.T) {
+	e := newEnv(t)
+	e.cfg.CLI.Send = "deny"
+	c := e.start()
+	before := e.file.bytes()
+	if _, err := c.ConfigSet("cli.send", "allow", "cli"); !errors.Is(err, ipc.ErrRefused) {
+		t.Fatalf("cli.send allow = %v, want ErrRefused", err)
+	}
+	if _, err := c.ConfigSet("notify.hook", "x", "cli"); !errors.Is(err, ipc.ErrRefused) {
+		t.Fatalf("notify.hook = %v, want ErrRefused", err)
+	}
+	if !slices.Equal(e.file.bytes(), before) {
+		t.Fatal("a refused change wrote the file")
+	}
+	s, err := c.ConfigSet("cli.send", "deny", "cli")
+	if err != nil || s.Value != "deny" {
+		t.Fatalf("cli.send deny = %+v, %v", s, err)
+	}
+	if _, err := c.ConfigSet("cli.send", "allow", "tui"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ConfigSet("notify.hook", "x", "tui"); err != nil {
+		t.Fatal(err)
+	}
+	saved := e.file.saved()
+	if saved.CLI.Send != "allow" || saved.Notify.Hook != "x" {
+		t.Fatalf("saved = %+v", saved)
+	}
+	if _, err := c.ConfigSet("splash", "false", "robot"); !errors.Is(err, ipc.ErrInvalid) {
+		t.Fatalf("unknown source = %v, want ErrInvalid", err)
+	}
+}
+
+func TestConfigSetValidation(t *testing.T) {
+	e := newEnv(t)
+	c := e.start()
+	_, err := c.ConfigSet("nope", "1", "tui")
+	if !errors.Is(err, ipc.ErrInvalid) || !strings.Contains(err.Error(), "unknown setting") {
+		t.Fatalf("unknown key = %v", err)
+	}
+	_, err = c.ConfigSet("notify.os", "sometimes", "tui")
+	if !errors.Is(err, ipc.ErrInvalid) || !strings.Contains(err.Error(), `notify.os: "sometimes" is not one of false, true, always`) {
+		t.Fatalf("bad value = %v", err)
+	}
+	if _, err = c.ConfigSet("account", "x", "tui"); !errors.Is(err, ipc.ErrInvalid) {
+		t.Fatalf("account = %v, want ErrInvalid", err)
+	}
+}
+
+func TestConfigSetRoomRules(t *testing.T) {
+	e := newEnv(t)
+	e.fake.AddConversation(room("r1", "platform", "me", "dana"))
+	e.fake.AddConversation(model.Conversation{ID: "dm1", Kind: model.ConvDM, Members: []string{"me", "dana"}})
+	c := e.start()
+	waitUntil(t, "two chats", func() bool { return len(chatIDs(t, c)) == 2 })
+	events := e.subscribe()
+	if _, err := c.ConfigSet("rooms.dm1", "muted", "tui"); !errors.Is(err, ipc.ErrInvalid) || !strings.Contains(err.Error(), "rooms only") {
+		t.Fatalf("dm = %v, want ErrInvalid about rooms only", err)
+	}
+	for _, key := range []string{"rooms.nope", "rooms."} {
+		if _, err := c.ConfigSet(key, "muted", "tui"); !errors.Is(err, ipc.ErrNotFound) {
+			t.Fatalf("%s = %v, want ErrNotFound", key, err)
+		}
+	}
+	s, err := c.ConfigSet("rooms.r1", "muted", "tui")
+	if err != nil || s.Value != "muted" || s.Room != "platform" {
+		t.Fatalf("room set = %+v, %v", s, err)
+	}
+	waitEvent(t, events, "a config event", func(ev ipc.Event) bool { return ev.Kind == ipc.KindConfig })
+	if got := e.file.saved().Rooms["r1"]; got != "muted" {
+		t.Fatalf("saved room mode = %q", got)
 	}
 }

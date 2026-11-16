@@ -152,6 +152,7 @@ These hold today and are what keep the layers swappable.
 | Untrusted text cannot drive the terminal | Every string shown goes through `internal/sanitize` (TUI, CLI table output, notifications). |
 | Reading as an agent does not mark read | `read`, `wait` and `search` never call `MarkRead`; only the TUI and `mark-read` do (`daemon/api.go`). |
 | One background process per user | Lock file `daemon.lock` in the runtime directory (`daemon/lock_unix.go`). |
+| Only the background process writes `config.toml` | The CLI and the interface change settings through it (`config_set`, `daemon/api_config.go`); `termchat join` goes through the same writer. |
 | Notification rules | `notify.ShouldNotify` plus the routing in `daemon/notify.go`. |
 
 ## Where state lives
@@ -159,7 +160,7 @@ These hold today and are what keep the layers swappable.
 | What | Where |
 |---|---|
 | Server database, host key | `<--data>/server.db`, `<--data>/host_key` |
-| Client config | `config.toml` in the config directory (`$TERMCHAT_CONFIG_DIR`, else the platform's user config directory plus `termchat`) |
+| Client config (changed live with `/settings`, `termchat config set` and `termchat room notify`) | `config.toml` in the config directory (`$TERMCHAT_CONFIG_DIR`, else the platform's user config directory plus `termchat`) |
 | Client local store, device key, pinned server keys, log | `client.db`, `keys/<host:port>.ed25519`, `known_servers`, `daemon.log`, and `set-aside/` (history moved aside when rejoining a server whose key changed) in the data directory (`$TERMCHAT_DATA_DIR`, else `$XDG_DATA_HOME/termchat`, else `~/.local/share/termchat`) |
 | Socket and lock | `daemon.sock`, `daemon.lock` in the runtime directory (`$TERMCHAT_RUNTIME_DIR`, else `$XDG_RUNTIME_DIR/termchat`, else `<data>/run`) |
 
