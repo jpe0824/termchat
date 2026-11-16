@@ -26,6 +26,37 @@ var pastes = [][]string{
 	{"r", "un it\n"},
 	{"/notify muted\n"},
 	{"/", "help\n"},
+	{"\tindented\n"},
+	{"\x1bescaped\n"},
+	{"\x1b[Bdown first\n"},
+	{"\x1b[Aup first\n"},
+}
+
+// typedOf is what pasted text types: its keys that do not type, esc and
+// the arrows, taken out.
+func typedOf(text string) string {
+	for seq := range arrowSeqs {
+		text = strings.ReplaceAll(text, seq, "")
+	}
+	return strings.ReplaceAll(text, "\x1b", "")
+}
+
+// splitsKey reports whether a pause before byte cut of text would break an
+// arrow's escape sequence, which is one key and cannot be split.
+func splitsKey(text string, cut int) bool {
+	for seq := range arrowSeqs {
+		for i := strings.Index(text, seq); i >= 0; {
+			if cut > i && cut < i+len(seq) {
+				return true
+			}
+			j := strings.Index(text[i+1:], seq)
+			if j < 0 {
+				break
+			}
+			i += 1 + j
+		}
+	}
+	return false
 }
 
 var everyWrite = []string{"send ", "edit ", "delete ", "retry ", "discard ", "markread ", "opendm ", "room ", "configset "}
@@ -149,6 +180,9 @@ func TestPastedKeysChangeNothingInOverlays(t *testing.T) {
 					}
 					checkPaste(t, st, w, parts, 0)
 					for cut := 2; cut <= len(text)-2; cut++ {
+						if splitsKey(text, cut) || typedOf(text[:cut]) == "" {
+							continue // an arrow, then silence: a deliberate press
+						}
 						checkPaste(t, st, w, []string{text}, cut)
 					}
 				})
@@ -157,18 +191,29 @@ func TestPastedKeysChangeNothingInOverlays(t *testing.T) {
 	}
 }
 
+// escActsAtOnce are the starts where esc is an immediate key, so text led
+// by a bare esc byte leaves them before the rest arrives.
+var escActsAtOnce = map[string]bool{
+	"own delivered message": true, "own failed message": true, "other person's message": true,
+	"previewed thread": true, "thread, no selection": true, "help": true,
+}
+
 func TestPastedKeysChangeNothing(t *testing.T) {
 	for _, st := range starts {
 		for _, w := range st.widths {
 			for _, parts := range pastes {
 				text := strings.Join(parts, "")
+				if escActsAtOnce[st.name] && strings.HasPrefix(text, "\x1b") && !strings.HasPrefix(text, "\x1b[") {
+					continue
+				}
 				t.Run(fmt.Sprintf("%s/%d/%q", st.name, w, text), func(t *testing.T) {
 					checkPaste(t, st, w, parts, 0)
 					// The same text with a pause in it, wherever the pause does
 					// not leave one key on its own: that key is a lone press.
 					for cut := 2; cut <= len(text)-2; cut++ {
-						if st.name == "previewed thread" && strings.Trim(text[:cut], "jk") == "" {
-							continue // movement keys, then silence: a deliberate scroll
+						if splitsKey(text, cut) || typedOf(text[:cut]) == "" ||
+							st.name == "previewed thread" && strings.Trim(typedOf(text[:cut]), "jk") == "" {
+							continue // movement keys, then silence: a deliberate press
 						}
 						checkPaste(t, st, w, []string{text}, cut)
 					}
@@ -200,7 +245,7 @@ func checkPaste(t *testing.T, st start, w int, parts []string, cut int) {
 		pause(h, 40*time.Millisecond)
 		soon(h, func() { h.typeText(text[cut:]) })
 	}
-	typed := strings.TrimSuffix(text, "\n")
+	typed := strings.TrimSuffix(typedOf(text), "\n")
 	if st.name == "input" && h.draft() != typed {
 		fail("draft %q, want the pasted text %q", h.draft(), typed)
 	}
@@ -218,7 +263,7 @@ func checkPaste(t *testing.T, st start, w int, parts []string, cut int) {
 		// The text is the draft, intact; a line break ending the paste,
 		// with nothing after it, is an enter.
 		before.drafts["r-platform"] = typed
-		if typed != text {
+		if strings.HasSuffix(text, "\n") {
 			wantWrites = []string{fmt.Sprintf("send r-platform %q tui", typed)}
 			before.drafts["r-platform"] = ""
 		}

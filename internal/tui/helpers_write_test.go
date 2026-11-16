@@ -118,8 +118,31 @@ func (f *fakeBackend) resetCalls() {
 	f.mu.Unlock()
 }
 
-// typeText types s one character at a time, as a terminal sends keys.
+// arrowSeqs are the escape sequences for ↑ and ↓, which pasted text can
+// carry and a terminal without bracketed paste reports as those keys.
+var arrowSeqs = map[string]string{"\x1b[A": "up", "\x1b[B": "down"}
+
+// typeText types s one character at a time, as a terminal sends keys; an
+// arrow's escape sequence arrives as that arrow key.
 func (h *tester) typeText(s string) {
+	h.t.Helper()
+	for s != "" {
+		next, key := len(s), ""
+		for seq, k := range arrowSeqs {
+			if i := strings.Index(s, seq); i >= 0 && i < next {
+				next, key = i, k
+			}
+		}
+		h.typeChars(s[:next])
+		if key == "" {
+			return
+		}
+		h.key(key)
+		s = s[next+3:]
+	}
+}
+
+func (h *tester) typeChars(s string) {
 	h.t.Helper()
 	graphemes(s, func(g string, _ int) bool {
 		switch g {

@@ -11,6 +11,6 @@
 │                    │   /help  keys and commands                                         │                    │
 │                    │ > /                                                                │                    │
 │                    │ ────────────────────────────────────────────────────────────────── │                    │
-│                    │ ↑↓ pick  tab complete  ⏎ run  esc hide                             │                    │
+│                    │ ↑↓ pick  tab complete  esc hide                                    │                    │
 │                    │                                                                    │                    │
 └─ ctrl+k jump  ctrl+n new  ctrl+o room  ctrl+c quit ──────────────────────────────────────────────────────────┘

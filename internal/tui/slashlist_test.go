@@ -2,6 +2,7 @@ package tui
 
 import (
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -168,9 +169,97 @@ func TestSlashListEsc(t *testing.T) {
 func TestSlashListHints(t *testing.T) {
 	_, h := slashOpened(t)
 	typeSlash(h)
+	mustContain(t, h.view(), "↑↓ pick  tab complete  esc hide")
+	mustNotContain(t, h.view(), "⏎")
+	h.typeText("he")
+	mustContain(t, h.view(), "↑↓ pick  tab complete  ⏎ complete  esc hide")
+	h.typeText("lp")
 	mustContain(t, h.view(), "↑↓ pick  tab complete  ⏎ run  esc hide")
 	h.key("esc")
 	mustNotContain(t, h.view(), "tab complete")
+}
+
+// A paste that starts with a tab keeps it: the tab is typed at once, and
+// only a lone one is taken back out to complete.
+func TestSlashListPastedLeadingTabTypes(t *testing.T) {
+	_, h := slashOpened(t)
+	typeSlash(h)
+	h.key("down")
+	soon(h, func() { h.typeText("\tfoo") })
+	pause(h, time.Second)
+	if h.draft() != "/\tfoo" || !cmdMode(h) {
+		t.Errorf("draft %q cmd %v, want \"/\\tfoo\" in command mode", h.draft(), cmdMode(h))
+	}
+
+	_, h = slashOpened(t)
+	typeSlash(h)
+	h.key("down")
+	feed(h, "\t")
+	if h.draft() != "/\t" {
+		t.Errorf("within the gap: draft %q, want the tab typed", h.draft())
+	}
+	pause(h, time.Second)
+	if h.draft() != "/help " {
+		t.Errorf("after the gap: draft %q, want \"/help \"", h.draft())
+	}
+}
+
+// esc hides the list only until the draft changes.
+func TestSlashListEscHidesUntilAnEdit(t *testing.T) {
+	_, h := slashOpened(t)
+	typeSlash(h)
+	h.typeText("no")
+	h.key("esc")
+	if listNames(h) != nil {
+		t.Fatal("esc did not hide the list")
+	}
+	h.key("left")
+	if listNames(h) != nil {
+		t.Error("moving the cursor brought the list back")
+	}
+	h.key("end")
+	h.key("backspace")
+	if got := listNames(h); !slices.Equal(got, []string{"notify"}) {
+		t.Errorf("after backspace: rows %q", got)
+	}
+	h.key("esc")
+	h.typeText("o")
+	if got := listNames(h); !slices.Equal(got, []string{"notify"}) {
+		t.Errorf("after typing: rows %q", got)
+	}
+}
+
+func TestSlashListBracketedPasteResetsHighlight(t *testing.T) {
+	_, h := slashOpened(t)
+	typeSlash(h)
+	h.key("down")
+	h.paste("h")
+	if picked(h) != 0 {
+		t.Errorf("pick %d after a paste, want 0", picked(h))
+	}
+}
+
+// The help, scrolled through to its end, has the command list's keys and
+// the input's /.
+func TestSlashListInHelp(t *testing.T) {
+	h := opened(t, fixture(), 90, 20)
+	h.key("esc")
+	h.key("?")
+	seen := map[string]bool{}
+	var all []string
+	for range 200 {
+		for _, l := range h.lines() {
+			if !seen[l] {
+				seen[l] = true
+				all = append(all, l)
+			}
+		}
+		h.key("down")
+	}
+	h.key("end")
+	v := strings.Join(strings.Fields(strings.ReplaceAll(strings.Join(all, "\n"), "│", " ")), " ")
+	mustContain(t, v, "Command list", "/ typed alone in an empty input",
+		"↑ ↓ move the highlight", "tab complete the highlighted command", "esc hide the list")
 }
 
 func TestSlashListClickKeepsTheInput(t *testing.T) {

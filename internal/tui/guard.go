@@ -133,8 +133,9 @@ func (m *Model) onPaste(s string) tea.Cmd {
 	case m.inputActive(g):
 		m.promote()
 		c := m.composeFor(m.openID)
+		before := c.in.text
 		c.in.insert(cleanInput(s))
-		c.syncCmd()
+		c.afterInputKey(before)
 		return nil
 	case m.focus == focusInput && m.threadShown(g) && !m.fits():
 		return nil

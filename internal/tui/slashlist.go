@@ -47,7 +47,8 @@ func (c *compose) pickIn(n int) int { return max(min(c.pick, n-1), 0) }
 // a guarded or deferred key is left to the input, which types a tab and
 // drops esc as it does without the list.
 func (m *Model) cmdListKey(k tea.KeyPressMsg) (tea.Cmd, bool) {
-	if len(m.slashMatches(m.drafts[m.openID])) == 0 {
+	c := m.drafts[m.openID]
+	if len(m.slashMatches(c)) == 0 {
 		return nil, false
 	}
 	b, ok := groupBinding(mainCmdList, k.String())
@@ -55,6 +56,9 @@ func (m *Model) cmdListKey(k tea.KeyPressMsg) (tea.Cmd, bool) {
 		return nil, false
 	}
 	key := k.String()
+	if key == "tab" {
+		return m.tabHold(c, b), true
+	}
 	return m.press(b.kind, hold{run: func() tea.Cmd {
 		if len(m.shownMatches(m.geom())) == 0 {
 			return nil
@@ -63,13 +67,30 @@ func (m *Model) cmdListKey(k tea.KeyPressMsg) (tea.Cmd, bool) {
 	}}), true
 }
 
-// afterInputKey keeps a draft's command state in step with a key that
-// changed it from before: command mode ends without the leading /, and the
-// highlight goes back to the first row.
+// tabHold types the tab at once, so a paste that starts with one keeps it.
+// Once the paste gap passes with no other key, a draft still holding just
+// that tab gets it taken back out and b, the completion, runs.
+func (m *Model) tabHold(c *compose, b binding) tea.Cmd {
+	before, pick := c.in.text, c.pick
+	c.in.insert("\t")
+	return m.press(b.kind, hold{run: func() tea.Cmd {
+		c := m.drafts[m.openID]
+		if c == nil || c.in.text != before+"\t" || !m.inputActive(m.geom()) {
+			return nil
+		}
+		c.in.set(before)
+		c.pick = pick
+		return b.run(m, keyCtx{key: "tab"})
+	}})
+}
+
+// afterInputKey keeps a draft's command state in step with a key or paste
+// that changed it from before: command mode ends without the leading /,
+// the highlight goes back to the first row, and a list esc hid shows again.
 func (c *compose) afterInputKey(before string) {
 	c.syncCmd()
 	if c.in.text != before {
-		c.pick = 0
+		c.pick, c.hide = 0, false
 	}
 }
 
@@ -112,13 +133,14 @@ func (m *Model) cmdListHide(keyCtx) tea.Cmd {
 // highlighted command rather than run: the list shows and the typed word
 // names no command exactly.
 func (m *Model) slashPartial(c *compose) bool {
+	rows := m.slashMatches(c)
 	word := strings.TrimPrefix(c.in.text, "/")
-	for _, s := range m.slashMatches(c) {
+	for _, s := range rows {
 		if s.name == word {
 			return false
 		}
 	}
-	return len(m.slashMatches(c)) > 0
+	return len(rows) > 0
 }
 
 // cmdListHeight is the rows the command list takes, at most avail.
@@ -152,16 +174,28 @@ func (m *Model) cmdListLines(g geom, l tlayout) []string {
 	return out
 }
 
-// cmdListFoot is the command list's key hints, from the table.
-func cmdListFoot() []string {
+// cmdListFoot is the command list's key hints, from the table. Enter is
+// offered as what it does to the draft: nothing on a bare /, completion of
+// a name typed in part, else running it.
+func (m *Model) cmdListFoot() []string {
+	c := m.drafts[m.openID]
 	var out []string
 	for _, g := range keyTable {
 		if g.main != mainCmdList {
 			continue
 		}
 		for _, b := range g.binds {
-			if b.foot != "" {
-				out = append(out, b.foot)
+			foot := b.foot
+			if b.keys == "enter" {
+				switch {
+				case c == nil || c.in.text == "/":
+					foot = ""
+				case m.slashPartial(c):
+					foot = "⏎ complete"
+				}
+			}
+			if foot != "" {
+				out = append(out, foot)
 			}
 		}
 	}
