@@ -34,8 +34,13 @@ and whether an interface that can show it is attached. If so, it sends the
 notification to that interface, which writes the escape sequence followed by a
 bell to the terminal, and the operating-system route is not used unless
 `notify.os` is `"always"`. Otherwise, with `notify.os` on, the background
-process posts it through the operating system. Changes made with `termchat config set` apply at once, without restarting
-the background process. `notify.hook` cannot be changed that way; edit
+process posts it through the operating system.
+
+Changes made with `termchat config set` or `termchat room notify` apply at
+once to the background process's settings (`notify.terminal`, `notify.os`,
+`notify.hook`, `cli.send`, room modes), with no restart. The interface's own
+settings (`notify.osc`, `mark_read`, `paste_gap_ms`, `splash`) are read when
+it next starts. `notify.hook` cannot be changed from the command line; edit
 `config.toml` and run `termchat daemon stop`.
 
 Route 2 uses `osascript` on macOS and `notify-send` (or `gdbus` when

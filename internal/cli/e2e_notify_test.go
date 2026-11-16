@@ -140,15 +140,20 @@ func TestRoomNotifyAppliesWithoutRestart(t *testing.T) {
 	runs := hookCounter(t, b)
 
 	a.ok("send", "agents", "first, no mention")
-	eventually(t, "bob to hold the first message", func() bool { return len(b.messages("read", "agents")) == 1 })
-	if n := hookRuns(runs); n != 0 {
-		t.Fatalf("hook ran %d times in a mentions-only room", n)
+	// The marker mentions bob, so it notifies in any mode. Messages are
+	// handled in order: once its hook has run, the first message was already
+	// judged, and a count of exactly 1 means the first one did not notify.
+	a.ok("send", "agents", "marker for @bob")
+	eventually(t, "the marker's hook to run", func() bool { return hookRuns(runs) >= 1 })
+	eventually(t, "bob to hold both messages", func() bool { return len(b.messages("read", "agents")) == 2 })
+	if n := hookRuns(runs); n != 1 {
+		t.Fatalf("hook ran %d times for an unmentioned message and a mention, want 1", n)
 	}
 	if out := b.ok("room", "notify", "agents", "all"); out != "#agents notifies: all\n" {
 		t.Fatalf("notify = %q", out)
 	}
-	a.ok("send", "agents", "second")
-	eventually(t, "the hook to run", func() bool { return hookRuns(runs) == 1 })
+	a.ok("send", "agents", "third, no mention")
+	eventually(t, "the hook to run for the third", func() bool { return hookRuns(runs) == 2 })
 }
 
 func TestRoomNotifyRefusesDM(t *testing.T) {

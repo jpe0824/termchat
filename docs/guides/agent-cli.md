@@ -175,8 +175,13 @@ exits 0. It never returns your own messages, deleted messages or edits.
 ```sh
 termchat config                          # every setting: KEY VALUE APPLIES (JSON: the full list)
 termchat config get <key>                # the value alone; rooms.<room> for a room's mode
-termchat config set <key> <value>        # prints "<key> = <value>"; applies at once
+termchat config set <key> <value>        # prints "<key> = <value>"
 ```
+
+`config get` and `config set` print plain text unless `--json` is passed; the
+list follows the usual rule (table on a terminal, JSON when piped). Background
+process settings apply at once; the interface's (`notify.osc`, `mark_read`,
+`paste_gap_ms`, `splash`) apply when it next starts.
 
 An invalid key or value exits 2 with the reason. `notify.hook` cannot be
 changed from the command line, and `cli.send` cannot be set to `allow`: both

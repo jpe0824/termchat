@@ -50,11 +50,10 @@ func TestConfigSetInvalid(t *testing.T) {
 }
 
 func TestConfigSetRefused(t *testing.T) {
-	_, a, b := pair(t)
+	_, a, _ := pair(t)
 	a.do("config", "set", "cli.send", "allow").fail(t, 7, ipc.ErrRefused.Error())
 	a.do("config", "set", "notify.hook", "x").fail(t, 7, ipc.ErrRefused.Error())
 	a.ok("dm", "bob")
 	a.ok("config", "set", "cli.send", "deny")
-	a.do("send", "bob", "hi").failContains(t, 6, "")
-	b.ok("status")
+	a.do("send", "bob", "hi").fail(t, 6, `sending from the command line is disabled (cli.send = "deny")`)
 }

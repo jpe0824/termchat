@@ -280,8 +280,10 @@ a table such as `[cli]` makes the file invalid, and a file that does not parse
 stops the background process from starting. A missing file means the defaults.
 
 You rarely need to edit it. `termchat config` lists every setting, and
-`termchat config set <key> <value>` changes one and applies it at once, without
-a restart. A hand edit applies at the next restart or the next settings change.
+`termchat config set <key> <value>` changes one without a restart: the background
+process's settings (`notify.terminal`, `notify.os`, `notify.hook`, `cli.send`,
+room modes) apply at once, the interface's (`notify.osc`, `mark_read`,
+`paste_gap_ms`, `splash`) when it next starts. A hand edit applies at the next restart or the next settings change.
 `notify.hook` and `cli.send = "allow"` cannot be set from the command line
 (exit 7); edit the file for those.
 
