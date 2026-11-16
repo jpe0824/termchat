@@ -82,6 +82,11 @@ type Model struct {
 	// sends a focus or blur event, which some terminals and multiplexers
 	// never do.
 	termFocus termFocus
+	// focusUntrusted ignores the terminal's focus events, so focus stays
+	// unknown. Herdr sends focus in when a pane is clicked but no focus out
+	// when the person switches to another app, which would leave the open
+	// conversation marked read while nobody looks at it.
+	focusUntrusted bool
 	// inputSince says a key or mouse input arrived after the newest message
 	// in the open conversation: with focus unknown, that is the evidence
 	// someone is looking.
@@ -135,6 +140,7 @@ func New(b Backend, opts Options) *Model {
 		ctx: ctx, cancel: cancel, b: b, procDown: b == nil, adopt: make(chan Backend, 1),
 		splashDone: !opts.Splash, drafts: map[string]*compose{},
 		readBusy: map[string]bool{}, osc: notify.ResolveOSC(opts.NotifyOSC, opts.Env),
+		focusUntrusted: opts.Env("HC_TERMINAL_ID") != "",
 	}
 }
 
@@ -199,9 +205,13 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 	case tea.MouseWheelMsg:
 		return m.onWheel(msg.Mouse())
 	case tea.FocusMsg:
-		m.termFocus = focusIn
+		if !m.focusUntrusted {
+			m.termFocus = focusIn
+		}
 	case tea.BlurMsg:
-		m.termFocus = focusOut
+		if !m.focusUntrusted {
+			m.termFocus = focusOut
+		}
 	case timerMsg:
 		return m.onTimer(msg)
 	case sentMsg:

@@ -92,8 +92,10 @@ The interface turns on the terminal's focus reporting, so the terminal says
 when its window gains or loses focus. Until the first such report arrives,
 focus is **unknown**, and the interface counts as **not focused**: messages in
 the conversation on screen notify like any other. Some terminals and
-multiplexers never report focus (Herdr panes, and tmux without
-`set -g focus-events on`), so focus stays unknown for the whole session there.
+multiplexers never report focus (tmux without `set -g focus-events on`), so
+focus stays unknown for the whole session there. In Herdr the interface
+ignores focus reports and keeps focus unknown: Herdr reports focus in when a
+pane is clicked, but not focus out when you switch to another app.
 
 Focus also decides when a new message in the open conversation is marked read
 (with `mark_read` on, and the thread at its newest message):

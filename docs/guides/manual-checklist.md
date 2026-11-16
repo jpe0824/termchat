@@ -63,9 +63,10 @@ appears, and that closing the interface still produces an OS notification.
       device, the conversation on screen in a focused window, a room in `muted`
       mode. One notification per conversation after the background process
       reconnects. Nothing on a new device's first sync.
-- [ ] A terminal that never reports focus (a Herdr pane): with a room open
-      and another app focused, a message in that room notifies and stays
-      unread; a key press in the interface then marks it read.
+- [ ] A terminal whose focus is unknown (a Herdr pane, even after clicking
+      into it): with a room open and another app focused, a message in that
+      room notifies and stays unread; a key press in the interface then marks
+      it read.
 
 ## 4. Layouts
 
