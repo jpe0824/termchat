@@ -1,0 +1,249 @@
+package tui
+
+import (
+	"slices"
+	"testing"
+	"time"
+
+	"github.com/jpe0824/termchat/internal/ipc"
+)
+
+var slashWrites = []string{"send ", "configset "}
+
+// slashOpened is the fixture with # platform open and its input focused,
+// nothing recorded yet.
+func slashOpened(t *testing.T, mod ...func(*Options)) (*fakeBackend, *tester) {
+	t.Helper()
+	f := fixture()
+	h := opened(t, f, 90, 20, mod...)
+	f.resetCalls()
+	return f, h
+}
+
+// typeSlash types a lone / and lets the paste gap pass.
+func typeSlash(h *tester) {
+	h.t.Helper()
+	h.key("/")
+	pause(h, time.Second)
+}
+
+func cmdMode(h *tester) bool {
+	c := h.m.drafts[h.m.openID]
+	return c != nil && c.cmd
+}
+
+func noteText(h *tester) string {
+	if h.m.note == nil {
+		return ""
+	}
+	return h.m.note.text
+}
+
+func TestSlashTypedEntersCommandMode(t *testing.T) {
+	f, h := slashOpened(t)
+	feed(h, "/")
+	if cmdMode(h) || h.draft() != "/" {
+		t.Fatalf("before the gap: cmd %v draft %q", cmdMode(h), h.draft())
+	}
+	pause(h, time.Second)
+	if !cmdMode(h) || h.draft() != "/" {
+		t.Fatalf("after the gap: cmd %v draft %q", cmdMode(h), h.draft())
+	}
+	h.typeText("notify all")
+	h.enter()
+	if got := f.writes(slashWrites...); !slices.Equal(got, []string{"configset rooms.r-platform all"}) {
+		t.Errorf("writes = %q", got)
+	}
+	if h.draft() != "" || cmdMode(h) {
+		t.Errorf("draft %q cmd %v, want both cleared", h.draft(), cmdMode(h))
+	}
+	if noteText(h) != "#platform notifies: all" || !h.m.note.info {
+		t.Errorf("notice = %+v", h.m.note)
+	}
+}
+
+func TestSlashBurstIsText(t *testing.T) {
+	f, h := slashOpened(t)
+	soon(h, func() { h.typeText("/n") })
+	pause(h, time.Second)
+	if cmdMode(h) || h.draft() != "/n" {
+		t.Fatalf("cmd %v draft %q, want text", cmdMode(h), h.draft())
+	}
+	h.typeText("otify all")
+	h.enter()
+	if got := f.writes(slashWrites...); !slices.Equal(got, []string{`send r-platform "/notify all" tui`}) {
+		t.Errorf("writes = %q", got)
+	}
+}
+
+func TestSlashBracketedPasteIsText(t *testing.T) {
+	f, h := slashOpened(t)
+	h.paste("/usr/bin")
+	pause(h, time.Second)
+	if cmdMode(h) {
+		t.Fatal("a bracketed paste entered command mode")
+	}
+	h.enter()
+	if got := f.writes(slashWrites...); !slices.Equal(got, []string{`send r-platform "/usr/bin" tui`}) {
+		t.Errorf("writes = %q", got)
+	}
+}
+
+func TestSlashGapOff(t *testing.T) {
+	_, h := slashOpened(t, func(o *Options) { o.PasteGap = -1 })
+	h.key("/")
+	if !cmdMode(h) || h.draft() != "/" {
+		t.Errorf("cmd %v draft %q, want command mode at once", cmdMode(h), h.draft())
+	}
+}
+
+func TestSlashDoubleSlashSends(t *testing.T) {
+	f, h := slashOpened(t)
+	typeSlash(h)
+	h.typeText("/hi")
+	h.enter()
+	if got := f.writes(slashWrites...); !slices.Equal(got, []string{`send r-platform "/hi" tui`}) {
+		t.Errorf("writes = %q", got)
+	}
+	if h.draft() != "" || cmdMode(h) {
+		t.Errorf("draft %q cmd %v, want both cleared", h.draft(), cmdMode(h))
+	}
+}
+
+func TestSlashUnknown(t *testing.T) {
+	f, h := slashOpened(t)
+	typeSlash(h)
+	h.typeText("frob")
+	h.enter()
+	if want := "unknown command /frob — commands: /notify /help; // sends a leading /"; noteText(h) != want {
+		t.Errorf("notice %q, want %q", noteText(h), want)
+	}
+	if h.draft() != "/frob" || !cmdMode(h) {
+		t.Errorf("draft %q cmd %v, want /frob kept in command mode", h.draft(), cmdMode(h))
+	}
+	if got := f.writes(slashWrites...); got != nil {
+		t.Errorf("writes = %q", got)
+	}
+}
+
+func TestSlashNotifyRefusals(t *testing.T) {
+	f, h := slashOpened(t)
+	for _, text := range []string{"notify", "notify loud"} {
+		h.send(keyMsg("ctrl+u"))
+		typeSlash(h)
+		h.typeText(text)
+		h.enter()
+		if want := "/notify all|mentions|muted"; noteText(h) != want {
+			t.Errorf("/%s: notice %q, want %q", text, noteText(h), want)
+		}
+		if h.draft() != "/"+text {
+			t.Errorf("/%s: draft %q", text, h.draft())
+		}
+	}
+
+	h.key("esc")
+	for _, k := range []string{"up", "up", "k", "enter"} {
+		h.key(k)
+	}
+	if h.m.openID != "dm-dana" {
+		t.Fatalf("open %q, want dm-dana", h.m.openID)
+	}
+	typeSlash(h)
+	h.typeText("notify all")
+	h.enter()
+	if want := "notification modes apply to rooms only"; noteText(h) != want {
+		t.Errorf("DM: notice %q, want %q", noteText(h), want)
+	}
+	if got := f.writes("configset "); got != nil {
+		t.Errorf("writes = %q", got)
+	}
+}
+
+func TestSlashNotInEdit(t *testing.T) {
+	_, h := slashOpened(t)
+	h.key("up")
+	h.key("up")
+	h.key("e")
+	if c := h.m.drafts["r-platform"]; c == nil || c.edit == nil {
+		t.Fatal("not editing")
+	}
+	h.send(keyMsg("ctrl+u"))
+	typeSlash(h)
+	if cmdMode(h) || h.draft() != "/" {
+		t.Errorf("cmd %v draft %q, want plain text while editing", cmdMode(h), h.draft())
+	}
+}
+
+func TestSlashFailureKeepsDraft(t *testing.T) {
+	f, h := slashOpened(t)
+	f.failWith("configset", ipc.ErrNotConnected)
+	typeSlash(h)
+	h.typeText("notify muted")
+	h.enter()
+	if got := f.writes("configset "); !slices.Equal(got, []string{"configset rooms.r-platform muted"}) {
+		t.Errorf("writes = %q", got)
+	}
+	if h.draft() != "/notify muted" || !cmdMode(h) {
+		t.Errorf("draft %q cmd %v, want both kept", h.draft(), cmdMode(h))
+	}
+	if want := failure("notify", ipc.ErrNotConnected); noteText(h) != want || h.m.note.info {
+		t.Errorf("notice %+v, want error %q", h.m.note, want)
+	}
+}
+
+func TestSlashLeavingLeadingSlashEndsCommandMode(t *testing.T) {
+	_, h := slashOpened(t)
+	typeSlash(h)
+	h.typeText("x")
+	h.key("backspace")
+	h.key("backspace")
+	if cmdMode(h) {
+		t.Error("an empty draft is still in command mode")
+	}
+	h.paste("x")
+	h.key("home")
+	h.paste("/")
+	if cmdMode(h) {
+		t.Error("a pasted / made the draft a command")
+	}
+}
+
+func TestSlashHelpOpensHelp(t *testing.T) {
+	f, h := slashOpened(t)
+	typeSlash(h)
+	h.typeText("help")
+	h.enter()
+	if !h.m.help || h.draft() != "" || cmdMode(h) {
+		t.Errorf("help %v draft %q cmd %v", h.m.help, h.draft(), cmdMode(h))
+	}
+	if got := f.writes(slashWrites...); got != nil {
+		t.Errorf("writes = %q", got)
+	}
+}
+
+func TestSlashStaleResultDropped(t *testing.T) {
+	f, h := slashOpened(t)
+	typeSlash(h)
+	h.typeText("notify all")
+	h.hold = true
+	h.enter()
+	held := h.held
+	h.hold, h.held = false, nil
+	if len(held) != 1 {
+		t.Fatalf("%d commands held, want the ConfigSet", len(held))
+	}
+	// The draft changes while the command is out: its result must not
+	// clear what is there now.
+	h.key("backspace")
+	done := held[0]()
+	if _, ok := done.(slashDoneMsg); !ok {
+		t.Fatalf("held command gave %T", done)
+	}
+	h.deliver(done)
+	if h.draft() != "/notify al" || !cmdMode(h) {
+		t.Errorf("draft %q cmd %v, want the changed draft kept", h.draft(), cmdMode(h))
+	}
+	if got := f.writes("configset "); !slices.Equal(got, []string{"configset rooms.r-platform all"}) {
+		t.Errorf("writes = %q", got)
+	}
+}

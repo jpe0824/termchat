@@ -27,12 +27,16 @@ const (
 )
 
 // compose is one conversation's input: its draft, an edit in progress with
-// the draft set aside, and whether a Send or an Edit is out.
+// the draft set aside, and whether a Send or an Edit is out. cmd says the
+// draft is a command; cmdSeq and cmdText tag the latest command run.
 type compose struct {
 	in      input
 	edit    *editing
 	sending bool
 	saving  bool
+	cmd     bool
+	cmdSeq  int
+	cmdText string
 }
 
 type editing struct {
@@ -98,9 +102,11 @@ func keyText(k tea.KeyPressMsg) string {
 
 // inputKey handles a key for the focused input. No key that pasted text
 // can carry moves focus or acts as a command here: tab types a tab, and
-// esc and ↑ inside a burst are dropped.
+// esc and ↑ inside a burst are dropped. A / typed alone into an empty
+// draft makes it a command once the paste gap passes with no other key.
 func (m *Model) inputKey(k tea.KeyPressMsg, g geom) tea.Cmd {
 	c := m.composeFor(m.openID)
+	defer c.syncCmd()
 	in, w := &c.in, m.inputWidth(g)
 	switch s := k.String(); s {
 	case "enter":
@@ -153,7 +159,12 @@ func (m *Model) inputKey(k tea.KeyPressMsg, g geom) tea.Cmd {
 		}
 		return m.guardKey(k, g)
 	default:
-		if t := keyText(k); t != "" {
+		t := keyText(k)
+		if t == "/" && in.text == "" && c.edit == nil && !m.tm.burst {
+			in.insert(t)
+			return m.press(keyDeferred, hold{run: m.slashHeld})
+		}
+		if t != "" {
 			in.insert(cleanInput(t))
 		}
 	}
@@ -211,18 +222,27 @@ func (m *Model) onEnterTimer(msg timerMsg) tea.Cmd {
 	return m.submit()
 }
 
-// submit acts on enter: saves an edit, or sends the draft. A draft is sent
-// by one Send call, and only when no Send for it is out.
+// submit acts on enter: saves an edit, runs a command, or sends the draft.
+// A command draft starting // sends the rest; a draft that is not a
+// command sends as it is, leading / and all. A draft is sent by one Send
+// call, and only when no Send for it is out.
 func (m *Model) submit() tea.Cmd {
 	conv := m.openID
 	c := m.composeFor(conv)
 	if c.edit != nil {
 		return m.saveEdit(conv, c)
 	}
+	text := strings.TrimRight(c.in.text, "\n")
+	draft := text
+	if c.cmd {
+		if !strings.HasPrefix(text, "//") {
+			return m.runSlash(conv, text)
+		}
+		text = text[1:]
+	}
 	if c.sending {
 		return m.setInfo(conv, "still sending…")
 	}
-	text := strings.TrimRight(c.in.text, "\n")
 	switch model.CheckText(text) {
 	case model.ErrEmptyText:
 		return nil
@@ -235,7 +255,7 @@ func (m *Model) submit() tea.Cmd {
 	b := m.b
 	return func() tea.Msg {
 		_, err := b.Send(conv, text, sendSource)
-		return sentMsg{conv: conv, text: text, err: err}
+		return sentMsg{conv: conv, text: text, draft: draft, err: err}
 	}
 }
 
@@ -256,11 +276,12 @@ func (m *Model) onSent(msg sentMsg) tea.Cmd {
 		in = &c.edit.saved
 	}
 	var cmd tea.Cmd
-	if rest, ok := strings.CutPrefix(in.text, msg.text); ok {
+	if rest, ok := strings.CutPrefix(in.text, msg.draft); ok {
 		rest = strings.TrimLeft(rest, "\n")
 		pos := max(in.pos-(len(in.text)-len(rest)), 0)
 		in.set(rest)
 		in.pos = pos
+		c.syncCmd()
 	} else {
 		// The draft was changed while it was sent; it stays, and says so.
 		cmd = m.setInfo(msg.conv, "sent — draft kept")

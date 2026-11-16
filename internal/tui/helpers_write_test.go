@@ -75,6 +75,24 @@ func (f *fakeBackend) SetFocus(conv string, focused bool) error {
 	return f.errFor("setfocus")
 }
 
+func (f *fakeBackend) ConfigSet(key, value, source string) (ipc.Setting, error) {
+	f.record(fmt.Sprintf("configset %s %s", key, value))
+	if err := f.errFor("configset"); err != nil {
+		return ipc.Setting{}, err
+	}
+	s := ipc.Setting{Key: key, Value: value}
+	if id, ok := strings.CutPrefix(key, "rooms."); ok {
+		f.mu.Lock()
+		for _, c := range f.convs {
+			if c.ID == id {
+				s.Room = c.Name
+			}
+		}
+		f.mu.Unlock()
+	}
+	return s, nil
+}
+
 // writes is the recorded calls that start with one of the prefixes.
 func (f *fakeBackend) writes(prefixes ...string) []string {
 	f.mu.Lock()

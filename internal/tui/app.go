@@ -218,6 +218,8 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		return m.onTimer(msg)
 	case sentMsg:
 		return m.onSent(msg)
+	case slashDoneMsg:
+		return m.onSlashDone(msg)
 	case actionMsg:
 		return m.onAction(msg)
 	case outboxMsg:

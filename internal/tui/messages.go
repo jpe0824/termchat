@@ -62,10 +62,12 @@ type (
 		ov  int
 	}
 	// sentMsg is not tied to a connection: a message queued on one that
-	// has since gone is still queued, and its draft is still done.
+	// has since gone is still queued, and its draft is still done. draft
+	// is the start of the draft it came from, which text may differ from
+	// by a leading /.
 	sentMsg struct {
-		conv, text string
-		err        error
+		conv, text, draft string
+		err               error
 	}
 	actionMsg struct {
 		b               Backend

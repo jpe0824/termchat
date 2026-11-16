@@ -24,9 +24,11 @@ var pastes = [][]string{
 	{"dyq"},
 	{"xy"},
 	{"r", "un it\n"},
+	{"/notify muted\n"},
+	{"/", "help\n"},
 }
 
-var everyWrite = []string{"send ", "edit ", "delete ", "retry ", "discard ", "markread ", "opendm ", "room "}
+var everyWrite = []string{"send ", "edit ", "delete ", "retry ", "discard ", "markread ", "opendm ", "room ", "configset "}
 
 // start is one place the keyboard can be when a paste arrives.
 type start struct {

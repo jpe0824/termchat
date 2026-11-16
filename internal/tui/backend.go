@@ -45,6 +45,8 @@ type Backend interface {
 	// Room creates, joins, leaves, invites to, removes from or renames a
 	// room.
 	Room(op ipc.RoomOp) (model.Conversation, error)
+	// ConfigSet changes one setting and returns it as now stored.
+	ConfigSet(key, value, source string) (ipc.Setting, error)
 }
 
 // Options are the settings and outside hooks the interface needs. Zero
