@@ -140,10 +140,7 @@ func (d *daemon) Send(_ context.Context, conv, text, source string) (string, err
 	return onAccount(d, func(a *account) (string, error) {
 		switch source {
 		case "cli":
-			d.mu.Lock()
-			deny := d.config().CLI.Send == "deny"
-			d.mu.Unlock()
-			if deny {
+			if d.config().CLI.Send == "deny" {
 				return "", ipc.ErrSendDenied
 			}
 		case "tui":

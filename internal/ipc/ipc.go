@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 
+	"github.com/jpe0824/termchat/internal/config"
 	"github.com/jpe0824/termchat/internal/connector"
 	"github.com/jpe0824/termchat/internal/model"
 	"github.com/jpe0824/termchat/internal/paths"
@@ -112,6 +113,9 @@ const (
 	KindStatus = "status"
 	// KindNotify: Notify is set.
 	KindNotify = "notify"
+	// KindConfig: a setting changed; the event carries nothing, re-read
+	// with ConfigGet.
+	KindConfig = "config"
 )
 
 // Event is one pushed change on a subscribed connection.
@@ -129,6 +133,16 @@ type Event struct {
 type NotifyPayload struct {
 	ConvID, ConvName, Sender, Text string
 	Mention, DM                    bool
+}
+
+// Setting is one entry of the settings list. Room is the sanitized room
+// name of a rooms.<id> entry and empty otherwise.
+type Setting struct {
+	Key, Value string
+	Choices    []string
+	Applies    config.Applies
+	Help       string
+	Room       string
 }
 
 // Wire format. A request carries the operation's arguments in one flat
@@ -157,6 +171,8 @@ type args struct {
 	MsgID     string            `json:",omitempty"`
 	Text      string            `json:",omitempty"`
 	Source    string            `json:",omitempty"`
+	Key       string            `json:",omitempty"`
+	Value     string            `json:",omitempty"`
 	Query     string            `json:",omitempty"`
 	Ref       string            `json:",omitempty"`
 	Handle    string            `json:",omitempty"`
@@ -206,4 +222,6 @@ const (
 	opSetFocus     = "set_focus"
 	opStop         = "stop"
 	opPeople       = "people"
+	opConfigGet    = "config_get"
+	opConfigSet    = "config_set"
 )

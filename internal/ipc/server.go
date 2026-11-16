@@ -53,6 +53,10 @@ type Backend interface {
 	Join(ctx context.Context, req JoinReq) (JoinRes, error)
 	// People returns every known identity, ordered by handle.
 	People(ctx context.Context) ([]model.Person, error)
+	// ConfigGet lists every setting with its current value.
+	ConfigGet(ctx context.Context) ([]Setting, error)
+	// ConfigSet changes one setting; source is "cli" or "tui".
+	ConfigSet(ctx context.Context, key, value, source string) (Setting, error)
 	// Stop asks the process to shut down. It must not block: the server
 	// is closed by whoever owns it, after the reply has been queued.
 	Stop()
@@ -472,6 +476,10 @@ func dispatch(ctx context.Context, b Backend, op string, a args) (any, error) {
 		return b.Join(ctx, JoinReq{Server: a.Server, Code: a.Code, ServerKey: a.ServerKey})
 	case opPeople:
 		return b.People(ctx)
+	case opConfigGet:
+		return b.ConfigGet(ctx)
+	case opConfigSet:
+		return b.ConfigSet(ctx, a.Key, a.Value, a.Source)
 	}
 	return nil, fmt.Errorf("%w: unknown operation %q", ErrInvalid, op)
 }

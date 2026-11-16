@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jpe0824/termchat/internal/config"
 	"github.com/jpe0824/termchat/internal/connector"
 	"github.com/jpe0824/termchat/internal/model"
 	"github.com/jpe0824/termchat/internal/store"
@@ -80,6 +81,12 @@ func (b *stubBackend) Join(context.Context, JoinReq) (JoinRes, error) {
 }
 func (b *stubBackend) People(context.Context) ([]model.Person, error) {
 	return []model.Person{{Handle: "ann", DisplayName: "Ann A"}, {Handle: "bot", Agent: true}}, b.err
+}
+func (b *stubBackend) ConfigGet(context.Context) ([]Setting, error) {
+	return []Setting{{Key: "splash", Value: "true", Choices: []string{"true", "false"}, Applies: config.AppliesLaunch, Help: "h", Room: "r"}}, b.err
+}
+func (b *stubBackend) ConfigSet(_ context.Context, key, value, source string) (Setting, error) {
+	return Setting{Key: key, Value: value, Help: source}, b.err
 }
 func (b *stubBackend) Stop() {
 	if b.stopped != nil {
@@ -467,5 +474,23 @@ func TestBroadcastNotifyCountsTheCapableUIsItReached(t *testing.T) {
 	}
 	if got := <-capable; got.Kind != KindNotify {
 		t.Fatalf("capable UI got %+v", got)
+	}
+}
+
+func TestConfigOpsRoundTrip(t *testing.T) {
+	_, sock := startServer(t, &stubBackend{})
+	c := dialTest(t, sock)
+	got, err := c.ConfigGet()
+	want := []Setting{{Key: "splash", Value: "true", Choices: []string{"true", "false"}, Applies: config.AppliesLaunch, Help: "h", Room: "r"}}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("ConfigGet = %+v, %v; want %+v", got, err, want)
+	}
+	set, err := c.ConfigSet("cli.send", "deny", "tui")
+	if err != nil || !reflect.DeepEqual(set, Setting{Key: "cli.send", Value: "deny", Help: "tui"}) {
+		t.Fatalf("ConfigSet = %+v, %v", set, err)
+	}
+	_, sock = startServer(t, &stubBackend{err: ErrRefused})
+	if _, err := dialTest(t, sock).ConfigSet("notify.hook", "x", "cli"); !errors.Is(err, ErrRefused) {
+		t.Fatalf("ConfigSet error = %v, want ErrRefused", err)
 	}
 }
